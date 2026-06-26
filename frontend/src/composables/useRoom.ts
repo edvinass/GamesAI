@@ -18,7 +18,13 @@ export function useRoom() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.detail ?? 'Failed to create room')
+        const detail = data.detail
+        const message = typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join(', ')
+            : 'Failed to create room'
+        throw new Error(message || 'Failed to create room')
       }
       return await res.json()
     } catch (e) {
@@ -40,7 +46,13 @@ export function useRoom() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.detail ?? 'Failed to join room')
+        const detail = data.detail
+        const message = typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join(', ')
+            : 'Failed to join room'
+        throw new Error(message || 'Failed to join room')
       }
       return await res.json()
     } catch (e) {

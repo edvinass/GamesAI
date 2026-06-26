@@ -15,32 +15,57 @@ const joinRoomId = ref('')
 const mode = ref<'create' | 'join'>('create')
 
 onMounted(async () => {
-  games.value = await fetchGames()
+  try {
+    games.value = await fetchGames()
+  } catch {
+    games.value = [{ id: 'codenames', name: 'Codenames', description: 'Team word guessing game' }]
+  }
 })
 
 async function enterGame() {
-  if (!nickname.value.trim()) return
-  playerStore.setNickname(nickname.value.trim())
-
-  if (mode.value === 'join' && joinRoomId.value.trim()) {
-    const result = await joinRoom(joinRoomId.value.trim(), nickname.value.trim())
-    playerStore.saveSession({
-      nickname: nickname.value.trim(),
-      sessionToken: result.session_token,
-      playerId: result.player_id,
-      roomId: result.room_id,
-    })
-    router.push(`/room/${result.room_id}`)
-  } else {
-    const result = await createRoom(gameType.value, nickname.value.trim())
-    playerStore.saveSession({
-      nickname: nickname.value.trim(),
-      sessionToken: result.session_token,
-      playerId: result.player_id,
-      roomId: result.room_id,
-    })
-    router.push(`/room/${result.room_id}`)
+  if (!nickname.value.trim()) {
+    error.value = 'Enter a nickname first'
+    return
   }
+
+  try {
+    playerStore.setNickname(nickname.value.trim())
+
+    if (mode.value === 'join') {
+      if (!joinRoomId.value.trim()) {
+        error.value = 'Enter a room ID to join'
+        return
+      }
+      const result = await joinRoom(joinRoomId.value.trim(), nickname.value.trim())
+      playerStore.saveSession({
+        nickname: nickname.value.trim(),
+        sessionToken: result.session_token,
+        playerId: result.player_id,
+        roomId: result.room_id,
+      })
+      await router.push(`/room/${result.room_id}`)
+    } else {
+      const result = await createRoom(gameType.value, nickname.value.trim())
+      playerStore.saveSession({
+        nickname: nickname.value.trim(),
+        sessionToken: result.session_token,
+        playerId: result.player_id,
+        roomId: result.room_id,
+      })
+      await router.push(`/room/${result.room_id}`)
+    }
+  } catch {
+    // error message shown via useRoom.error
+  }
+}
+
+function startNewGame() {
+  mode.value = 'create'
+  enterGame()
+}
+
+function switchToJoin() {
+  mode.value = 'join'
 }
 </script>
 
@@ -69,18 +94,25 @@ async function enterGame() {
 
         <div class="mode-toggle">
           <button
+            type="button"
             :class="['mode-btn', { active: mode === 'create' }]"
-            @click="mode = 'create'"
+            :disabled="loading"
+            @click="startNewGame"
           >
-            New Game
+            {{ loading && mode === 'create' ? 'Creating...' : 'New Game' }}
           </button>
           <button
+            type="button"
             :class="['mode-btn', { active: mode === 'join' }]"
-            @click="mode = 'join'"
+            :disabled="loading"
+            @click="switchToJoin"
           >
             Join Room
           </button>
         </div>
+
+        <p v-if="mode === 'create'" class="hint">Pick a game, then click New Game or ENTER GAME below.</p>
+        <p v-else class="hint">Paste the room ID from your friend's link, then click ENTER GAME.</p>
 
         <template v-if="mode === 'create'">
           <label>
@@ -102,8 +134,13 @@ async function enterGame() {
 
         <p v-if="error" class="error-msg">{{ error }}</p>
 
-        <button class="btn-primary enter-btn" :disabled="loading || !nickname.trim()" @click="enterGame">
-          {{ loading ? 'Joining...' : 'ENTER GAME' }}
+        <button
+          type="button"
+          class="btn-primary enter-btn"
+          :disabled="loading || !nickname.trim() || (mode === 'join' && !joinRoomId.trim())"
+          @click="enterGame"
+        >
+          {{ loading ? 'Please wait...' : mode === 'create' ? 'ENTER GAME' : 'JOIN GAME' }}
         </button>
       </div>
     </div>
@@ -208,5 +245,16 @@ label {
 .error-msg {
   color: var(--error);
   font-size: 0.9rem;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: -0.25rem 0 0;
+}
+
+.mode-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
 }
 </style>
