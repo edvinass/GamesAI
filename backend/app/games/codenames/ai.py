@@ -1,12 +1,31 @@
 import json
 import logging
+import random
 import re
+import string
 from typing import Any
 
 from app.config import settings
 from app.services.deepseek import deepseek_chat
 
 logger = logging.getLogger(__name__)
+
+FALLBACK_CLUES = [
+    "LINK", "GROUP", "SET", "TYPE", "KIND", "THEME", "IDEA", "FIELD",
+    "ORDER", "POINT", "SPACE", "WORLD", "STORY", "MOTION", "VISION",
+]
+
+
+def fallback_clue(state: dict) -> tuple[str, int]:
+    board_words = {c["word"].upper() for c in state["cards"]}
+    options = [w for w in FALLBACK_CLUES if w not in board_words]
+    if not options:
+        while True:
+            word = "".join(random.choices(string.ascii_uppercase, k=5))
+            if word not in board_words:
+                options = [word]
+                break
+    return random.choice(options), 1
 
 
 async def ai_spymaster_clue(state: dict, team: str) -> tuple[str, int]:
@@ -28,19 +47,22 @@ Board:
 Your team has {team_remaining} words remaining.
 
 Respond ONLY with JSON: {{"clue": "WORD", "number": N}}
-Rules: clue is ONE word (not on board), number >= 0 (0 means unlimited guesses)."""
+Rules: clue is ONE word (not on board), number >= 1."""
 
-    try:
-        response = await deepseek_chat(prompt)
-        data = _parse_json(response)
-        clue = str(data.get("clue", "")).strip().upper()
-        number = int(data.get("number", 1))
-        if clue and number >= 0:
-            return clue, number
-    except Exception as e:
-        logger.warning("AI spymaster failed: %s", e)
+    board_words = {c["word"].upper() for c in state["cards"]}
 
-    return "THING", 1
+    for attempt in range(2):
+        try:
+            response = await deepseek_chat(prompt)
+            data = _parse_json(response)
+            clue = str(data.get("clue", "")).strip().upper()
+            number = int(data.get("number", 1))
+            if clue and number >= 1 and clue not in board_words and len(clue.split()) == 1:
+                return clue, number
+        except Exception as e:
+            logger.warning("AI spymaster attempt %s failed: %s", attempt + 1, e)
+
+    return fallback_clue(state)
 
 
 async def ai_operative_guesses(state: dict, team: str, max_guesses: int) -> list[int]:

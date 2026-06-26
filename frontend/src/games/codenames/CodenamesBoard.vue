@@ -16,6 +16,15 @@ const emit = defineEmits<{
 
 const me = computed(() => props.room.players.find((p) => p.id === props.playerId))
 
+const currentActor = computed(() => {
+  const role = props.gameState.phase === 'clue' ? 'spymaster' : 'operative'
+  return props.room.players.find(
+    (p) => p.team === props.gameState.current_team && p.role === role
+  )
+})
+
+const isAiTurn = computed(() => Boolean(currentActor.value?.is_ai))
+
 const isMyTurn = computed(() => {
   if (!me.value) return false
   return (
@@ -23,6 +32,21 @@ const isMyTurn = computed(() => {
     ((props.gameState.phase === 'clue' && me.value.role === 'spymaster') ||
       (props.gameState.phase === 'guess' && me.value.role === 'operative'))
   )
+})
+
+const statusMessage = computed(() => {
+  const team = props.gameState.current_team.toUpperCase()
+  if (isAiTurn.value) {
+    const role = props.gameState.phase === 'clue' ? 'spymaster' : 'operative'
+    return `${team} team's AI ${role} is thinking...`
+  }
+  if (isMyTurn.value) {
+    return props.gameState.phase === 'clue'
+      ? `${team} team — your clue`
+      : `${team} team — your guess`
+  }
+  const role = props.gameState.phase === 'clue' ? 'spymaster' : 'operative'
+  return `${team} team — waiting for ${role}`
 })
 
 const redPlayers = computed(() => props.room.players.filter((p) => p.team === 'red'))
@@ -56,14 +80,17 @@ function cardClass(card: { revealed: boolean; color?: string }) {
     </div>
 
     <div class="status-bar">
-      <span :class="['turn-indicator', gameState.current_team]">
-        {{ gameState.current_team.toUpperCase() }} team's turn
-        · {{ gameState.phase === 'clue' ? 'Give a clue' : 'Guess words' }}
+      <span :class="['turn-indicator', gameState.current_team, { 'ai-thinking': isAiTurn }]">
+        {{ statusMessage }}
       </span>
       <span v-if="gameState.current_clue" class="current-clue">
         Clue: <strong>{{ gameState.current_clue.word }}</strong> {{ gameState.current_clue.number }}
         <span v-if="gameState.phase === 'guess'"> · {{ gameState.guesses_remaining }} guesses left</span>
       </span>
+    </div>
+
+    <div v-if="isAiTurn" class="ai-thinking-banner card">
+      🤖 AI is playing — hang tight...
     </div>
 
     <div class="layout">
@@ -128,6 +155,24 @@ function cardClass(card: { revealed: boolean; color?: string }) {
 
 .turn-indicator.red { color: var(--red-team); }
 .turn-indicator.blue { color: var(--blue-team); }
+
+.turn-indicator.ai-thinking {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.ai-thinking-banner {
+  text-align: center;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  border-left: 3px solid #bb86fc;
+}
 
 .current-clue {
   color: var(--text-muted);

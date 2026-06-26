@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -7,7 +8,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session
-from app.services.room_service import RoomService
+from app.services.room_service import RoomService, process_ai_turns
 from app.utils import player_to_dict, room_to_dict
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,10 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+def schedule_ai_turn(room_id: uuid.UUID) -> None:
+    asyncio.create_task(process_ai_turns(room_id, broadcast_room_state))
 
 
 async def broadcast_room_state(room, events: list[dict] | None = None) -> None:
@@ -105,6 +110,8 @@ async def handle_websocket(websocket: WebSocket, room_id: uuid.UUID, token: str)
                     "game_state": viewer_state,
                     "player_id": player_id,
                 })
+                if room.status.value == "playing":
+                    schedule_ai_turn(room_id)
 
         while True:
             data = await websocket.receive_json()
@@ -166,12 +173,12 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                     "room": room_to_dict(room),
                 })
                 await broadcast_room_state(room, [{"type": "game_started"}])
-                await service.run_ai_turn_if_needed(room_id, broadcast_room_state)
+                schedule_ai_turn(room_id)
 
             elif action_type in ("submit_clue", "guess_word", "end_turn"):
                 room, state, events = await service.apply_game_action(room_id, pid, data)
                 await broadcast_room_state(room, events)
-                await service.run_ai_turn_if_needed(room_id, broadcast_room_state)
+                schedule_ai_turn(room_id)
 
             else:
                 await manager.active.get(str(room_id), {}).get(player_id, None)
