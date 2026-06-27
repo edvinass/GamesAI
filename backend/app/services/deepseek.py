@@ -29,18 +29,34 @@ async def deepseek_chat(
             {"role": "user", "content": prompt},
         ],
     }
-    if settings.deepseek_thinking:
+    # JSON mode needs the final answer in `content`. deepseek-v4-pro defaults to thinking
+    # on, and reasoning tokens can consume the entire budget leaving content empty.
+    use_thinking = settings.deepseek_thinking and not json_mode
+    if use_thinking:
         payload["reasoning_effort"] = settings.deepseek_reasoning_effort
         payload["thinking"] = {"type": "enabled"}
     else:
         payload["temperature"] = temperature
+        if json_mode:
+            payload["thinking"] = {"type": "disabled"}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
         payload["max_tokens"] = 2048
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(url, headers=headers, json=payload)
         response.raise_for_status()
         data = response.json()
 
-    return data["choices"][0]["message"]["content"]
+    choice = data["choices"][0]
+    content = (choice["message"].get("content") or "").strip()
+    if not content:
+        finish_reason = choice.get("finish_reason", "unknown")
+        logger.warning(
+            "DeepSeek returned empty content (finish_reason=%s, json_mode=%s, thinking=%s)",
+            finish_reason,
+            json_mode,
+            use_thinking,
+        )
+        raise RuntimeError(f"DeepSeek returned empty content (finish_reason={finish_reason})")
+    return content

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { useLeaveRoom } from '@/composables/useLeaveRoom'
+import { useRoute, useRouter } from 'vue-router'
 import { usePlayerStore } from '@/stores/player'
 import { useRoom } from '@/composables/useRoom'
 import { useWebSocket } from '@/composables/useWebSocket'
@@ -10,6 +9,7 @@ import GameRulesModal from '@/components/GameRulesModal.vue'
 import type { Room, GameState } from '@/types'
 
 const route = useRoute()
+const router = useRouter()
 const playerStore = usePlayerStore()
 const { fetchRoom } = useRoom()
 
@@ -20,8 +20,7 @@ const toast = ref('')
 const showRules = ref(false)
 
 const wsToken = computed(() => playerStore.sessionToken)
-const { connected, lastMessage, error, send, disconnect } = useWebSocket(roomId, wsToken)
-const { leave } = useLeaveRoom()
+const { connected, lastMessage, error, send } = useWebSocket(roomId, wsToken)
 
 onMounted(async () => {
   try {
@@ -35,6 +34,9 @@ watch(lastMessage, (msg) => {
   if (!msg) return
   if (msg.room) room.value = msg.room
   if (msg.game_state !== undefined) gameState.value = msg.game_state
+  if (msg.type === 'returned_to_lobby' && msg.room) {
+    router.push(`/room/${roomId.value}`)
+  }
   if (msg.type === 'error') {
     toast.value = msg.message ?? 'Error'
     setTimeout(() => (toast.value = ''), 3000)
@@ -54,6 +56,10 @@ function sendAction(data: Record<string, unknown>) {
     setTimeout(() => (toast.value = ''), 3000)
   }
 }
+
+function backToLobby() {
+  sendAction({ type: 'return_to_lobby' })
+}
 </script>
 
 <template>
@@ -69,7 +75,7 @@ function sendAction(data: Record<string, unknown>) {
         </p>
       </div>
       <div class="header-actions">
-        <button type="button" class="btn-secondary" @click="leave(disconnect)">Leave</button>
+        <button type="button" class="btn-secondary" @click="backToLobby">Back to Lobby</button>
         <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
       </div>
     </header>

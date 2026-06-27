@@ -25,7 +25,7 @@ const showRules = ref(false)
 
 const wsToken = ref(playerStore.sessionToken)
 const { connected, lastMessage, send, disconnect } = useWebSocket(roomId, wsToken)
-const { leave } = useLeaveRoom()
+const { leaveRoom } = useLeaveRoom()
 
 onMounted(async () => {
   try {
@@ -132,7 +132,7 @@ async function copyUrl() {
           <p class="muted">{{ room.game_type }} · {{ room.players.length }} players</p>
         </div>
         <div class="header-actions">
-          <button type="button" class="btn-secondary" @click="leave(disconnect)">Leave</button>
+          <button type="button" class="btn-secondary" @click="leaveRoom(disconnect)">Leave Room</button>
           <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
           <div class="connection" :class="{ online: connected }">
             {{ connected ? 'Connected' : 'Reconnecting...' }}

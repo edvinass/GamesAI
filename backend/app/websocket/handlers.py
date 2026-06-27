@@ -188,6 +188,13 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                 await broadcast_room_state(room, [{"type": "game_started"}])
                 schedule_ai_turn(room_id)
 
+            elif action_type == "return_to_lobby":
+                room = await service.return_to_lobby(room_id, pid)
+                await manager.broadcast(str(room_id), {
+                    "type": "returned_to_lobby",
+                    "room": room_to_dict(room),
+                })
+
             elif action_type in ("submit_clue", "guess_word", "end_turn"):
                 room, state, events = await service.apply_game_action(room_id, pid, data)
                 await broadcast_room_state(room, events)

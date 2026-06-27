@@ -298,6 +298,25 @@ class RoomService:
         await self.db.refresh(room, ["players", "game_state"])
         return room, state
 
+    async def return_to_lobby(self, room_id: uuid.UUID, player_id: uuid.UUID) -> Room:
+        room = await self._load_room(room_id)
+        if not room:
+            raise ValueError("Room not found")
+        if room.status not in (RoomStatus.PLAYING, RoomStatus.FINISHED):
+            raise ValueError("Game is not in progress")
+
+        player = next((p for p in room.players if p.id == player_id), None)
+        if not player:
+            raise ValueError("Player not found")
+
+        room.status = RoomStatus.LOBBY
+        if room.game_state:
+            await self.db.delete(room.game_state)
+
+        await self.db.commit()
+        await self.db.refresh(room, ["players", "game_state"])
+        return room
+
     async def _setup_solo_practice(self, room: Room) -> None:
         for p in list(room.players):
             if p.is_ai:

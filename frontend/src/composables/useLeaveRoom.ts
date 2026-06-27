@@ -5,11 +5,11 @@ export function useLeaveRoom() {
   const router = useRouter()
   const playerStore = usePlayerStore()
 
-  function leave(disconnect?: () => void) {
+  function leaveRoom(disconnect?: () => void) {
     disconnect?.()
     playerStore.clearSession()
     router.push('/')
   }
 
-  return { leave }
+  return { leaveRoom }
 }
