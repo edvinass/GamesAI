@@ -7,7 +7,12 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-async def deepseek_chat(prompt: str, system: str = "You are a helpful game AI. Respond concisely.") -> str:
+async def deepseek_chat(
+    prompt: str,
+    system: str = "You are a helpful game AI. Respond concisely.",
+    *,
+    temperature: float = 0.7,
+) -> str:
     if not settings.deepseek_api_key:
         raise RuntimeError("DEEPSEEK_API_KEY is not configured")
 
@@ -22,7 +27,7 @@ async def deepseek_chat(prompt: str, system: str = "You are a helpful game AI. R
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.7,
+        "temperature": temperature,
     }
 
     async with httpx.AsyncClient(timeout=60.0) as client:

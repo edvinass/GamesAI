@@ -112,6 +112,7 @@ class CodenamesEngine(GamePlugin):
             "win_reason": None,
             "red_remaining": sum(1 for c in cards if c["color"] == "red" and not c["revealed"]),
             "blue_remaining": sum(1 for c in cards if c["color"] == "blue" and not c["revealed"]),
+            "clue_history": {"red": [], "blue": []},
             "players": players,
             "settings": settings,
             "last_action": None,
@@ -122,6 +123,36 @@ class CodenamesEngine(GamePlugin):
             (p for p in state["players"] if p.get("team") == team and p.get("role") == "spymaster"),
             None,
         )
+
+    def _ensure_clue_history(self, state: dict) -> dict:
+        history = state.get("clue_history")
+        if not history:
+            history = {"red": [], "blue": []}
+            state["clue_history"] = history
+        return history
+
+    def _complete_clue_turn(self, state: dict, team: str) -> None:
+        history = self._ensure_clue_history(state).get(team, [])
+        if history and not history[-1].get("completed"):
+            history[-1]["completed"] = True
+
+    def _record_clue(self, state: dict, team: str, clue_word: str, clue_number: int) -> None:
+        history = self._ensure_clue_history(state)
+        for entry in history.get(team, []):
+            if not entry.get("completed"):
+                entry["completed"] = True
+        history.setdefault(team, []).append(
+            {
+                "clue": {"word": clue_word, "number": clue_number},
+                "guesses": [],
+                "completed": False,
+            }
+        )
+
+    def _record_guess(self, state: dict, team: str, index: int, word: str, color: str) -> None:
+        history = self._ensure_clue_history(state).get(team, [])
+        if history and not history[-1].get("completed"):
+            history[-1]["guesses"].append({"index": index, "word": word, "color": color})
 
     def _validate_clue(self, state: dict, clue_word: str, clue_number: int) -> None:
         clue_word = clue_word.strip().upper()
@@ -157,6 +188,7 @@ class CodenamesEngine(GamePlugin):
             state["current_clue"] = {"word": clue_word, "number": clue_number}
             state["phase"] = "guess"
             state["guesses_remaining"] = clue_number + 1
+            self._record_clue(state, team, clue_word, clue_number)
             state["last_action"] = {"type": "clue", "team": team, "clue": state["current_clue"]}
             events.append({"type": "turn_changed", "team": team, "phase": "guess"})
 
@@ -175,6 +207,7 @@ class CodenamesEngine(GamePlugin):
 
             card["revealed"] = True
             state["guesses_remaining"] -= 1
+            self._record_guess(state, team, index, card["word"], card["color"])
             state["red_remaining"] = sum(
                 1 for c in state["cards"] if c["color"] == "red" and not c["revealed"]
             )
@@ -203,12 +236,14 @@ class CodenamesEngine(GamePlugin):
                 return state, events
 
             if card["color"] != team:
+                self._complete_clue_turn(state, team)
                 state["phase"] = "clue"
                 state["current_clue"] = None
                 state["guesses_remaining"] = 0
                 state["current_team"] = "blue" if team == "red" else "red"
                 events.append({"type": "turn_changed", "team": state["current_team"], "phase": "clue"})
             elif state["guesses_remaining"] <= 0:
+                self._complete_clue_turn(state, team)
                 state["phase"] = "clue"
                 state["current_clue"] = None
                 state["guesses_remaining"] = 0
@@ -223,6 +258,7 @@ class CodenamesEngine(GamePlugin):
             if role != "operative":
                 raise ValueError("Only operatives can end turn")
 
+            self._complete_clue_turn(state, team)
             state["phase"] = "clue"
             state["current_clue"] = None
             state["guesses_remaining"] = 0
