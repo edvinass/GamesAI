@@ -66,7 +66,7 @@ function endTurn() {
 }
 
 function cardClass(card: { revealed: boolean; color?: string }) {
-  if (!card.revealed) return 'hidden'
+  // Backend includes color only when this viewer may see it (all cards for spymaster).
   return card.color ?? 'hidden'
 }
 </script>
