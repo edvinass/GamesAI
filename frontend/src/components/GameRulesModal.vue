@@ -24,11 +24,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   <div class="modal-backdrop" @click.self="emit('close')">
     <div class="modal card" role="dialog" aria-modal="true" :aria-label="rules?.title ?? 'Game rules'">
       <header class="modal-header">
-        <h2>{{ rules?.title ?? 'Rules' }}</h2>
+        <h2>📖 {{ rules?.title ?? 'Rules' }}</h2>
         <button type="button" class="close-btn" aria-label="Close" @click="emit('close')">×</button>
       </header>
 
-      <div v-if="rules" class="modal-body">
+      <div v-if="rules" class="modal-body stagger-in">
         <section v-for="(section, i) in rules.sections" :key="i" class="rules-section">
           <h3>{{ section.heading }}</h3>
           <p>{{ section.body }}</p>
@@ -46,24 +46,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
   z-index: 1000;
-  animation: fadeIn 0.2s ease;
+  animation: fadeIn 0.25s ease;
 }
 
 .modal {
   width: 100%;
-  max-width: 520px;
+  max-width: 540px;
   max-height: min(85vh, 640px);
   display: flex;
   flex-direction: column;
   padding: 0;
   overflow: hidden;
-  animation: slideUp 0.25s ease;
+  animation: modalIn 0.4s var(--ease-bounce);
 }
 
 .modal-header {
@@ -80,8 +81,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 }
 
 .close-btn {
-  width: 2rem;
-  height: 2rem;
+  width: 2.25rem;
+  height: 2.25rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -89,12 +90,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   color: var(--text-muted);
   font-size: 1.5rem;
   line-height: 1;
-  border-radius: 6px;
+  border-radius: 8px;
+  transition: transform 0.2s, background 0.2s, color 0.2s;
 }
 
 .close-btn:hover {
   background: var(--surface-hover);
   color: var(--text);
+  transform: rotate(90deg);
 }
 
 .modal-body {
@@ -128,8 +131,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   to { opacity: 1; }
 }
 
-@keyframes slideUp {
-  from { transform: translateY(1rem); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+@keyframes modalIn {
+  from {
+    transform: translateY(24px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
 }
 </style>

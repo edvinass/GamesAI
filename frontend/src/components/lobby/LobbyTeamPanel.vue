@@ -48,7 +48,7 @@ function displayName(player: Player) {
 <template>
   <section :class="['team-board', team]">
     <header class="team-header">
-      <h3>{{ team === 'red' ? 'Red' : 'Blue' }} Team</h3>
+      <h3>{{ team === 'red' ? '🔴 Red' : '🔵 Blue' }} Team</h3>
       <span class="team-count">{{ players.filter((p) => p.team === team).length }} players</span>
     </header>
 
@@ -93,7 +93,7 @@ function displayName(player: Player) {
         </div>
       </div>
       <div v-else class="player-slot empty">
-        <span class="empty-text">No spymaster</span>
+        <span class="empty-text">No spymaster yet</span>
         <button
           v-if="isHost"
           type="button"
@@ -108,7 +108,7 @@ function displayName(player: Player) {
     <div class="slot-section">
       <p class="slot-label">Operatives</p>
       <ul v-if="operatives.length" class="operative-list">
-        <li v-for="player in operatives" :key="player.id" class="player-slot filled">
+        <li v-for="(player, idx) in operatives" :key="player.id" class="player-slot filled" :style="{ '--slot-delay': `${idx * 0.05}s` }">
           <div class="player-info">
             <span class="player-name">{{ displayName(player) }}</span>
             <span class="badges">
@@ -148,7 +148,7 @@ function displayName(player: Player) {
         </li>
       </ul>
       <div v-else class="player-slot empty">
-        <span class="empty-text">No operatives</span>
+        <span class="empty-text">No operatives yet</span>
         <button
           v-if="isHost"
           type="button"
@@ -180,16 +180,21 @@ function displayName(player: Player) {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  transition: transform 0.25s var(--ease-smooth), box-shadow 0.25s;
+}
+
+.team-board:hover {
+  transform: translateY(-2px);
 }
 
 .team-board.red {
   border-top: 4px solid var(--red-team);
-  background: linear-gradient(180deg, var(--red-team-bg) 0%, var(--surface) 120px);
+  background: linear-gradient(180deg, var(--red-team-bg) 0%, var(--surface) 100px);
 }
 
 .team-board.blue {
   border-top: 4px solid var(--blue-team);
-  background: linear-gradient(180deg, var(--blue-team-bg) 0%, var(--surface) 120px);
+  background: linear-gradient(180deg, var(--blue-team-bg) 0%, var(--surface) 100px);
 }
 
 .team-header {
@@ -239,10 +244,29 @@ function displayName(player: Player) {
   justify-content: space-between;
   gap: 0.75rem;
   min-height: 3.25rem;
+  transition: transform 0.2s var(--ease-bounce), border-color 0.2s, background 0.2s;
 }
 
 .player-slot.filled {
   background: rgba(0, 0, 0, 0.15);
+  animation: slotIn 0.35s var(--ease-bounce) backwards;
+  animation-delay: var(--slot-delay, 0s);
+}
+
+@keyframes slotIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.player-slot.filled:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateX(2px);
 }
 
 .player-slot.empty {
@@ -252,6 +276,12 @@ function displayName(player: Player) {
   align-items: stretch;
   text-align: center;
   gap: 0.5rem;
+  animation: pulse-empty 3s ease-in-out infinite;
+}
+
+@keyframes pulse-empty {
+  0%, 100% { border-color: var(--border); }
+  50% { border-color: rgba(91, 156, 255, 0.3); }
 }
 
 .empty-text {
@@ -288,12 +318,12 @@ function displayName(player: Player) {
 }
 
 .badge-you {
-  background: rgba(79, 140, 255, 0.2);
+  background: rgba(91, 156, 255, 0.2);
   color: var(--accent);
 }
 
 .badge-host {
-  background: rgba(46, 204, 113, 0.15);
+  background: rgba(61, 214, 140, 0.15);
   color: var(--success);
 }
 
@@ -316,10 +346,11 @@ function displayName(player: Player) {
 .action-btn:hover:not(:disabled) {
   background: var(--border);
   color: var(--text);
+  transform: translateY(-1px);
 }
 
 .action-btn.danger:hover:not(:disabled) {
-  background: rgba(231, 76, 92, 0.2);
+  background: rgba(255, 92, 108, 0.2);
   color: var(--error);
   border-color: var(--error);
 }
@@ -331,11 +362,13 @@ function displayName(player: Player) {
   color: var(--text);
   border: 1px dashed var(--border);
   border-radius: 8px;
+  transition: border-color 0.2s, color 0.2s, transform 0.2s var(--ease-bounce);
 }
 
 .add-ai-btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
+  transform: scale(1.02);
 }
 
 .add-ai-btn.secondary {

@@ -64,27 +64,23 @@ function backToLobby() {
 
 <template>
   <div class="game-page">
-    <header class="game-header container">
-      <div>
+    <header class="game-header container-wide">
+      <div class="header-left">
         <h1>Codenames</h1>
-        <p class="muted">
-          Room {{ roomId.slice(0, 8) }}...
+        <div class="header-meta">
+          <span class="room-id">Room {{ roomId.slice(0, 8) }}…</span>
           <span class="connection" :class="{ online: connected }">
-            {{ connected ? '· Connected' : '· Reconnecting...' }}
+            <span class="connection-dot" />
+            {{ connected ? 'Live' : 'Reconnecting' }}
           </span>
-        </p>
+          <span class="av-hint">💬 Voice chat recommended</span>
+        </div>
       </div>
       <div class="header-actions">
-        <button type="button" class="btn-secondary" @click="backToLobby">Back to Lobby</button>
+        <button type="button" class="btn-secondary" @click="backToLobby">Lobby</button>
         <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
       </div>
     </header>
-
-    <div class="av-callout container">
-      <div class="card av-inner">
-        Use your favorite audio or video chat to talk with teammates.
-      </div>
-    </div>
 
     <CodenamesBoard
       v-if="gameState && room"
@@ -94,11 +90,14 @@ function backToLobby() {
       @action="sendAction"
     />
 
-    <div v-else class="container loading">
+    <div v-else class="container-wide loading">
+      <div class="loading-spinner" />
       <p>Loading game...</p>
     </div>
 
-    <div v-if="toast" class="toast error">{{ toast }}</div>
+    <Transition name="toast">
+      <div v-if="toast" class="toast error">{{ toast }}</div>
+    </Transition>
 
     <GameRulesModal
       v-if="showRules"
@@ -111,33 +110,45 @@ function backToLobby() {
 <style scoped>
 .game-page {
   min-height: 100vh;
-  padding-bottom: 2rem;
+  padding-bottom: 1.5rem;
 }
 
 .game-header {
-  padding-top: 1.5rem;
-  margin-bottom: 1rem;
+  padding-top: 1rem;
+  padding-bottom: 0.75rem;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 1rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+  animation: fadeInUp 0.4s var(--ease-smooth);
 }
 
 .game-header h1 {
-  font-size: 1.5rem;
+  font-size: 1.35rem;
+  font-weight: 700;
 }
 
-.header-actions {
+.header-meta {
   display: flex;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.2rem;
 }
 
-.muted {
+.room-id {
+  font-size: 0.8rem;
   color: var(--text-muted);
-  font-size: 0.85rem;
 }
 
 .connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   color: var(--error);
 }
 
@@ -145,20 +156,57 @@ function backToLobby() {
   color: var(--success);
 }
 
-.av-callout {
-  margin-bottom: 1rem;
+.connection-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
-.av-inner {
-  font-size: 0.85rem;
+.connection.online .connection-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.av-hint {
+  font-size: 0.75rem;
   color: var(--text-muted);
-  text-align: center;
-  padding: 0.75rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .loading {
-  text-align: center;
-  padding: 4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 6rem 1rem;
   color: var(--text-muted);
+}
+
+.loading-spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.toast-enter-active {
+  animation: toastIn 0.4s var(--ease-bounce);
+}
+
+.toast-leave-active {
+  animation: toastIn 0.25s reverse;
 }
 </style>

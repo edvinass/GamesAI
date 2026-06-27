@@ -127,36 +127,43 @@ async function copyUrl() {
 
     <template v-else-if="room">
       <header class="lobby-header">
-        <div>
+        <div class="header-title">
           <h1>Lobby</h1>
-          <p class="muted">{{ room.game_type }} · {{ room.players.length }} players</p>
+          <div class="meta-row">
+            <span class="game-tag">{{ room.game_type }}</span>
+            <span class="player-count">{{ room.players.length }} players</span>
+            <span class="connection" :class="{ online: connected }">
+              <span class="connection-dot" />
+              {{ connected ? 'Connected' : 'Reconnecting...' }}
+            </span>
+          </div>
         </div>
         <div class="header-actions">
-          <button type="button" class="btn-secondary" @click="leaveRoom(disconnect)">Leave Room</button>
+          <button type="button" class="btn-secondary" @click="leaveRoom(disconnect)">Leave</button>
           <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
-          <div class="connection" :class="{ online: connected }">
-            {{ connected ? 'Connected' : 'Reconnecting...' }}
-          </div>
         </div>
       </header>
 
-      <div class="av-callout card">
-        <strong>Tip:</strong> Connect with your friends using your favorite audio or video chat (Discord, Zoom, etc.)
-      </div>
-
-      <div class="share-row card">
-        <input :value="roomUrl" readonly class="url-input" />
-        <button class="btn-secondary" @click="copyUrl">
-          {{ copied ? 'Copied!' : 'Copy URL' }}
-        </button>
-      </div>
-
-      <div class="settings card" v-if="isHost">
-        <h3>Settings</h3>
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="soloPractice" />
-          Solo practice (play against AI teams)
-        </label>
+      <div class="toolbar card">
+        <div class="share-block">
+          <span class="toolbar-label">Invite friends</span>
+          <div class="share-row">
+            <input :value="roomUrl" readonly class="url-input" />
+            <button class="btn-secondary copy-btn" :class="{ copied }" @click="copyUrl">
+              {{ copied ? '✓ Copied!' : 'Copy URL' }}
+            </button>
+          </div>
+        </div>
+        <div v-if="isHost" class="settings-block">
+          <span class="toolbar-label">Host settings</span>
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="soloPractice" />
+            Solo practice (play against AI)
+          </label>
+        </div>
+        <p v-else class="av-tip">
+          💬 Use Discord, Zoom, or your favorite chat while you play
+        </p>
       </div>
 
       <div v-if="soloPractice" class="solo-notice card">
@@ -165,10 +172,10 @@ async function copyUrl() {
 
       <template v-else>
         <p v-if="isHost" class="arrange-hint">
-          Assign each team one spymaster and at least one operative. Use the slot buttons to move players, change roles, or fill gaps with AI.
+          Assign each team one spymaster and at least one operative. Use slot buttons to move players or add AI.
         </p>
 
-        <div class="teams">
+        <div class="teams stagger-in">
           <LobbyTeamPanel
             team="red"
             :players="room.players"
@@ -208,14 +215,17 @@ async function copyUrl() {
       <button
         v-if="isHost"
         class="btn-primary start-btn"
+        :class="{ ready: lobbyValidation.valid }"
         :disabled="!lobbyValidation.valid"
         @click="startGame"
       >
-        Start Game
+        Start Game →
       </button>
     </template>
 
-    <div v-if="toast" class="toast error">{{ toast }}</div>
+    <Transition name="toast">
+      <div v-if="toast" class="toast error">{{ toast }}</div>
+    </Transition>
 
     <GameRulesModal
       v-if="showRules && room"
@@ -227,8 +237,9 @@ async function copyUrl() {
 
 <style scoped>
 .lobby {
-  padding-top: 2rem;
+  padding-top: 1.5rem;
   padding-bottom: 3rem;
+  max-width: 1280px;
 }
 
 .join-card {
@@ -237,23 +248,51 @@ async function copyUrl() {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  animation: fadeInUp 0.5s var(--ease-smooth);
 }
 
 .lobby-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  animation: fadeInUp 0.4s var(--ease-smooth);
 }
 
 .lobby-header h1 {
-  font-size: 1.75rem;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.35rem;
+}
+
+.game-tag {
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: rgba(91, 156, 255, 0.15);
+  color: var(--accent);
+}
+
+.player-count {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .muted {
@@ -262,29 +301,67 @@ async function copyUrl() {
 }
 
 .connection {
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
   color: var(--error);
-  padding: 0.35rem 0.75rem;
-  border-radius: 20px;
-  background: rgba(231, 76, 92, 0.1);
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(255, 92, 108, 0.1);
 }
 
 .connection.online {
   color: var(--success);
-  background: rgba(46, 204, 113, 0.1);
+  background: rgba(61, 214, 140, 0.1);
 }
 
-.av-callout {
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
+.connection-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.connection.online .connection-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding: 1.25rem;
+  animation: fadeInUp 0.4s var(--ease-smooth) 0.05s backwards;
+}
+
+@media (min-width: 768px) {
+  .toolbar {
+    grid-template-columns: 1.4fr 1fr;
+    align-items: end;
+  }
+}
+
+.toolbar-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-muted);
-  border-left: 3px solid var(--accent);
+  margin-bottom: 0.5rem;
 }
 
 .share-row {
   display: flex;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  gap: 0.5rem;
 }
 
 .url-input {
@@ -292,13 +369,17 @@ async function copyUrl() {
   font-size: 0.85rem;
 }
 
-.settings {
-  margin-bottom: 1rem;
+.copy-btn.copied {
+  background: rgba(61, 214, 140, 0.15);
+  border-color: var(--success);
+  color: var(--success);
+  animation: celebrate 0.4s var(--ease-bounce);
 }
 
-.settings h3 {
-  margin-bottom: 0.75rem;
-  font-size: 1rem;
+.av-tip {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  align-self: center;
 }
 
 .checkbox-label {
@@ -314,6 +395,7 @@ async function copyUrl() {
   font-size: 0.9rem;
   color: var(--text-muted);
   border-left: 3px solid var(--accent);
+  animation: fadeInUp 0.4s var(--ease-smooth);
 }
 
 .arrange-hint {
@@ -339,23 +421,24 @@ async function copyUrl() {
   display: flex;
   gap: 0.75rem;
   align-items: flex-start;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
   padding: 1rem 1.25rem;
+  transition: border-color 0.3s, background 0.3s, transform 0.3s var(--ease-bounce);
 }
 
 .validation-banner.valid {
-  border-color: rgba(46, 204, 113, 0.4);
-  background: rgba(46, 204, 113, 0.08);
+  border-color: rgba(61, 214, 140, 0.4);
+  background: rgba(61, 214, 140, 0.08);
 }
 
 .validation-banner.invalid {
-  border-color: rgba(231, 76, 92, 0.35);
-  background: rgba(231, 76, 92, 0.08);
+  border-color: rgba(255, 92, 108, 0.35);
+  background: rgba(255, 92, 108, 0.08);
 }
 
 .validation-icon {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.75rem;
+  height: 1.75rem;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -363,15 +446,17 @@ async function copyUrl() {
   font-weight: 700;
   font-size: 0.85rem;
   flex-shrink: 0;
+  transition: transform 0.3s var(--ease-bounce);
 }
 
 .validation-banner.valid .validation-icon {
-  background: rgba(46, 204, 113, 0.2);
+  background: rgba(61, 214, 140, 0.2);
   color: var(--success);
+  animation: celebrate 0.5s var(--ease-bounce);
 }
 
 .validation-banner.invalid .validation-icon {
-  background: rgba(231, 76, 92, 0.2);
+  background: rgba(255, 92, 108, 0.2);
   color: var(--error);
 }
 
@@ -392,7 +477,24 @@ async function copyUrl() {
 
 .start-btn {
   width: 100%;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   padding: 1rem;
+  transition: transform 0.2s, box-shadow 0.3s;
+}
+
+.start-btn.ready {
+  animation: glowPulse 2.5s ease-in-out infinite;
+}
+
+.start-btn.ready:hover:not(:disabled) {
+  transform: translateY(-3px) scale(1.01);
+}
+
+.toast-enter-active {
+  animation: toastIn 0.4s var(--ease-bounce);
+}
+
+.toast-leave-active {
+  animation: toastIn 0.25s reverse;
 }
 </style>

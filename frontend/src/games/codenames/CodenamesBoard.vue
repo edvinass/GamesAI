@@ -42,12 +42,12 @@ const statusMessage = computed(() => {
   const team = props.gameState.current_team.toUpperCase()
   if (isAiTurn.value) {
     const role = props.gameState.phase === 'clue' ? 'spymaster' : 'operative'
-    return `${team} team's AI ${role} is thinking...`
+    return `${team} AI ${role} is thinking…`
   }
   if (isMyTurn.value) {
     return props.gameState.phase === 'clue'
-      ? `${team} team — your clue`
-      : `${team} team — your guess`
+      ? `Your clue — ${team} team`
+      : `Your guess — ${team} team`
   }
   const role = props.gameState.phase === 'clue' ? 'spymaster' : 'operative'
   return `${team} team — waiting for ${role}`
@@ -114,49 +114,82 @@ watch(
 function isPopping(index: number) {
   return poppingCards.value.has(index)
 }
+
+const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 </script>
 
 <template>
-  <div class="board-container container">
-    <div v-if="gameState.winner" class="game-over card">
-      <h2>{{ gameState.winner.toUpperCase() }} team wins!</h2>
-      <p v-if="gameState.win_reason === 'assassin'">Assassin card was revealed.</p>
-      <p v-else>All team words revealed.</p>
-      <button v-if="isHost" class="btn-primary new-game-btn" @click="startNewGame">
-        New Game
-      </button>
-      <p v-else class="waiting-host">Waiting for host to start a new game...</p>
-    </div>
+  <div class="board-container container-wide">
+    <Transition name="win">
+      <div v-if="gameState.winner" class="game-over card">
+        <div class="confetti" aria-hidden="true">
+          <span
+            v-for="piece in confettiPieces"
+            :key="piece"
+            class="confetti-piece"
+            :style="{ '--i': piece }"
+          />
+        </div>
+        <div class="winner-badge" :class="gameState.winner">
+          🏆 {{ gameState.winner.toUpperCase() }} WINS!
+        </div>
+        <p class="win-reason">
+          {{ gameState.win_reason === 'assassin' ? 'The assassin was revealed.' : 'All team words found!' }}
+        </p>
+        <button v-if="isHost" class="btn-primary new-game-btn" @click="startNewGame">
+          Play Again
+        </button>
+        <p v-else class="waiting-host">Waiting for host to start a new game…</p>
+      </div>
+    </Transition>
 
     <div v-if="!isGameOver" class="status-bar">
-      <span :class="['turn-indicator', gameState.current_team, { 'ai-thinking': isAiTurn }]">
-        {{ statusMessage }}
-      </span>
-      <span v-if="gameState.current_clue" class="current-clue">
-        Clue: <strong>{{ gameState.current_clue.word }}</strong> {{ gameState.current_clue.number }}
-        <span v-if="gameState.phase === 'guess'"> · {{ gameState.guesses_remaining }} guesses left</span>
-      </span>
-    </div>
-
-    <div v-if="isAiTurn" class="ai-thinking-banner card">
-      🤖 AI is playing — hang tight...
+      <div
+        class="turn-pill"
+        :class="[gameState.current_team, { 'my-turn': isMyTurn, 'ai-thinking': isAiTurn }]"
+      >
+        <span v-if="isAiTurn" class="ai-icon">🤖</span>
+        <span class="turn-text">{{ statusMessage }}</span>
+      </div>
+      <Transition name="clue-reveal">
+        <div v-if="gameState.current_clue" class="current-clue">
+          <span class="clue-label">Clue</span>
+          <strong>{{ gameState.current_clue.word }}</strong>
+          <span class="clue-number">{{ gameState.current_clue.number }}</span>
+          <span v-if="gameState.phase === 'guess'" class="guesses-left">
+            {{ gameState.guesses_remaining }} left
+          </span>
+        </div>
+      </Transition>
     </div>
 
     <div class="layout">
-      <TeamPanel team="red" :players="redPlayers" :remaining="gameState.red_remaining" />
+      <TeamPanel
+        team="red"
+        :players="redPlayers"
+        :remaining="gameState.red_remaining"
+        :active="!isGameOver && gameState.current_team === 'red'"
+      />
 
       <div class="center">
-        <ClueInput
-          v-if="isMyTurn && gameState.phase === 'clue'"
-          :board-words="gameState.cards.map((c) => c.word)"
-          @submit="submitClue"
-        />
+        <Transition name="slide-down">
+          <ClueInput
+            v-if="isMyTurn && gameState.phase === 'clue'"
+            :board-words="gameState.cards.map((c) => c.word)"
+            @submit="submitClue"
+          />
+        </Transition>
 
         <div class="grid">
           <button
-            v-for="card in gameState.cards"
+            v-for="(card, idx) in gameState.cards"
             :key="card.index"
-            :class="['card-btn', ...cardClasses(card), { pop: isPopping(card.index) }]"
+            :class="[
+              'card-btn',
+              ...cardClasses(card),
+              { pop: isPopping(card.index), 'can-guess': isMyTurn && gameState.phase === 'guess' && !card.revealed && !gameState.winner },
+            ]"
+            :style="{ '--delay': `${idx * 0.03}s` }"
             :disabled="!!gameState.winner || !isMyTurn || gameState.phase !== 'guess' || card.revealed"
             @click="guessCard(card.index)"
           >
@@ -164,38 +197,87 @@ function isPopping(index: number) {
           </button>
         </div>
 
-        <button
-          v-if="isMyTurn && gameState.phase === 'guess'"
-          class="btn-secondary end-turn-btn"
-          @click="endTurn"
-        >
-          End Turn
-        </button>
+        <Transition name="slide-down">
+          <button
+            v-if="isMyTurn && gameState.phase === 'guess'"
+            class="btn-secondary end-turn-btn"
+            @click="endTurn"
+          >
+            End Turn
+          </button>
+        </Transition>
       </div>
 
-      <TeamPanel team="blue" :players="bluePlayers" :remaining="gameState.blue_remaining" />
+      <TeamPanel
+        team="blue"
+        :players="bluePlayers"
+        :remaining="gameState.blue_remaining"
+        :active="!isGameOver && gameState.current_team === 'blue'"
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
 .board-container {
-  padding-bottom: 2rem;
+  padding-bottom: 1.5rem;
 }
 
 .game-over {
+  position: relative;
   text-align: center;
-  margin-bottom: 1.5rem;
-  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+  padding: 2rem 1.5rem;
+  overflow: hidden;
 }
 
-.game-over h2 {
-  font-size: 1.5rem;
+.confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.confetti-piece {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  top: -10px;
+  left: calc(var(--i) * 4.2%);
+  background: hsl(calc(var(--i) * 15), 80%, 60%);
+  border-radius: 2px;
+  animation: confetti-fall 2.5s ease-in forwards;
+  animation-delay: calc(var(--i) * 0.05s);
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(180px) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.winner-badge {
+  font-size: 1.75rem;
+  font-weight: 800;
   margin-bottom: 0.5rem;
+  animation: celebrate 0.6s var(--ease-bounce);
+}
+
+.winner-badge.red { color: var(--red-team); }
+.winner-badge.blue { color: var(--blue-team); }
+
+.win-reason {
+  color: var(--text-muted);
+  margin-bottom: 1rem;
 }
 
 .new-game-btn {
-  margin-top: 1rem;
+  animation: fadeInUp 0.5s var(--ease-smooth) 0.3s backwards;
 }
 
 .waiting-host {
@@ -204,61 +286,108 @@ function isPopping(index: number) {
   color: var(--text-muted);
 }
 
+.win-enter-active {
+  animation: celebrate 0.6s var(--ease-bounce);
+}
+
 .status-bar {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 1rem;
+  animation: fadeInUp 0.4s var(--ease-smooth);
+}
+
+.turn-pill {
+  display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  justify-content: center;
-  margin-bottom: 1.5rem;
-  text-align: center;
-}
-
-.turn-indicator {
-  font-size: 2rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 999px;
+  font-size: 0.95rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
 }
 
-.turn-indicator.red { color: var(--red-team); }
-.turn-indicator.blue { color: var(--blue-team); }
+.turn-pill.red {
+  border-color: rgba(255, 92, 108, 0.4);
+  color: var(--red-team);
+}
 
-.turn-indicator.ai-thinking {
+.turn-pill.blue {
+  border-color: rgba(91, 156, 255, 0.4);
+  color: var(--blue-team);
+}
+
+.turn-pill.my-turn {
+  animation: glowPulse 2s ease-in-out infinite;
+}
+
+.turn-pill.ai-thinking {
   animation: pulse 1.5s ease-in-out infinite;
+}
+
+.ai-icon {
+  animation: float 2s ease-in-out infinite;
 }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
-
-.ai-thinking-banner {
-  text-align: center;
-  margin-bottom: 1rem;
-  padding: 0.75rem 1rem;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-  border-left: 3px solid #bb86fc;
+  50% { opacity: 0.6; }
 }
 
 .current-clue {
-  font-size: 1.5rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.clue-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
 }
 
 .current-clue strong {
-  font-size: 2rem;
+  font-size: 1.35rem;
   color: var(--text);
+}
+
+.clue-number {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.guesses-left {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--border);
+}
+
+.clue-reveal-enter-active {
+  animation: fadeInUp 0.35s var(--ease-bounce);
 }
 
 .layout {
   display: grid;
-  grid-template-columns: 160px 1fr 160px;
+  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr) minmax(140px, 200px);
   gap: 1rem;
   align-items: start;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1000px) {
   .layout {
     grid-template-columns: 1fr;
   }
@@ -267,16 +396,15 @@ function isPopping(index: number) {
 .center {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1rem;
+  align-items: stretch;
+  gap: 0.75rem;
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 0.5rem;
+  gap: 0.45rem;
   width: 100%;
-  max-width: 700px;
 }
 
 @media (max-width: 600px) {
@@ -286,26 +414,42 @@ function isPopping(index: number) {
 }
 
 .card-btn {
-  aspect-ratio: 1.6;
-  padding: 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
+  aspect-ratio: 1.55;
+  padding: 0.4rem 0.35rem;
+  font-size: clamp(0.65rem, 1.2vw, 0.8rem);
+  font-weight: 700;
   text-transform: uppercase;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 2px solid var(--border);
-  background: #c4a35a;
+  background: #d4b06a;
   color: #1a1a1a;
   word-break: break-word;
-  line-height: 1.2;
+  line-height: 1.15;
   position: relative;
+  transition:
+    transform 0.2s var(--ease-bounce),
+    box-shadow 0.2s,
+    border-color 0.2s;
+  animation: cardDeal 0.4s var(--ease-smooth) backwards;
+  animation-delay: var(--delay);
+}
+
+@keyframes cardDeal {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .card-btn.hidden {
-  background: #c4a35a;
+  background: linear-gradient(145deg, #dcc078 0%, #c4a35a 100%);
   color: #1a1a1a;
 }
 
-/* Post-game unrevealed — same tan face operatives see during play, color via border */
 .card-btn.unguessed {
   background: #c4a35a;
   color: #1a1a1a;
@@ -313,23 +457,11 @@ function isPopping(index: number) {
   cursor: default;
 }
 
-.card-btn.unguessed.red {
-  border-color: var(--red-team);
-}
+.card-btn.unguessed.red { border-color: var(--red-team); }
+.card-btn.unguessed.blue { border-color: var(--blue-team); }
+.card-btn.unguessed.neutral { border-color: #8a7040; }
+.card-btn.unguessed.assassin { border-color: #555; }
 
-.card-btn.unguessed.blue {
-  border-color: var(--blue-team);
-}
-
-.card-btn.unguessed.neutral {
-  border-color: #8a7040;
-}
-
-.card-btn.unguessed.assassin {
-  border-color: #555;
-}
-
-/* Spymaster key view — unrevealed cards show a muted color hint */
 .card-btn.key {
   opacity: 1;
   border-style: dashed;
@@ -359,11 +491,10 @@ function isPopping(index: number) {
   border-color: #555;
 }
 
-/* Revealed cards — solid color, full opacity even when disabled */
 .card-btn.revealed {
   opacity: 1;
   cursor: default;
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.2);
 }
 
 .card-btn.revealed::after {
@@ -371,7 +502,7 @@ function isPopping(index: number) {
   position: absolute;
   top: 3px;
   right: 5px;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   line-height: 1;
   opacity: 0.85;
 }
@@ -412,22 +543,31 @@ function isPopping(index: number) {
 }
 
 .card-btn.pop {
-  animation: card-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: card-pop 0.45s var(--ease-bounce);
   z-index: 1;
 }
 
 @keyframes card-pop {
   0% { transform: scale(1); }
-  45% { transform: scale(1.14); }
+  45% { transform: scale(1.12); }
   100% { transform: scale(1); }
 }
 
-.card-btn:not(:disabled):not(.revealed):hover {
-  transform: scale(1.03);
-  box-shadow: var(--shadow);
+.card-btn.can-guess:hover {
+  transform: translateY(-3px) scale(1.04);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(91, 156, 255, 0.3);
+  z-index: 1;
 }
 
 .end-turn-btn {
-  margin-top: 0.5rem;
+  align-self: center;
+}
+
+.slide-down-enter-active {
+  animation: fadeInUp 0.35s var(--ease-bounce);
+}
+
+.slide-down-leave-active {
+  animation: fadeInUp 0.2s reverse;
 }
 </style>
