@@ -15,8 +15,9 @@ SPYMASTER_ATTEMPTS = 3
 OPERATIVE_ATTEMPTS = 3
 
 SPYMASTER_SYSTEM = (
-    "You are an expert Codenames spymaster. "
-    "Think carefully about semantic associations before choosing a clue. "
+    "You are an expert Codenames spymaster with full memory of every clue given this game. "
+    "Track what your operatives found, missed, and guessed wrong — build on prior clues when "
+    "targets remain unrevealed, and avoid repeating associations that led to mistakes. "
     "Give precise clues that connect only your team's unrevealed words. "
     "Never lead operatives toward opponent, neutral, or assassin words. "
     "List every board word your clue might accidentally suggest in risky_words."
@@ -132,7 +133,7 @@ def _validate_spymaster_response(
     valid_targets: list[str],
     board_words: set[str],
     avoid_words: list[str],
-) -> tuple[str, int] | None:
+) -> tuple[str, int, list[str]] | None:
     clue = str(data.get("clue", "")).strip().upper()
     if not _is_valid_clue_word(clue, board_words):
         return None
@@ -149,22 +150,27 @@ def _validate_spymaster_response(
     if _risky_words_hit_avoid(data, avoid_words):
         return None
 
-    return clue, number
+    return clue, number, targets
 
 
 def _build_spymaster_prompt(state: dict, team: str) -> str:
     cards = state["cards"]
     targets = _unrevealed_team_words(cards, team)
     avoid = _avoid_clue_words(cards, team)
-    revealed = _revealed_words(cards)
     assassin = _assassin_word(cards)
     team_remaining, opponent_remaining, strategy = _game_situation(state, team)
     opponent = _opponent_team(team)
 
     target_lines = "\n".join(f"- {word}" for word in targets) or "- (none)"
     avoid_lines = "\n".join(f"- {word}" for word in avoid) or "- (none)"
-    revealed_lines = "\n".join(f"- {word}" for word in revealed) or "- (none)"
     assassin_line = f"\nASSASSIN (never lead toward): {assassin}" if assassin else ""
+
+    team_history = _format_clue_history(state, team, include_current=False)
+    opponent_history = _format_clue_history(state, opponent, include_current=False)
+    unresolved = _summarize_unresolved_clues_for_spymaster(state, team)
+    mistakes = _summarize_operative_mistakes(state, team)
+    revealed_intel = _format_revealed_intel(state, team)
+    used_clues = _used_clue_words(state, team)
 
     return f"""You are the {team.upper()} spymaster in Codenames.
 
@@ -179,8 +185,23 @@ YOUR TARGETS — unrevealed {team} words only. Your clue must apply ONLY to word
 NEVER LEAD TOWARD — if your clue could suggest any of these unrevealed words, choose a different clue:
 {avoid_lines}{assassin_line}
 
-ALREADY REVEALED — ignore these when choosing a clue:
-{revealed_lines}
+REVEALED BOARD (what operatives know):
+{revealed_intel}
+
+YOUR PRIOR CLUES AND OPERATIVE RESULTS:
+{team_history}
+
+UNRESOLVED TARGETS (prior clues whose words operatives have not fully found):
+{unresolved}
+
+OPERATIVE MISTAKES (wrong guesses — avoid similar associations):
+{mistakes}
+
+CLUE WORDS ALREADY USED BY YOUR TEAM (prefer fresh associations):
+{used_clues}
+
+OPPONENT'S PRIOR CLUES (avoid overlapping their semantic space):
+{opponent_history}
 
 Rules:
 - clue: exactly ONE word, not on the board, not a substring of any board word
@@ -188,6 +209,7 @@ Rules:
 - targets: the specific words from YOUR TARGETS that the clue is meant for
 - risky_words: unrevealed board words your clue might accidentally suggest (list all plausible ones)
 - prefer safe clues for 2-3 targets when possible; use 1 if no safe multi-word clue exists
+- if unresolved targets remain from a prior clue, consider a follow-up clue for those words
 - if any risky_words are opponent, neutral, or assassin words, pick a different clue
 
 Think step by step, then respond ONLY with JSON:
@@ -244,6 +266,83 @@ def _summarize_unresolved_clues(state: dict, team: str) -> str:
                 f"up to {remaining} unrevealed target(s) may still relate to this clue"
             )
     return "\n".join(lines) if lines else "None — focus on the current clue."
+
+
+def _summarize_unresolved_clues_for_spymaster(state: dict, team: str) -> str:
+    """Prior clues with unrevealed intended targets, when recorded."""
+    history = state.get("clue_history", {}).get(team, [])
+    unrevealed_team = set(_unrevealed_team_words(state["cards"], team))
+    lines: list[str] = []
+    for entry in history:
+        if not entry.get("completed"):
+            continue
+        clue = entry.get("clue") or {}
+        word = clue.get("word")
+        number = clue.get("number", 0)
+        if not word:
+            continue
+        intended = entry.get("targets") or []
+        still_unfound = [t for t in intended if t in unrevealed_team]
+        if still_unfound:
+            lines.append(
+                f'- "{word}" {number}: intended {", ".join(intended)}; '
+                f"still unrevealed: {', '.join(still_unfound)}"
+            )
+            continue
+        if intended:
+            continue
+        guesses = entry.get("guesses") or []
+        team_hits = sum(1 for g in guesses if g.get("color") == team)
+        if number > 0 and team_hits < number:
+            remaining = number - team_hits
+            lines.append(
+                f'- "{word}" {number}: operatives found {team_hits} team word(s); '
+                f"up to {remaining} target(s) likely still unrevealed"
+            )
+    return "\n".join(lines) if lines else "None — all prior targets found or no prior clues."
+
+
+def _summarize_operative_mistakes(state: dict, team: str) -> str:
+    history = state.get("clue_history", {}).get(team, [])
+    lines: list[str] = []
+    for entry in history:
+        if not entry.get("completed"):
+            continue
+        clue_word = (entry.get("clue") or {}).get("word", "?")
+        for guess in entry.get("guesses") or []:
+            color = guess.get("color")
+            if color and color != team:
+                lines.append(
+                    f'- On "{clue_word}": guessed {guess["word"]} ({color}) — '
+                    "avoid clues that could suggest this word"
+                )
+    return "\n".join(lines) if lines else "None."
+
+
+def _format_revealed_intel(state: dict, team: str) -> str:
+    opponent = _opponent_team(team)
+    by_color: dict[str, list[str]] = {"red": [], "blue": [], "neutral": [], "assassin": []}
+    for card in state["cards"]:
+        if card["revealed"]:
+            by_color[card["color"]].append(card["word"])
+
+    lines = [
+        f"- Your team ({team}): {', '.join(by_color[team]) or 'none'}",
+        f"- Opponent ({opponent}): {', '.join(by_color[opponent]) or 'none'}",
+        f"- Neutral: {', '.join(by_color['neutral']) or 'none'}",
+    ]
+    if by_color["assassin"]:
+        lines.append(f"- Assassin (revealed): {', '.join(by_color['assassin'])}")
+    return "\n".join(lines)
+
+
+def _used_clue_words(state: dict, team: str) -> str:
+    words = [
+        (entry.get("clue") or {}).get("word")
+        for entry in state.get("clue_history", {}).get(team, [])
+        if (entry.get("clue") or {}).get("word")
+    ]
+    return ", ".join(words) if words else "None"
 
 
 def _build_operative_prompt(state: dict, team: str, max_guesses: int) -> str:
@@ -367,10 +466,10 @@ def _parse_operative_guesses(
     return result
 
 
-async def fallback_clue(state: dict, team: str) -> tuple[str, int]:
+async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
     targets = _unrevealed_team_words(state["cards"], team)
     if not targets:
-        return _random_generic_clue(state), 1
+        return _random_generic_clue(state), 1, []
 
     board_words = _board_words_upper(state["cards"])
     avoid = _avoid_clue_words(state["cards"], team)
@@ -400,17 +499,17 @@ Respond ONLY with JSON:
         except Exception as e:
             logger.warning("Focused fallback clue failed for %s: %s", target, e)
 
-    return _random_generic_clue(state), 1
+    return _random_generic_clue(state), 1, [targets[0]] if targets else []
 
 
-async def ai_spymaster_clue(state: dict, team: str) -> tuple[str, int]:
+async def ai_spymaster_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
     cards = state["cards"]
     targets = _unrevealed_team_words(cards, team)
     board_words = _board_words_upper(cards)
     avoid = _avoid_clue_words(cards, team)
 
     if not targets:
-        return _random_generic_clue(state), 1
+        return _random_generic_clue(state), 1, []
 
     prompt = _build_spymaster_prompt(state, team)
     feedback = ""

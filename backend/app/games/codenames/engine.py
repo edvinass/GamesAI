@@ -136,18 +136,26 @@ class CodenamesEngine(GamePlugin):
         if history and not history[-1].get("completed"):
             history[-1]["completed"] = True
 
-    def _record_clue(self, state: dict, team: str, clue_word: str, clue_number: int) -> None:
+    def _record_clue(
+        self,
+        state: dict,
+        team: str,
+        clue_word: str,
+        clue_number: int,
+        targets: list[str] | None = None,
+    ) -> None:
         history = self._ensure_clue_history(state)
         for entry in history.get(team, []):
             if not entry.get("completed"):
                 entry["completed"] = True
-        history.setdefault(team, []).append(
-            {
-                "clue": {"word": clue_word, "number": clue_number},
-                "guesses": [],
-                "completed": False,
-            }
-        )
+        entry: dict[str, Any] = {
+            "clue": {"word": clue_word, "number": clue_number},
+            "guesses": [],
+            "completed": False,
+        }
+        if targets:
+            entry["targets"] = targets
+        history.setdefault(team, []).append(entry)
 
     def _record_guess(self, state: dict, team: str, index: int, word: str, color: str) -> None:
         history = self._ensure_clue_history(state).get(team, [])
@@ -188,7 +196,16 @@ class CodenamesEngine(GamePlugin):
             state["current_clue"] = {"word": clue_word, "number": clue_number}
             state["phase"] = "guess"
             state["guesses_remaining"] = clue_number + 1
-            self._record_clue(state, team, clue_word, clue_number)
+            raw_targets = action.get("targets")
+            targets = None
+            if isinstance(raw_targets, list) and raw_targets:
+                valid = {
+                    c["word"]
+                    for c in state["cards"]
+                    if c["color"] == team and not c["revealed"]
+                }
+                targets = [str(t) for t in raw_targets if str(t) in valid] or None
+            self._record_clue(state, team, clue_word, clue_number, targets)
             state["last_action"] = {"type": "clue", "team": team, "clue": state["current_clue"]}
             events.append({"type": "turn_changed", "team": team, "phase": "guess"})
 

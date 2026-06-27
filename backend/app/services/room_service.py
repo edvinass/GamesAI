@@ -417,15 +417,27 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                 try:
                     if state["phase"] == "clue":
                         await asyncio.sleep(AI_CLUE_THINK_PAUSE_SEC)
-                        clue, number = await ai_spymaster_clue(state, actor.team.value)
-                        action = {"type": "submit_clue", "clue_word": clue, "clue_number": number}
+                        clue, number, targets = await ai_spymaster_clue(state, actor.team.value)
+                        action: dict[str, Any] = {
+                            "type": "submit_clue",
+                            "clue_word": clue,
+                            "clue_number": number,
+                        }
+                        if targets:
+                            action["targets"] = targets
                         try:
                             room, state, events = await service.apply_game_action(
                                 room_id, actor.id, action, allow_ai=True
                             )
                         except ValueError:
-                            clue, number = await fallback_clue(state, actor.team.value)
-                            action = {"type": "submit_clue", "clue_word": clue, "clue_number": number}
+                            clue, number, targets = await fallback_clue(state, actor.team.value)
+                            action = {
+                                "type": "submit_clue",
+                                "clue_word": clue,
+                                "clue_number": number,
+                            }
+                            if targets:
+                                action["targets"] = targets
                             room, state, events = await service.apply_game_action(
                                 room_id, actor.id, action, allow_ai=True
                             )

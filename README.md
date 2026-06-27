@@ -65,7 +65,9 @@ The Vite dev server proxies `/api` and `/ws` to `http://localhost:8000`. Update 
 | `DATABASE_URL` | PostgreSQL connection string (asyncpg) |
 | `DEEPSEEK_API_KEY` | DeepSeek API key for AI players |
 | `DEEPSEEK_BASE_URL` | DeepSeek API base URL (default: `https://api.deepseek.com`) |
-| `DEEPSEEK_MODEL` | Model name (default: `deepseek-chat`) |
+| `DEEPSEEK_MODEL` | Model name (default: `deepseek-v4-pro`) |
+| `DEEPSEEK_THINKING` | Enable chain-of-thought reasoning (default: `true`) |
+| `DEEPSEEK_REASONING_EFFORT` | Reasoning depth: `high` or `max` (default: `max`) |
 | `SECRET_KEY` | Session signing key |
 | `CORS_ORIGINS` | Comma-separated allowed origins |
 

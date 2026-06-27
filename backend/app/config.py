@@ -9,7 +9,9 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_thinking: bool = True
+    deepseek_reasoning_effort: str = "max"
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -28,8 +28,12 @@ async def deepseek_chat(
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
-        "temperature": temperature,
     }
+    if settings.deepseek_thinking:
+        payload["reasoning_effort"] = settings.deepseek_reasoning_effort
+        payload["thinking"] = {"type": "enabled"}
+    else:
+        payload["temperature"] = temperature
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
         payload["max_tokens"] = 2048
