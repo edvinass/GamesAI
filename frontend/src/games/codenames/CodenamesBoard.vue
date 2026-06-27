@@ -196,11 +196,18 @@ function isPopping(index: number) {
 
 .status-bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
   justify-content: center;
-  margin-bottom: 1.25rem;
-  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.turn-indicator {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .turn-indicator.red { color: var(--red-team); }
@@ -225,7 +232,13 @@ function isPopping(index: number) {
 }
 
 .current-clue {
+  font-size: 1.5rem;
   color: var(--text-muted);
+}
+
+.current-clue strong {
+  font-size: 2rem;
+  color: var(--text);
 }
 
 .layout {

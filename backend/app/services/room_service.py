@@ -424,7 +424,7 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                                 room_id, actor.id, action, allow_ai=True
                             )
                         except ValueError:
-                            clue, number = fallback_clue(state)
+                            clue, number = await fallback_clue(state, actor.team.value)
                             action = {"type": "submit_clue", "clue_word": clue, "clue_number": number}
                             room, state, events = await service.apply_game_action(
                                 room_id, actor.id, action, allow_ai=True
