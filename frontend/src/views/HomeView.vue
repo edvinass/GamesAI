@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePlayerStore } from '@/stores/player'
 import { useRoom } from '@/composables/useRoom'
+import GameRulesModal from '@/components/GameRulesModal.vue'
 
 const router = useRouter()
 const playerStore = usePlayerStore()
@@ -13,6 +14,7 @@ const gameType = ref('codenames')
 const games = ref<Array<{ id: string; name: string; description: string }>>([])
 const joinRoomId = ref('')
 const mode = ref<'create' | 'join'>('create')
+const showRules = ref(false)
 
 onMounted(async () => {
   try {
@@ -117,11 +119,16 @@ function switchToJoin() {
         <template v-if="mode === 'create'">
           <label>
             Game
-            <select v-model="gameType">
-              <option v-for="g in games" :key="g.id" :value="g.id">
-                {{ g.name }}
-              </option>
-            </select>
+            <div class="game-select-row">
+              <select v-model="gameType">
+                <option v-for="g in games" :key="g.id" :value="g.id">
+                  {{ g.name }}
+                </option>
+              </select>
+              <button type="button" class="btn-secondary" @click="showRules = true">
+                Rules
+              </button>
+            </div>
           </label>
         </template>
 
@@ -144,6 +151,8 @@ function switchToJoin() {
         </button>
       </div>
     </div>
+
+    <GameRulesModal v-if="showRules" :game-type="gameType" @close="showRules = false" />
   </div>
 </template>
 
@@ -204,6 +213,15 @@ function switchToJoin() {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.game-select-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.game-select-row select {
+  flex: 1;
 }
 
 label {

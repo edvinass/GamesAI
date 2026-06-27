@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { usePlayerStore } from '@/stores/player'
 import { useRoom } from '@/composables/useRoom'
 import { useWebSocket } from '@/composables/useWebSocket'
+import { useLeaveRoom } from '@/composables/useLeaveRoom'
+import GameRulesModal from '@/components/GameRulesModal.vue'
 import type { Room, Player } from '@/types'
 
 const route = useRoute()
@@ -17,9 +19,11 @@ const joinNickname = ref(playerStore.nickname || '')
 const needsJoin = ref(false)
 const copied = ref(false)
 const toast = ref('')
+const showRules = ref(false)
 
 const wsToken = ref(playerStore.sessionToken)
-const { connected, lastMessage, send } = useWebSocket(roomId, wsToken)
+const { connected, lastMessage, send, disconnect } = useWebSocket(roomId, wsToken)
+const { leave } = useLeaveRoom()
 
 onMounted(async () => {
   try {
@@ -121,8 +125,12 @@ function playerLabel(p: Player) {
           <h1>Lobby</h1>
           <p class="muted">{{ room.game_type }} · {{ room.players.length }} players</p>
         </div>
-        <div class="connection" :class="{ online: connected }">
-          {{ connected ? 'Connected' : 'Reconnecting...' }}
+        <div class="header-actions">
+          <button type="button" class="btn-secondary" @click="leave(disconnect)">Leave</button>
+          <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
+          <div class="connection" :class="{ online: connected }">
+            {{ connected ? 'Connected' : 'Reconnecting...' }}
+          </div>
         </div>
       </header>
 
@@ -197,6 +205,12 @@ function playerLabel(p: Player) {
     </template>
 
     <div v-if="toast" class="toast error">{{ toast }}</div>
+
+    <GameRulesModal
+      v-if="showRules && room"
+      :game-type="room.game_type"
+      @close="showRules = false"
+    />
   </div>
 </template>
 
@@ -223,6 +237,12 @@ function playerLabel(p: Player) {
 
 .lobby-header h1 {
   font-size: 1.75rem;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .muted {

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useLeaveRoom } from '@/composables/useLeaveRoom'
 import { usePlayerStore } from '@/stores/player'
 import { useRoom } from '@/composables/useRoom'
 import { useWebSocket } from '@/composables/useWebSocket'
 import CodenamesBoard from '@/games/codenames/CodenamesBoard.vue'
+import GameRulesModal from '@/components/GameRulesModal.vue'
 import type { Room, GameState } from '@/types'
 
 const route = useRoute()
@@ -15,9 +17,11 @@ const roomId = computed(() => route.params.id as string)
 const room = ref<Room | null>(null)
 const gameState = ref<GameState | null>(null)
 const toast = ref('')
+const showRules = ref(false)
 
 const wsToken = computed(() => playerStore.sessionToken)
-const { connected, lastMessage, error, send } = useWebSocket(roomId, wsToken)
+const { connected, lastMessage, error, send, disconnect } = useWebSocket(roomId, wsToken)
+const { leave } = useLeaveRoom()
 
 onMounted(async () => {
   try {
@@ -59,6 +63,10 @@ const playerId = computed(() => playerStore.playerId)
           </span>
         </p>
       </div>
+      <div class="header-actions">
+        <button type="button" class="btn-secondary" @click="leave(disconnect)">Leave</button>
+        <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
+      </div>
     </header>
 
     <div class="av-callout container">
@@ -80,6 +88,12 @@ const playerId = computed(() => playerStore.playerId)
     </div>
 
     <div v-if="toast" class="toast error">{{ toast }}</div>
+
+    <GameRulesModal
+      v-if="showRules"
+      :game-type="room?.game_type ?? 'codenames'"
+      @close="showRules = false"
+    />
   </div>
 </template>
 
@@ -92,10 +106,19 @@ const playerId = computed(() => playerStore.playerId)
 .game-header {
   padding-top: 1.5rem;
   margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
 }
 
 .game-header h1 {
   font-size: 1.5rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .muted {
