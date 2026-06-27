@@ -23,8 +23,9 @@ SPYMASTER_SYSTEM = (
 )
 
 OPERATIVE_SYSTEM = (
-    "You are a sharp Codenames operative. "
-    "Consider the clue, prior team clues, and revealed cards before guessing. "
+    "You are a sharp Codenames operative with full memory of every clue given this game. "
+    "Use your team's prior clues to find unrevealed words your spymaster already hinted at. "
+    "Use opponent clues and revealed outcomes to avoid their words and narrow the board. "
     "Rank guesses by confidence and stop when unsure — wrong guesses end your turn."
 )
 
@@ -193,29 +194,56 @@ Think step by step, then respond ONLY with JSON:
 {{"reasoning": "brief explanation", "clue": "WORD", "number": N, "targets": ["TARGET1"], "risky_words": ["MAYBE1"]}}"""
 
 
-def _format_clue_history(state: dict, team: str) -> str:
+def _format_clue_entry(entry: dict, *, current: bool = False) -> str:
+    clue = entry.get("clue") or {}
+    word = clue.get("word", "?")
+    number = clue.get("number", 0)
+    guesses = entry.get("guesses") or []
+    if current and not entry.get("completed"):
+        return f'- "{word}" {number}: (current clue)'
+    if guesses:
+        guess_desc = ", ".join(f"{g['word']} ({g['color']})" for g in guesses)
+        return f'- "{word}" {number}: guessed {guess_desc}'
+    return f'- "{word}" {number}: turn ended with no guesses'
+
+
+def _format_clue_history(state: dict, team: str, *, include_current: bool = True) -> str:
     history = state.get("clue_history", {}).get(team, [])
     if not history:
-        return "No prior clues from your team this game."
+        return "None yet."
 
     lines: list[str] = []
     for entry in history:
-        if entry.get("completed") and not entry.get("guesses"):
+        if not include_current and not entry.get("completed"):
+            continue
+        if include_current and not entry.get("completed"):
+            lines.append(_format_clue_entry(entry, current=True))
+        else:
+            lines.append(_format_clue_entry(entry))
+    return "\n".join(lines) if lines else "None yet."
+
+
+def _summarize_unresolved_clues(state: dict, team: str) -> str:
+    """Clues whose full target count was not found before the turn ended."""
+    history = state.get("clue_history", {}).get(team, [])
+    lines: list[str] = []
+    for entry in history:
+        if not entry.get("completed"):
             continue
         clue = entry.get("clue") or {}
-        word = clue.get("word", "?")
+        word = clue.get("word")
         number = clue.get("number", 0)
+        if not word or number <= 0:
+            continue
         guesses = entry.get("guesses") or []
-        if guesses:
-            guess_desc = ", ".join(
-                f"{g['word']} ({g['color']})" for g in guesses
+        team_hits = sum(1 for g in guesses if g.get("color") == team)
+        if team_hits < number:
+            remaining = number - team_hits
+            lines.append(
+                f'- "{word}" {number}: only {team_hits} team word(s) found; '
+                f"up to {remaining} unrevealed target(s) may still relate to this clue"
             )
-            lines.append(f'- "{word}" {number}: guessed {guess_desc}')
-        elif not entry.get("completed"):
-            lines.append(f'- "{word}" {number}: (current clue)')
-        else:
-            lines.append(f'- "{word}" {number}: turn ended with no guesses')
-    return "\n".join(lines) if lines else "No prior clues from your team this game."
+    return "\n".join(lines) if lines else "None — focus on the current clue."
 
 
 def _build_operative_prompt(state: dict, team: str, max_guesses: int) -> str:
@@ -236,7 +264,10 @@ def _build_operative_prompt(state: dict, team: str, max_guesses: int) -> str:
             unrevealed.append({"index": card["index"], "word": card["word"]})
 
     limit = max_guesses if clue_number > 0 else min(max_guesses, 3)
-    history_text = _format_clue_history(state, team)
+    opponent = _opponent_team(team)
+    team_history = _format_clue_history(state, team, include_current=False)
+    opponent_history = _format_clue_history(state, opponent, include_current=False)
+    unresolved = _summarize_unresolved_clues(state, team)
 
     return f"""You are a {team.upper()} operative in Codenames.
 
@@ -247,14 +278,23 @@ GAME STATE:
 
 CURRENT CLUE: "{clue_word}" for {clue_number} word(s)
 
-YOUR TEAM'S PRIOR CLUES:
-{history_text}
+YOUR TEAM'S PRIOR CLUES (use these to infer unrevealed team words):
+{team_history}
+
+UNRESOLVED PRIOR CLUES (may still point at unrevealed cards on the board):
+{unresolved}
+
+OPPONENT'S PRIOR CLUES (public — avoid words they were likely targeting):
+{opponent_history}
 
 Unrevealed cards (color hidden — only spymasters know colors):
 {json.dumps(unrevealed)}
 
 Revealed cards (do not guess these):
 {json.dumps(revealed)}
+
+Use prior clues together with the current clue — earlier spymaster hints often still apply to
+unrevealed words. Cross-reference revealed guess outcomes (team/opponent/neutral) from past turns.
 
 Pick up to {limit} unrevealed card indices related to "{clue_word}", ordered by confidence.
 Stop early if unsure — guessing an opponent, neutral, or assassin word ends your turn.
@@ -348,7 +388,10 @@ Respond ONLY with JSON:
 
         try:
             response = await deepseek_chat(
-                prompt, system=SPYMASTER_SYSTEM, temperature=SPYMASTER_TEMPERATURE
+                prompt,
+                system=SPYMASTER_SYSTEM,
+                temperature=SPYMASTER_TEMPERATURE,
+                json_mode=True,
             )
             data = _parse_json(response)
             validated = _validate_spymaster_response(data, targets, board_words, avoid)
@@ -376,7 +419,10 @@ async def ai_spymaster_clue(state: dict, team: str) -> tuple[str, int]:
         try:
             full_prompt = prompt if not feedback else f"{prompt}\n\nPrevious invalid response:\n{feedback}"
             response = await deepseek_chat(
-                full_prompt, system=SPYMASTER_SYSTEM, temperature=SPYMASTER_TEMPERATURE
+                full_prompt,
+                system=SPYMASTER_SYSTEM,
+                temperature=SPYMASTER_TEMPERATURE,
+                json_mode=True,
             )
             data = _parse_json(response)
             validated = _validate_spymaster_response(data, targets, board_words, avoid)
@@ -420,7 +466,10 @@ async def ai_operative_guesses(state: dict, team: str, max_guesses: int) -> list
         try:
             full_prompt = prompt if not feedback else f"{prompt}\n\nPrevious invalid response:\n{feedback}"
             response = await deepseek_chat(
-                full_prompt, system=OPERATIVE_SYSTEM, temperature=OPERATIVE_TEMPERATURE
+                full_prompt,
+                system=OPERATIVE_SYSTEM,
+                temperature=OPERATIVE_TEMPERATURE,
+                json_mode=True,
             )
             data = _parse_json(response)
             guesses = _parse_operative_guesses(data, state, limit, clue_number, team)
@@ -439,9 +488,42 @@ async def ai_operative_guesses(state: dict, team: str, max_guesses: int) -> list
     return []
 
 
-def _parse_json(text: str) -> dict[str, Any]:
+def _extract_json_objects(text: str) -> list[dict[str, Any]]:
     text = text.strip()
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        return json.loads(match.group())
-    return json.loads(text)
+    if not text:
+        return []
+
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    if fence:
+        text = fence.group(1).strip()
+
+    decoder = json.JSONDecoder()
+    objects: list[dict[str, Any]] = []
+    i = 0
+    while i < len(text):
+        if text[i] != "{":
+            i += 1
+            continue
+        try:
+            obj, end = decoder.raw_decode(text, i)
+            if isinstance(obj, dict):
+                objects.append(obj)
+            i = end if end > i else i + 1
+        except json.JSONDecodeError:
+            i += 1
+    return objects
+
+
+def _parse_json(text: str) -> dict[str, Any]:
+    objects = _extract_json_objects(text)
+    if not objects:
+        raise json.JSONDecodeError("No JSON object found", text, 0)
+
+    # Models sometimes emit a short preamble object then the real payload.
+    preferred_keys = ("clue", "guesses", "targets", "number")
+    for key in preferred_keys:
+        for obj in reversed(objects):
+            if key in obj:
+                return obj
+
+    return max(objects, key=len)

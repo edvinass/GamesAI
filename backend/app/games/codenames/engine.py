@@ -273,10 +273,11 @@ class CodenamesEngine(GamePlugin):
 
     def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
         is_spymaster = viewer_player and viewer_player.get("role") == "spymaster"
+        game_over = bool(state.get("winner"))
         cards = []
         for card in state["cards"]:
             c = {"index": card["index"], "word": card["word"], "revealed": card["revealed"]}
-            if card["revealed"] or is_spymaster:
+            if card["revealed"] or is_spymaster or game_over:
                 c["color"] = card["color"]
             cards.append(c)
 

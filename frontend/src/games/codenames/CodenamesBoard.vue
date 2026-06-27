@@ -23,7 +23,11 @@ const currentActor = computed(() => {
   )
 })
 
-const isAiTurn = computed(() => Boolean(currentActor.value?.is_ai))
+const isGameOver = computed(() => Boolean(props.gameState.winner))
+
+const isAiTurn = computed(
+  () => !isGameOver.value && Boolean(currentActor.value?.is_ai),
+)
 
 const isMyTurn = computed(() => {
   if (!me.value) return false
@@ -72,9 +76,14 @@ function startNewGame() {
 }
 
 function cardClasses(card: { revealed: boolean; color?: string }) {
-  // Backend includes color for revealed cards and for spymaster key view.
   if (card.revealed) {
     return ['revealed', card.color ?? 'hidden']
+  }
+  if (props.gameState.winner && card.color) {
+    if (me.value?.role === 'spymaster') {
+      return ['key', card.color]
+    }
+    return ['unguessed', card.color]
   }
   if (card.color) {
     return ['key', card.color]
@@ -119,7 +128,7 @@ function isPopping(index: number) {
       <p v-else class="waiting-host">Waiting for host to start a new game...</p>
     </div>
 
-    <div class="status-bar">
+    <div v-if="!isGameOver" class="status-bar">
       <span :class="['turn-indicator', gameState.current_team, { 'ai-thinking': isAiTurn }]">
         {{ statusMessage }}
       </span>
@@ -147,7 +156,7 @@ function isPopping(index: number) {
             v-for="card in gameState.cards"
             :key="card.index"
             :class="['card-btn', ...cardClasses(card), { pop: isPopping(card.index) }]"
-            :disabled="!isMyTurn || gameState.phase !== 'guess' || card.revealed"
+            :disabled="!!gameState.winner || !isMyTurn || gameState.phase !== 'guess' || card.revealed"
             @click="guessCard(card.index)"
           >
             {{ card.word }}
@@ -293,6 +302,30 @@ function isPopping(index: number) {
 .card-btn.hidden {
   background: #c4a35a;
   color: #1a1a1a;
+}
+
+/* Post-game unrevealed — same tan face operatives see during play, color via border */
+.card-btn.unguessed {
+  background: #c4a35a;
+  color: #1a1a1a;
+  border-style: dashed;
+  cursor: default;
+}
+
+.card-btn.unguessed.red {
+  border-color: var(--red-team);
+}
+
+.card-btn.unguessed.blue {
+  border-color: var(--blue-team);
+}
+
+.card-btn.unguessed.neutral {
+  border-color: #8a7040;
+}
+
+.card-btn.unguessed.assassin {
+  border-color: #555;
 }
 
 /* Spymaster key view — unrevealed cards show a muted color hint */

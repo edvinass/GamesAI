@@ -12,6 +12,7 @@ async def deepseek_chat(
     system: str = "You are a helpful game AI. Respond concisely.",
     *,
     temperature: float = 0.7,
+    json_mode: bool = False,
 ) -> str:
     if not settings.deepseek_api_key:
         raise RuntimeError("DEEPSEEK_API_KEY is not configured")
@@ -21,7 +22,7 @@ async def deepseek_chat(
         "Authorization": f"Bearer {settings.deepseek_api_key}",
         "Content-Type": "application/json",
     }
-    payload = {
+    payload: dict = {
         "model": settings.deepseek_model,
         "messages": [
             {"role": "system", "content": system},
@@ -29,6 +30,9 @@ async def deepseek_chat(
         ],
         "temperature": temperature,
     }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+        payload["max_tokens"] = 2048
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(url, headers=headers, json=payload)
