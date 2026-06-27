@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import logging
 import uuid
 from typing import Any
@@ -338,8 +339,9 @@ class RoomService:
 
         game = get_game(room.game_type)
         player_data = self._player_data(player)
-        state, events = game.apply_action(room.game_state.state, action, player_data)
-
+        state, events = game.apply_action(
+            copy.deepcopy(room.game_state.state), action, player_data
+        )
         room.game_state.state = state
         room.game_state.version += 1
         if state.get("winner"):

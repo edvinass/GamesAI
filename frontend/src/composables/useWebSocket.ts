@@ -62,7 +62,10 @@ export function useWebSocket(roomId: Ref<string> | string, token: Ref<string> | 
   function send(data: Record<string, unknown>) {
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(data))
+      return true
     }
+    error.value = 'Not connected — try again in a moment'
+    return false
   }
 
   function disconnect() {

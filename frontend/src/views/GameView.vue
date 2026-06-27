@@ -48,7 +48,12 @@ watch(error, (e) => {
   }
 })
 
-const playerId = computed(() => playerStore.playerId)
+function sendAction(data: Record<string, unknown>) {
+  if (!send(data)) {
+    toast.value = 'Not connected — try again in a moment'
+    setTimeout(() => (toast.value = ''), 3000)
+  }
+}
 </script>
 
 <template>
@@ -80,7 +85,7 @@ const playerId = computed(() => playerStore.playerId)
       :game-state="gameState"
       :room="room"
       :player-id="playerId"
-      @action="send"
+      @action="sendAction"
     />
 
     <div v-else class="container loading">
