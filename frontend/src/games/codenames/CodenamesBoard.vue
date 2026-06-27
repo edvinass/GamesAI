@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { GameState, Room } from '@/types'
 import TeamPanel from './TeamPanel.vue'
 import ClueInput from './ClueInput.vue'
+import FlowSlot from '@/components/FlowSlot.vue'
 
 const props = defineProps<{
   gameState: GameState
@@ -57,6 +58,20 @@ const redPlayers = computed(() => props.room.players.filter((p) => p.team === 'r
 const bluePlayers = computed(() => props.room.players.filter((p) => p.team === 'blue'))
 
 const isHost = computed(() => props.room.host_player_id === props.playerId)
+
+const showClueInput = computed(
+  () => isMyTurn.value && props.gameState.phase === 'clue',
+)
+
+const showEndTurn = computed(
+  () => isMyTurn.value && props.gameState.phase === 'guess',
+)
+
+const showCurrentClue = computed(() => Boolean(props.gameState.current_clue))
+
+const showGuessesLeft = computed(
+  () => showCurrentClue.value && props.gameState.phase === 'guess',
+)
 
 function guessCard(index: number) {
   if (!isMyTurn.value || props.gameState.phase !== 'guess') return
@@ -120,8 +135,8 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 
 <template>
   <div class="board-container container-wide">
-    <Transition name="win">
-      <div v-if="gameState.winner" class="game-over card">
+    <FlowSlot :open="isGameOver" spaced="after" class="game-over-flow">
+      <div v-show="isGameOver" class="game-over card">
         <div class="confetti" aria-hidden="true">
           <span
             v-for="piece in confettiPieces"
@@ -131,7 +146,7 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
           />
         </div>
         <div class="winner-badge" :class="gameState.winner">
-          🏆 {{ gameState.winner.toUpperCase() }} WINS!
+          🏆 {{ gameState.winner?.toUpperCase() }} WINS!
         </div>
         <p class="win-reason">
           {{ gameState.win_reason === 'assassin' ? 'The assassin was revealed.' : 'All team words found!' }}
@@ -141,27 +156,33 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
         </button>
         <p v-else class="waiting-host">Waiting for host to start a new game…</p>
       </div>
-    </Transition>
+    </FlowSlot>
 
-    <div v-if="!isGameOver" class="status-bar">
-      <div
-        class="turn-pill"
-        :class="[gameState.current_team, { 'my-turn': isMyTurn, 'ai-thinking': isAiTurn }]"
-      >
-        <span v-if="isAiTurn" class="ai-icon">🤖</span>
-        <span class="turn-text">{{ statusMessage }}</span>
-      </div>
-      <Transition name="clue-reveal">
-        <div v-if="gameState.current_clue" class="current-clue">
-          <span class="clue-label">Clue</span>
-          <strong>{{ gameState.current_clue.word }}</strong>
-          <span class="clue-number">{{ gameState.current_clue.number }}</span>
-          <span v-if="gameState.phase === 'guess'" class="guesses-left">
-            {{ gameState.guesses_remaining }} left
-          </span>
+    <FlowSlot :open="!isGameOver" spaced="after" class="status-flow">
+      <div v-show="!isGameOver" class="status-bar">
+        <div
+          class="turn-pill"
+          :class="[gameState.current_team, { 'my-turn': isMyTurn, 'ai-thinking': isAiTurn }]"
+        >
+          <FlowSlot horizontal :open="isAiTurn">
+            <span v-show="isAiTurn" class="ai-icon">🤖</span>
+          </FlowSlot>
+          <span class="turn-text">{{ statusMessage }}</span>
         </div>
-      </Transition>
-    </div>
+        <FlowSlot horizontal :open="showCurrentClue" class="status-clue-flow">
+          <div v-show="showCurrentClue" class="current-clue">
+            <span class="clue-label">Clue</span>
+            <strong>{{ gameState.current_clue?.word }}</strong>
+            <span class="clue-number">{{ gameState.current_clue?.number }}</span>
+            <FlowSlot horizontal :open="showGuessesLeft">
+              <span v-show="showGuessesLeft" class="guesses-left">
+                {{ gameState.guesses_remaining }} left
+              </span>
+            </FlowSlot>
+          </div>
+        </FlowSlot>
+      </div>
+    </FlowSlot>
 
     <div class="layout">
       <TeamPanel
@@ -172,13 +193,13 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
       />
 
       <div class="center">
-        <Transition name="slide-down">
+        <FlowSlot :open="showClueInput" spaced="after">
           <ClueInput
-            v-if="isMyTurn && gameState.phase === 'clue'"
+            v-show="showClueInput"
             :board-words="gameState.cards.map((c) => c.word)"
             @submit="submitClue"
           />
-        </Transition>
+        </FlowSlot>
 
         <div class="grid">
           <button
@@ -197,15 +218,15 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
           </button>
         </div>
 
-        <Transition name="slide-down">
+        <FlowSlot :open="showEndTurn" spaced="before">
           <button
-            v-if="isMyTurn && gameState.phase === 'guess'"
+            v-show="showEndTurn"
             class="btn-secondary end-turn-btn"
             @click="endTurn"
           >
             End Turn
           </button>
-        </Transition>
+        </FlowSlot>
       </div>
 
       <TeamPanel
@@ -220,15 +241,19 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 
 <style scoped>
 .board-container {
+  --flow-duration: 0.35s;
   padding-bottom: 1.5rem;
 }
 
 .game-over {
   position: relative;
   text-align: center;
-  margin-bottom: 1.25rem;
   padding: 2rem 1.5rem;
   overflow: hidden;
+}
+
+:deep(.game-over-flow.flow-slot--spaced-after.flow-slot--open) {
+  margin-bottom: 1.25rem;
 }
 
 .confetti {
@@ -286,18 +311,17 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
   color: var(--text-muted);
 }
 
-.win-enter-active {
-  animation: celebrate 0.6s var(--ease-bounce);
-}
-
 .status-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 0.75rem 1.25rem;
-  margin-bottom: 1rem;
   animation: fadeInUp 0.4s var(--ease-smooth);
+}
+
+:deep(.status-flow.flow-slot--spaced-after.flow-slot--open) {
+  margin-bottom: 1rem;
 }
 
 .turn-pill {
@@ -348,6 +372,7 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
   border-radius: 999px;
   background: var(--surface);
   border: 1px solid var(--border);
+  white-space: nowrap;
 }
 
 .clue-label {
@@ -374,10 +399,22 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
   color: var(--text-muted);
   padding-left: 0.5rem;
   border-left: 1px solid var(--border);
+  white-space: nowrap;
 }
 
-.clue-reveal-enter-active {
-  animation: fadeInUp 0.35s var(--ease-bounce);
+@media (max-width: 640px) {
+  :deep(.status-clue-flow.flow-slot--horizontal) {
+    width: 100%;
+    grid-template-columns: unset;
+    grid-template-rows: 0fr;
+    transition:
+      grid-template-rows var(--flow-duration, 0.35s) var(--ease-smooth),
+      margin var(--flow-duration, 0.35s) var(--ease-smooth);
+  }
+
+  :deep(.status-clue-flow.flow-slot--horizontal.flow-slot--open) {
+    grid-template-rows: 1fr;
+  }
 }
 
 .layout {
@@ -397,7 +434,6 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.75rem;
 }
 
 .grid {
@@ -430,6 +466,9 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
     transform 0.2s var(--ease-bounce),
     box-shadow 0.2s,
     border-color 0.2s;
+}
+
+.card-btn:not(.revealed) {
   animation: cardDeal 0.4s var(--ease-smooth) backwards;
   animation-delay: var(--delay);
 }
@@ -495,6 +534,7 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
   opacity: 1;
   cursor: default;
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.2);
+  animation: none;
 }
 
 .card-btn.revealed::after {
@@ -561,13 +601,9 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 
 .end-turn-btn {
   align-self: center;
-}
-
-.slide-down-enter-active {
-  animation: fadeInUp 0.35s var(--ease-bounce);
-}
-
-.slide-down-leave-active {
-  animation: fadeInUp 0.2s reverse;
+  width: 100%;
+  max-width: 12rem;
+  margin: 0 auto;
+  display: block;
 }
 </style>

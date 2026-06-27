@@ -11,7 +11,7 @@ import { RouterView } from 'vue-router'
       <span class="orb orb-4" />
     </div>
     <RouterView v-slot="{ Component, route }">
-      <Transition name="page" mode="out-in">
+      <Transition name="page">
         <component :is="Component" :key="route.path" />
       </Transition>
     </RouterView>

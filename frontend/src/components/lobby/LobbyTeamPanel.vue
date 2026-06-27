@@ -54,61 +54,63 @@ function displayName(player: Player) {
 
     <div class="slot-section">
       <p class="slot-label">Spymaster</p>
-      <div v-if="spymaster" class="player-slot filled">
-        <div class="player-info">
-          <span class="player-name">{{ displayName(spymaster) }}</span>
-          <span class="badges">
-            <span v-if="isYou(spymaster)" class="badge badge-you">You</span>
-            <span v-if="isHost(spymaster)" class="badge badge-host">Host</span>
-            <span v-if="spymaster.is_ai" class="badge badge-ai">AI</span>
-            <span v-if="!spymaster.is_connected" class="badge badge-disconnected">Offline</span>
-          </span>
-        </div>
-        <div v-if="isHost" class="slot-actions">
+      <div class="player-slot" :class="spymaster ? 'filled' : 'empty'">
+        <template v-if="spymaster">
+          <div class="player-info">
+            <span class="player-name">{{ displayName(spymaster) }}</span>
+            <span class="badges">
+              <span v-if="isYou(spymaster)" class="badge badge-you">You</span>
+              <span v-if="isHost(spymaster)" class="badge badge-host">Host</span>
+              <span v-if="spymaster.is_ai" class="badge badge-ai">AI</span>
+              <span v-if="!spymaster.is_connected" class="badge badge-disconnected">Offline</span>
+            </span>
+          </div>
+          <div v-if="isHost" class="slot-actions">
+            <button
+              type="button"
+              class="action-btn"
+              :title="`Move to ${otherTeam} team`"
+              @click="moveToOtherTeam(spymaster)"
+            >
+              To {{ otherTeam === 'red' ? 'Red' : 'Blue' }}
+            </button>
+            <button
+              type="button"
+              class="action-btn"
+              title="Set as operative"
+              @click="setRole(spymaster, 'operative')"
+            >
+              Operative
+            </button>
+            <button
+              v-if="spymaster.is_ai"
+              type="button"
+              class="action-btn danger"
+              title="Remove AI"
+              @click="emit('remove', spymaster.id)"
+            >
+              ×
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <span class="empty-text">No spymaster yet</span>
           <button
+            v-if="isHost"
             type="button"
-            class="action-btn"
-            :title="`Move to ${otherTeam} team`"
-            @click="moveToOtherTeam(spymaster)"
+            class="add-ai-btn"
+            @click="emit('addAi', team, 'spymaster')"
           >
-            To {{ otherTeam === 'red' ? 'Red' : 'Blue' }}
+            + AI Spymaster
           </button>
-          <button
-            type="button"
-            class="action-btn"
-            title="Set as operative"
-            @click="setRole(spymaster, 'operative')"
-          >
-            Operative
-          </button>
-          <button
-            v-if="spymaster.is_ai"
-            type="button"
-            class="action-btn danger"
-            title="Remove AI"
-            @click="emit('remove', spymaster.id)"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-      <div v-else class="player-slot empty">
-        <span class="empty-text">No spymaster yet</span>
-        <button
-          v-if="isHost"
-          type="button"
-          class="add-ai-btn"
-          @click="emit('addAi', team, 'spymaster')"
-        >
-          + AI Spymaster
-        </button>
+        </template>
       </div>
     </div>
 
     <div class="slot-section">
       <p class="slot-label">Operatives</p>
       <ul v-if="operatives.length" class="operative-list">
-        <li v-for="(player, idx) in operatives" :key="player.id" class="player-slot filled" :style="{ '--slot-delay': `${idx * 0.05}s` }">
+        <li v-for="player in operatives" :key="player.id" class="player-slot filled">
           <div class="player-info">
             <span class="player-name">{{ displayName(player) }}</span>
             <span class="badges">
@@ -147,7 +149,7 @@ function displayName(player: Player) {
           </div>
         </li>
       </ul>
-      <div v-else class="player-slot empty">
+      <div v-else class="player-slot empty operative-empty">
         <span class="empty-text">No operatives yet</span>
         <button
           v-if="isHost"
@@ -249,19 +251,6 @@ function displayName(player: Player) {
 
 .player-slot.filled {
   background: rgba(0, 0, 0, 0.15);
-  animation: slotIn 0.35s var(--ease-bounce) backwards;
-  animation-delay: var(--slot-delay, 0s);
-}
-
-@keyframes slotIn {
-  from {
-    opacity: 0;
-    transform: translateX(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
 }
 
 .player-slot.filled:hover {
@@ -276,6 +265,9 @@ function displayName(player: Player) {
   align-items: stretch;
   text-align: center;
   gap: 0.5rem;
+}
+
+.player-slot.empty:not(.operative-empty) {
   animation: pulse-empty 3s ease-in-out infinite;
 }
 

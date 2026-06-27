@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Player } from '@/types'
+import FlowSlot from '@/components/FlowSlot.vue'
 
 const props = defineProps<{
   team: 'red' | 'blue'
@@ -24,7 +25,9 @@ const dots = computed(() => {
   <div :class="['team-panel', team, { active }]">
     <div class="panel-header">
       <h3>{{ team.toUpperCase() }}</h3>
-      <span v-if="active" class="turn-badge">Turn</span>
+      <FlowSlot horizontal :open="Boolean(active)">
+        <span v-show="active" class="turn-badge">Turn</span>
+      </FlowSlot>
     </div>
 
     <div class="remaining-block">

@@ -11,16 +11,24 @@ const { createRoom, joinRoom, fetchGames, loading, error } = useRoom()
 
 const nickname = ref(playerStore.nickname || '')
 const gameType = ref('codenames')
-const games = ref<Array<{ id: string; name: string; description: string }>>([])
+const games = ref<Array<{ id: string; name: string; description: string }>>([
+  { id: 'codenames', name: 'Codenames', description: 'Team word guessing game' },
+])
 const joinRoomId = ref('')
 const mode = ref<'create' | 'join'>('create')
 const showRules = ref(false)
 
 onMounted(async () => {
   try {
-    games.value = await fetchGames()
+    const fetched = await fetchGames()
+    if (Array.isArray(fetched) && fetched.length > 0) {
+      games.value = fetched
+      if (!fetched.some((g) => g.id === gameType.value)) {
+        gameType.value = fetched[0].id
+      }
+    }
   } catch {
-    games.value = [{ id: 'codenames', name: 'Codenames', description: 'Team word guessing game' }]
+    // keep default games list
   }
 })
 
@@ -61,9 +69,8 @@ async function enterGame() {
   }
 }
 
-function startNewGame() {
+function selectCreateMode() {
   mode.value = 'create'
-  enterGame()
 }
 
 function switchToJoin() {
@@ -104,12 +111,12 @@ function switchToJoin() {
             <input v-model="nickname" placeholder="Your nickname" maxlength="50" @keyup.enter="enterGame" />
           </label>
 
-          <div class="mode-toggle">
+          <div class="mode-toggle" :class="mode">
             <button
               type="button"
               :class="['mode-btn', { active: mode === 'create' }]"
               :disabled="loading"
-              @click="startNewGame"
+              @click="selectCreateMode"
             >
               {{ loading && mode === 'create' ? 'Creating...' : 'New Game' }}
             </button>
@@ -121,35 +128,30 @@ function switchToJoin() {
             >
               Join Room
             </button>
-            <span class="mode-slider" :class="mode" />
           </div>
 
           <p v-if="mode === 'create'" class="hint">Pick a game, then hit ENTER GAME below.</p>
           <p v-else class="hint">Paste the room ID from your friend's link.</p>
 
-          <Transition name="field" mode="out-in">
-            <template v-if="mode === 'create'" key="create">
-              <label>
-                Game
-                <div class="game-select-row">
-                  <select v-model="gameType">
-                    <option v-for="g in games" :key="g.id" :value="g.id">
-                      {{ g.name }}
-                    </option>
-                  </select>
-                  <button type="button" class="btn-secondary" @click="showRules = true">
-                    Rules
-                  </button>
-                </div>
-              </label>
-            </template>
-            <template v-else key="join">
-              <label>
-                Room ID
-                <input v-model="joinRoomId" placeholder="Paste room ID from URL" />
-              </label>
-            </template>
-          </Transition>
+          <div class="field-area">
+            <label v-show="mode === 'create'">
+              Game
+              <div class="game-select-row">
+                <select v-model="gameType">
+                  <option v-for="g in games" :key="g.id" :value="g.id">
+                    {{ g.name }}
+                  </option>
+                </select>
+                <button type="button" class="btn-secondary" @click="showRules = true">
+                  Rules
+                </button>
+              </div>
+            </label>
+            <label v-show="mode === 'join'">
+              Room ID
+              <input v-model="joinRoomId" placeholder="Paste room ID from URL" />
+            </label>
+          </div>
 
           <Transition name="field">
             <p v-if="error" class="error-msg">{{ error }}</p>
@@ -302,7 +304,16 @@ function switchToJoin() {
 }
 
 .form-card {
-  animation: fadeInUp 0.6s var(--ease-smooth) 0.15s backwards;
+  animation: slideUp 0.5s var(--ease-smooth) 0.1s both;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(12px);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 .form-card h2 {
@@ -314,6 +325,14 @@ function switchToJoin() {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.field-area {
+  display: grid;
+}
+
+.field-area > label {
+  grid-area: 1 / 1;
 }
 
 .game-select-row {
@@ -343,6 +362,25 @@ label {
   background: var(--bg);
   border-radius: 12px;
   border: 1px solid var(--border);
+  isolation: isolate;
+}
+
+.mode-toggle::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  background: linear-gradient(135deg, var(--accent), #7c6cf0);
+  border-radius: 9px;
+  box-shadow: 0 2px 12px var(--accent-glow);
+  transition: left 0.3s var(--ease-bounce);
+  z-index: 0;
+}
+
+.mode-toggle.join::before {
+  left: calc(50%);
 }
 
 .mode-btn {
@@ -353,30 +391,12 @@ label {
   color: var(--text-muted);
   border: none;
   border-radius: 9px;
-  transition: color 0.25s;
+  font-weight: 500;
 }
 
 .mode-btn.active {
-  color: white;
-}
-
-.mode-slider {
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  width: calc(50% - 4px);
-  background: linear-gradient(135deg, var(--accent), #7c6cf0);
-  border-radius: 9px;
-  transition: transform 0.3s var(--ease-bounce);
-  box-shadow: 0 2px 12px var(--accent-glow);
-}
-
-.mode-slider.create {
-  transform: translateX(0);
-}
-
-.mode-slider.join {
-  transform: translateX(100%);
+  color: var(--text);
+  font-weight: 600;
 }
 
 .enter-btn {
@@ -413,16 +433,5 @@ label {
 .mode-btn:disabled {
   opacity: 0.7;
   cursor: wait;
-}
-
-.field-enter-active,
-.field-leave-active {
-  transition: opacity 0.2s, transform 0.2s;
-}
-
-.field-enter-from,
-.field-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
 }
 </style>
