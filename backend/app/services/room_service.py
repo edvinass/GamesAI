@@ -26,6 +26,16 @@ def _get_ai_lock(room_id: str) -> asyncio.Lock:
     return _ai_locks[room_id]
 
 
+def _ai_nickname_for_role(role: Role) -> str:
+    label = "AI Spymaster" if role == Role.SPYMASTER else "AI Operative"
+    return f"🤖 {label}"
+
+
+def _sync_ai_nickname(player: RoomPlayer) -> None:
+    if player.is_ai and player.role:
+        player.nickname = _ai_nickname_for_role(player.role)
+
+
 class RoomService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -158,8 +168,7 @@ class RoomService:
                 await self.db.delete(p)
 
         token = generate_session_token()
-        ai_names = {"spymaster": "AI Spymaster", "operative": "AI Operative"}
-        nickname = f"🤖 {ai_names.get(role, 'AI')}"
+        nickname = _ai_nickname_for_role(role_enum)
 
         player = RoomPlayer(
             room_id=room.id,
@@ -229,6 +238,7 @@ class RoomService:
                 )
                 if existing:
                     target.role = Role.OPERATIVE
+                    _sync_ai_nickname(target)
             target.team = new_team
 
         if role is not None:
@@ -237,7 +247,9 @@ class RoomService:
                 for p in room.players:
                     if p.id != target.id and p.team == target.team and p.role == Role.SPYMASTER:
                         p.role = Role.OPERATIVE
+                        _sync_ai_nickname(p)
             target.role = new_role
+            _sync_ai_nickname(target)
 
         await self.db.commit()
         await self.db.refresh(room, ["players"])
@@ -298,16 +310,16 @@ class RoomService:
             human.role = Role.OPERATIVE
 
         slots = [
-            (Team.RED, Role.SPYMASTER, "🤖 AI Spymaster"),
-            (Team.BLUE, Role.SPYMASTER, "🤖 AI Spymaster"),
-            (Team.BLUE, Role.OPERATIVE, "🤖 AI Operative"),
+            (Team.RED, Role.SPYMASTER),
+            (Team.BLUE, Role.SPYMASTER),
+            (Team.BLUE, Role.OPERATIVE),
         ]
-        for team, role, name in slots:
+        for team, role in slots:
             token = generate_session_token()
             self.db.add(
                 RoomPlayer(
                     room_id=room.id,
-                    nickname=name,
+                    nickname=_ai_nickname_for_role(role),
                     session_token_hash=hash_session_token(token),
                     team=team,
                     role=role,

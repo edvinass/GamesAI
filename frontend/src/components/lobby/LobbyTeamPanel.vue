@@ -36,6 +36,13 @@ function moveToOtherTeam(player: Player) {
 function setRole(player: Player, role: 'spymaster' | 'operative') {
   emit('assign', player.id, props.team, role)
 }
+
+function displayName(player: Player) {
+  if (player.is_ai && player.role) {
+    return player.role === 'spymaster' ? '🤖 AI Spymaster' : '🤖 AI Operative'
+  }
+  return player.nickname
+}
 </script>
 
 <template>
@@ -49,7 +56,7 @@ function setRole(player: Player, role: 'spymaster' | 'operative') {
       <p class="slot-label">Spymaster</p>
       <div v-if="spymaster" class="player-slot filled">
         <div class="player-info">
-          <span class="player-name">{{ spymaster.nickname }}</span>
+          <span class="player-name">{{ displayName(spymaster) }}</span>
           <span class="badges">
             <span v-if="isYou(spymaster)" class="badge badge-you">You</span>
             <span v-if="isHost(spymaster)" class="badge badge-host">Host</span>
@@ -103,7 +110,7 @@ function setRole(player: Player, role: 'spymaster' | 'operative') {
       <ul v-if="operatives.length" class="operative-list">
         <li v-for="player in operatives" :key="player.id" class="player-slot filled">
           <div class="player-info">
-            <span class="player-name">{{ player.nickname }}</span>
+            <span class="player-name">{{ displayName(player) }}</span>
             <span class="badges">
               <span v-if="isYou(player)" class="badge badge-you">You</span>
               <span v-if="isHost(player)" class="badge badge-host">Host</span>
