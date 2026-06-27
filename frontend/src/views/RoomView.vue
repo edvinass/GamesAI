@@ -6,7 +6,9 @@ import { useRoom } from '@/composables/useRoom'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useLeaveRoom } from '@/composables/useLeaveRoom'
 import GameRulesModal from '@/components/GameRulesModal.vue'
-import type { Room, Player } from '@/types'
+import LobbyTeamPanel from '@/components/lobby/LobbyTeamPanel.vue'
+import { validateLobby } from '@/games/codenames/lobbyValidation'
+import type { Room } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -58,8 +60,9 @@ watch(lastMessage, (msg) => {
 const roomUrl = computed(() => `${window.location.origin}/room/${roomId.value}`)
 const isHost = computed(() => room.value?.host_player_id === playerStore.playerId)
 
-const redPlayers = computed(() => room.value?.players.filter((p) => p.team === 'red') ?? [])
-const bluePlayers = computed(() => room.value?.players.filter((p) => p.team === 'blue') ?? [])
+const lobbyValidation = computed(() =>
+  room.value ? validateLobby(room.value) : { valid: false, message: '', issues: [] },
+)
 
 const soloPractice = computed({
   get: () => Boolean(room.value?.settings?.solo_practice),
@@ -92,6 +95,14 @@ function removePlayer(id: string) {
   send({ type: 'remove_player', player_id: id })
 }
 
+function assignPlayer(
+  playerId: string,
+  team: 'red' | 'blue',
+  role: 'spymaster' | 'operative',
+) {
+  send({ type: 'update_player', player_id: playerId, team, role })
+}
+
 function startGame() {
   send({ type: 'start_game' })
 }
@@ -100,11 +111,6 @@ async function copyUrl() {
   await navigator.clipboard.writeText(roomUrl.value)
   copied.value = true
   setTimeout(() => (copied.value = false), 2000)
-}
-
-function playerLabel(p: Player) {
-  const role = p.role === 'spymaster' ? 'Spymaster' : 'Operative'
-  return `${p.nickname} (${role})`
 }
 </script>
 
@@ -153,53 +159,58 @@ function playerLabel(p: Player) {
         </label>
       </div>
 
-      <div class="teams">
-        <div class="team-panel card red">
-          <h3>Red Team</h3>
-          <ul>
-            <li v-for="p in redPlayers" :key="p.id" class="player-row">
-              <span>
-                {{ playerLabel(p) }}
-                <span v-if="p.is_ai" class="badge badge-ai">AI</span>
-                <span v-if="!p.is_connected" class="badge badge-disconnected">Offline</span>
-              </span>
-              <button
-                v-if="isHost && p.is_ai"
-                class="btn-small btn-secondary"
-                @click="removePlayer(p.id)"
-              >Remove</button>
-            </li>
-          </ul>
-          <div v-if="isHost && !soloPractice" class="ai-buttons">
-            <button class="btn-secondary btn-small" @click="addAi('red', 'spymaster')">+ AI Spymaster</button>
-            <button class="btn-secondary btn-small" @click="addAi('red', 'operative')">+ AI Operative</button>
-          </div>
-        </div>
-
-        <div class="team-panel card blue">
-          <h3>Blue Team</h3>
-          <ul>
-            <li v-for="p in bluePlayers" :key="p.id" class="player-row">
-              <span>
-                {{ playerLabel(p) }}
-                <span v-if="p.is_ai" class="badge badge-ai">AI</span>
-                <span v-if="!p.is_connected" class="badge badge-disconnected">Offline</span>
-              </span>
-              <button
-                v-if="isHost && p.is_ai"
-                class="btn-small btn-secondary"
-                @click="removePlayer(p.id)"
-              >Remove</button>
-            </li>
-          </ul>
-          <div v-if="isHost && !soloPractice" class="ai-buttons">
-            <button class="btn-secondary btn-small" @click="addAi('blue', 'spymaster')">+ AI Spymaster</button>
-            <button class="btn-secondary btn-small" @click="addAi('blue', 'operative')">+ AI Operative</button>
-          </div>
-        </div>
+      <div v-if="soloPractice" class="solo-notice card">
+        <p>Solo practice auto-builds teams when you start. You will play as the red operative against AI.</p>
       </div>
 
-      <button v-if="isHost" class="btn-primary start-btn" @click="startGame">
+      <template v-else>
+        <p v-if="isHost" class="arrange-hint">
+          Assign each team one spymaster and at least one operative. Use the slot buttons to move players, change roles, or fill gaps with AI.
+        </p>
+
+        <div class="teams">
+          <LobbyTeamPanel
+            team="red"
+            :players="room.players"
+            :is-host="isHost"
+            :current-player-id="playerStore.playerId"
+            :host-player-id="room.host_player_id"
+            @assign="assignPlayer"
+            @add-ai="addAi"
+            @remove="removePlayer"
+          />
+          <LobbyTeamPanel
+            team="blue"
+            :players="room.players"
+            :is-host="isHost"
+            :current-player-id="playerStore.playerId"
+            :host-player-id="room.host_player_id"
+            @assign="assignPlayer"
+            @add-ai="addAi"
+            @remove="removePlayer"
+          />
+        </div>
+
+        <div
+          class="validation-banner card"
+          :class="{ valid: lobbyValidation.valid, invalid: !lobbyValidation.valid }"
+        >
+          <span class="validation-icon">{{ lobbyValidation.valid ? '✓' : '!' }}</span>
+          <div>
+            <p class="validation-message">{{ lobbyValidation.message }}</p>
+            <ul v-if="!lobbyValidation.valid && lobbyValidation.issues.length > 1" class="validation-issues">
+              <li v-for="issue in lobbyValidation.issues" :key="issue">{{ issue }}</li>
+            </ul>
+          </div>
+        </div>
+      </template>
+
+      <button
+        v-if="isHost"
+        class="btn-primary start-btn"
+        :disabled="!lobbyValidation.valid"
+        @click="startGame"
+      >
         Start Game
       </button>
     </template>
@@ -298,48 +309,85 @@ function playerLabel(p: Player) {
   font-size: 0.9rem;
 }
 
+.solo-notice {
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  border-left: 3px solid var(--accent);
+}
+
+.arrange-hint {
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 .teams {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .teams {
     grid-template-columns: 1fr;
   }
 }
 
-.team-panel h3 {
-  margin-bottom: 0.75rem;
-}
-
-.team-panel.red h3 { color: var(--red-team); }
-.team-panel.blue h3 { color: var(--blue-team); }
-
-.team-panel ul {
-  list-style: none;
-  margin-bottom: 0.75rem;
-}
-
-.player-row {
+.validation-banner {
   display: flex;
-  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  padding: 1rem 1.25rem;
+}
+
+.validation-banner.valid {
+  border-color: rgba(46, 204, 113, 0.4);
+  background: rgba(46, 204, 113, 0.08);
+}
+
+.validation-banner.invalid {
+  border-color: rgba(231, 76, 92, 0.35);
+  background: rgba(231, 76, 92, 0.08);
+}
+
+.validation-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  display: flex;
   align-items: center;
-  padding: 0.4rem 0;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.validation-banner.valid .validation-icon {
+  background: rgba(46, 204, 113, 0.2);
+  color: var(--success);
+}
+
+.validation-banner.invalid .validation-icon {
+  background: rgba(231, 76, 92, 0.2);
+  color: var(--error);
+}
+
+.validation-message {
   font-size: 0.9rem;
 }
 
-.ai-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+.validation-issues {
+  margin-top: 0.5rem;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
-.btn-small {
-  font-size: 0.75rem;
-  padding: 0.35rem 0.65rem;
+.validation-issues li {
+  margin-bottom: 0.2rem;
 }
 
 .start-btn {

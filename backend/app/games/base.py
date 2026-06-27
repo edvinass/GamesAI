@@ -31,3 +31,6 @@ class GamePlugin(ABC):
 
     def assign_lobby_roles(self, players: list[dict], settings: dict) -> list[dict]:
         return players
+
+    def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
+        return None

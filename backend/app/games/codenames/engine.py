@@ -78,6 +78,24 @@ class CodenamesEngine(GamePlugin):
 
         return players
 
+    def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
+        settings = self.validate_settings(settings)
+        if settings.get("solo_practice"):
+            humans = [p for p in players if not p.get("is_ai")]
+            if len(humans) != 1:
+                return "Solo practice requires exactly one human player"
+            return None
+
+        for team, label in (("red", "Red"), ("blue", "Blue")):
+            team_players = [p for p in players if p.get("team") == team]
+            spymasters = [p for p in team_players if p.get("role") == "spymaster"]
+            operatives = [p for p in team_players if p.get("role") == "operative"]
+            if len(spymasters) != 1:
+                return f"{label} team needs exactly one spymaster"
+            if len(operatives) < 1:
+                return f"{label} team needs at least one operative"
+        return None
+
     def create_initial_state(self, players: list[dict], settings: dict) -> dict:
         settings = self.validate_settings(settings)
         language = settings["language"]

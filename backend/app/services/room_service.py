@@ -194,6 +194,54 @@ class RoomService:
         await self.db.refresh(room, ["players"])
         return room
 
+    async def update_player(
+        self,
+        room_id: uuid.UUID,
+        host_id: uuid.UUID,
+        target_id: uuid.UUID,
+        *,
+        team: str | None = None,
+        role: str | None = None,
+    ) -> Room:
+        room = await self._load_room(room_id)
+        if not room:
+            raise ValueError("Room not found")
+        if room.host_player_id != host_id:
+            raise ValueError("Only host can rearrange teams")
+        if room.status != RoomStatus.LOBBY:
+            raise ValueError("Cannot rearrange teams after game started")
+
+        target = next((p for p in room.players if p.id == target_id), None)
+        if not target:
+            raise ValueError("Player not found")
+
+        if team is not None:
+            new_team = Team(team)
+            if target.team != new_team and target.role == Role.SPYMASTER:
+                existing = next(
+                    (
+                        p
+                        for p in room.players
+                        if p.id != target.id and p.team == new_team and p.role == Role.SPYMASTER
+                    ),
+                    None,
+                )
+                if existing:
+                    target.role = Role.OPERATIVE
+            target.team = new_team
+
+        if role is not None:
+            new_role = Role(role)
+            if new_role == Role.SPYMASTER:
+                for p in room.players:
+                    if p.id != target.id and p.team == target.team and p.role == Role.SPYMASTER:
+                        p.role = Role.OPERATIVE
+            target.role = new_role
+
+        await self.db.commit()
+        await self.db.refresh(room, ["players"])
+        return room
+
     async def start_game(self, room_id: uuid.UUID, host_id: uuid.UUID) -> tuple[Room, dict]:
         room = await self._load_room(room_id)
         if not room:
@@ -205,6 +253,10 @@ class RoomService:
 
         game = get_game(room.game_type)
         settings = game.validate_settings(room.settings)
+        players_data = [self._player_data(p) for p in room.players]
+        lobby_error = game.validate_lobby(players_data, settings)
+        if lobby_error:
+            raise ValueError(lobby_error)
 
         if settings.get("solo_practice"):
             await self._setup_solo_practice(room)

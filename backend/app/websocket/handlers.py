@@ -166,6 +166,19 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                     "room": room_to_dict(room),
                 })
 
+            elif action_type == "update_player":
+                room = await service.update_player(
+                    room_id,
+                    pid,
+                    uuid.UUID(data["player_id"]),
+                    team=data.get("team"),
+                    role=data.get("role"),
+                )
+                await manager.broadcast(str(room_id), {
+                    "type": "room_updated",
+                    "room": room_to_dict(room),
+                })
+
             elif action_type == "start_game":
                 room, state = await service.start_game(room_id, pid)
                 await manager.broadcast(str(room_id), {
