@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { GameState, Room } from '@/types'
 import TeamPanel from './TeamPanel.vue'
 import ClueInput from './ClueInput.vue'
@@ -52,6 +52,8 @@ const statusMessage = computed(() => {
 const redPlayers = computed(() => props.room.players.filter((p) => p.team === 'red'))
 const bluePlayers = computed(() => props.room.players.filter((p) => p.team === 'blue'))
 
+const isHost = computed(() => props.room.host_player_id === props.playerId)
+
 function guessCard(index: number) {
   if (!isMyTurn.value || props.gameState.phase !== 'guess') return
   emit('action', { type: 'guess_word', card_index: index })
@@ -65,9 +67,43 @@ function endTurn() {
   emit('action', { type: 'end_turn' })
 }
 
-function cardClass(card: { revealed: boolean; color?: string }) {
-  // Backend includes color only when this viewer may see it (all cards for spymaster).
-  return card.color ?? 'hidden'
+function startNewGame() {
+  emit('action', { type: 'start_game' })
+}
+
+function cardClasses(card: { revealed: boolean; color?: string }) {
+  // Backend includes color for revealed cards and for spymaster key view.
+  if (card.revealed) {
+    return ['revealed', card.color ?? 'hidden']
+  }
+  if (card.color) {
+    return ['key', card.color]
+  }
+  return ['hidden']
+}
+
+const poppingCards = ref<Set<number>>(new Set())
+
+watch(
+  () => props.gameState.cards.map((c) => ({ index: c.index, revealed: c.revealed })),
+  (cards, prev) => {
+    if (!prev) return
+    for (const card of cards) {
+      const wasRevealed = prev.find((c) => c.index === card.index)?.revealed
+      if (card.revealed && !wasRevealed) {
+        poppingCards.value = new Set(poppingCards.value).add(card.index)
+        setTimeout(() => {
+          const next = new Set(poppingCards.value)
+          next.delete(card.index)
+          poppingCards.value = next
+        }, 500)
+      }
+    }
+  },
+)
+
+function isPopping(index: number) {
+  return poppingCards.value.has(index)
 }
 </script>
 
@@ -77,6 +113,10 @@ function cardClass(card: { revealed: boolean; color?: string }) {
       <h2>{{ gameState.winner.toUpperCase() }} team wins!</h2>
       <p v-if="gameState.win_reason === 'assassin'">Assassin card was revealed.</p>
       <p v-else>All team words revealed.</p>
+      <button v-if="isHost" class="btn-primary new-game-btn" @click="startNewGame">
+        New Game
+      </button>
+      <p v-else class="waiting-host">Waiting for host to start a new game...</p>
     </div>
 
     <div class="status-bar">
@@ -106,7 +146,7 @@ function cardClass(card: { revealed: boolean; color?: string }) {
           <button
             v-for="card in gameState.cards"
             :key="card.index"
-            :class="['card-btn', cardClass(card)]"
+            :class="['card-btn', ...cardClasses(card), { pop: isPopping(card.index) }]"
             :disabled="!isMyTurn || gameState.phase !== 'guess' || card.revealed"
             @click="guessCard(card.index)"
           >
@@ -142,6 +182,16 @@ function cardClass(card: { revealed: boolean; color?: string }) {
 .game-over h2 {
   font-size: 1.5rem;
   margin-bottom: 0.5rem;
+}
+
+.new-game-btn {
+  margin-top: 1rem;
+}
+
+.waiting-host {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
 }
 
 .status-bar {
@@ -224,6 +274,7 @@ function cardClass(card: { revealed: boolean; color?: string }) {
   color: #1a1a1a;
   word-break: break-word;
   line-height: 1.2;
+  position: relative;
 }
 
 .card-btn.hidden {
@@ -231,35 +282,100 @@ function cardClass(card: { revealed: boolean; color?: string }) {
   color: #1a1a1a;
 }
 
-.card-btn.red {
-  background: var(--red-team);
-  color: white;
+/* Spymaster key view — unrevealed cards show a muted color hint */
+.card-btn.key {
+  opacity: 1;
+  border-style: dashed;
+}
+
+.card-btn.key.red {
+  background: color-mix(in srgb, var(--red-team) 35%, #c4a35a);
+  color: #1a1a1a;
   border-color: var(--red-team);
 }
 
-.card-btn.blue {
-  background: var(--blue-team);
-  color: white;
+.card-btn.key.blue {
+  background: color-mix(in srgb, var(--blue-team) 35%, #c4a35a);
+  color: #1a1a1a;
   border-color: var(--blue-team);
 }
 
-.card-btn.neutral {
-  background: #c4a35a;
+.card-btn.key.neutral {
+  background: #b8956a;
   color: #1a1a1a;
-  border-color: #a08040;
+  border-color: #8a7040;
 }
 
-.card-btn.assassin {
+.card-btn.key.assassin {
+  background: color-mix(in srgb, var(--assassin) 40%, #c4a35a);
+  color: #1a1a1a;
+  border-color: #555;
+}
+
+/* Revealed cards — solid color, full opacity even when disabled */
+.card-btn.revealed {
+  opacity: 1;
+  cursor: default;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+
+.card-btn.revealed::after {
+  content: '✓';
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  font-size: 0.65rem;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.card-btn.revealed.red {
+  background: var(--red-team);
+  color: white;
+  border-color: var(--red-team);
+  border-style: solid;
+}
+
+.card-btn.revealed.blue {
+  background: var(--blue-team);
+  color: white;
+  border-color: var(--blue-team);
+  border-style: solid;
+}
+
+.card-btn.revealed.neutral {
+  background: #9a8455;
+  color: #f5f0e6;
+  border-color: #7a6840;
+  border-style: solid;
+}
+
+.card-btn.revealed.assassin {
   background: var(--assassin);
   color: white;
-  border-color: #333;
+  border-color: #555;
+  border-style: solid;
 }
 
-.card-btn:disabled:not(.red):not(.blue):not(.neutral):not(.assassin) {
-  cursor: default;
+.card-btn.revealed.hidden {
+  background: #9a8455;
+  color: #f5f0e6;
+  border-color: #7a6840;
+  border-style: solid;
 }
 
-.card-btn:not(:disabled):hover {
+.card-btn.pop {
+  animation: card-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 1;
+}
+
+@keyframes card-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+
+.card-btn:not(:disabled):not(.revealed):hover {
   transform: scale(1.03);
   box-shadow: var(--shadow);
 }

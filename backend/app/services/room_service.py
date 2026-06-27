@@ -249,34 +249,39 @@ class RoomService:
             raise ValueError("Room not found")
         if room.host_player_id != host_id:
             raise ValueError("Only host can start the game")
-        if room.status != RoomStatus.LOBBY:
-            raise ValueError("Game already started")
+        if room.status == RoomStatus.PLAYING:
+            raise ValueError("Game already in progress")
 
         game = get_game(room.game_type)
         settings = game.validate_settings(room.settings)
         players_data = [self._player_data(p) for p in room.players]
-        lobby_error = game.validate_lobby(players_data, settings)
-        if lobby_error:
-            raise ValueError(lobby_error)
 
-        if settings.get("solo_practice"):
-            await self._setup_solo_practice(room)
-            await self.db.refresh(room, ["players"])
+        if room.status == RoomStatus.LOBBY:
+            lobby_error = game.validate_lobby(players_data, settings)
+            if lobby_error:
+                raise ValueError(lobby_error)
 
-        players_data = [self._player_data(p) for p in room.players]
-        players_data = game.assign_lobby_roles(players_data, settings)
+            if settings.get("solo_practice"):
+                await self._setup_solo_practice(room)
+                await self.db.refresh(room, ["players"])
 
-        for p in room.players:
-            pdata = next(d for d in players_data if d["id"] == str(p.id))
-            if pdata.get("team"):
-                p.team = Team(pdata["team"])
-            if pdata.get("role"):
-                p.role = Role(pdata["role"])
+            players_data = [self._player_data(p) for p in room.players]
+            players_data = game.assign_lobby_roles(players_data, settings)
+
+            for p in room.players:
+                pdata = next(d for d in players_data if d["id"] == str(p.id))
+                if pdata.get("team"):
+                    p.team = Team(pdata["team"])
+                if pdata.get("role"):
+                    p.role = Role(pdata["role"])
 
         state = game.create_initial_state(players_data, settings)
-        game_state = GameState(room_id=room.id, version=1, state=state)
+        if room.game_state:
+            room.game_state.state = state
+            room.game_state.version = 1
+        else:
+            self.db.add(GameState(room_id=room.id, version=1, state=state))
         room.status = RoomStatus.PLAYING
-        self.db.add(game_state)
         await self.db.commit()
         await self.db.refresh(room, ["players", "game_state"])
         return room, state
@@ -362,6 +367,12 @@ class RoomService:
         await process_ai_turns(room_id, broadcast_fn)
 
 
+AI_CLUE_THINK_PAUSE_SEC = 2.0
+AI_GUESS_THINK_PAUSE_SEC = 1.5
+AI_REVEAL_PAUSE_SEC = 1.8
+AI_TURN_PAUSE_SEC = 0.8
+
+
 async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
     lock = _get_ai_lock(str(room_id))
     if lock.locked():
@@ -393,6 +404,7 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
 
                 try:
                     if state["phase"] == "clue":
+                        await asyncio.sleep(AI_CLUE_THINK_PAUSE_SEC)
                         clue, number = await ai_spymaster_clue(state, actor.team.value)
                         action = {"type": "submit_clue", "clue_word": clue, "clue_number": number}
                         try:
@@ -406,18 +418,20 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                                 room_id, actor.id, action, allow_ai=True
                             )
                         await broadcast_fn(room, events)
-                        await asyncio.sleep(0.3)
+                        await asyncio.sleep(AI_TURN_PAUSE_SEC)
                         continue
 
+                    await asyncio.sleep(AI_GUESS_THINK_PAUSE_SEC)
                     guesses = await ai_operative_guesses(
                         state, actor.team.value, state.get("guesses_remaining", 1)
                     )
                     if not guesses:
+                        await asyncio.sleep(AI_TURN_PAUSE_SEC)
                         room, state, events = await service.apply_game_action(
                             room_id, actor.id, {"type": "end_turn"}, allow_ai=True
                         )
                         await broadcast_fn(room, events)
-                        await asyncio.sleep(0.3)
+                        await asyncio.sleep(AI_TURN_PAUSE_SEC)
                         continue
 
                     for idx in guesses:
@@ -438,8 +452,9 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                             return
                         if state["phase"] == "clue":
                             break
+                        await asyncio.sleep(AI_REVEAL_PAUSE_SEC)
 
-                    await asyncio.sleep(0.3)
+                    await asyncio.sleep(AI_TURN_PAUSE_SEC)
                     continue
 
                 except Exception as e:
