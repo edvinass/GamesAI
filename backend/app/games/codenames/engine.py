@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.games.base import GamePlugin
+from app.games.codenames.clue_validation import validate_clue_word
 
 WORD_LIST_DIR = Path(__file__).parent / "word_lists"
 
@@ -163,12 +164,9 @@ class CodenamesEngine(GamePlugin):
             history[-1]["guesses"].append({"index": index, "word": word, "color": color})
 
     def _validate_clue(self, state: dict, clue_word: str, clue_number: int) -> None:
-        clue_word = clue_word.strip().upper()
-        if not clue_word or len(clue_word.split()) > 1:
-            raise ValueError("Clue must be a single word")
         board_words = {c["word"].upper() for c in state["cards"]}
-        if clue_word in board_words:
-            raise ValueError("Clue cannot match a word on the board")
+        if error := validate_clue_word(clue_word, board_words):
+            raise ValueError(error)
         if clue_number < 0:
             raise ValueError("Clue number must be non-negative")
 

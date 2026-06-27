@@ -148,6 +148,7 @@ function isPopping(index: number) {
       <div class="center">
         <ClueInput
           v-if="isMyTurn && gameState.phase === 'clue'"
+          :board-words="gameState.cards.map((c) => c.word)"
           @submit="submitClue"
         />
 

@@ -21,7 +21,7 @@ export const codenamesRules: GameRules = {
     },
     {
       heading: 'Spymaster',
-      body: 'On your team\'s turn, the Spymaster gives a one-word clue and a number (e.g. "OCEAN 3"). The number is how many board words relate to the clue. The clue must be a single word and cannot match any word on the board.',
+      body: 'On your team\'s turn, the Spymaster gives a one-word clue and a number (e.g. "OCEAN 3"). The number is how many board words relate to the clue. The clue must be a single word and cannot match or contain any word on the board — including plurals and similar forms (e.g. if BUG is on the board, BUGS and BUGGY are not allowed).',
     },
     {
       heading: 'Operatives',

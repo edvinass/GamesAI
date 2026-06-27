@@ -5,6 +5,11 @@ import re
 import string
 from typing import Any
 
+from app.games.codenames.clue_validation import (
+    board_words_upper,
+    conflicting_board_word,
+    validate_clue_word,
+)
 from app.services.deepseek import deepseek_chat
 
 logger = logging.getLogger(__name__)
@@ -66,23 +71,6 @@ def _revealed_words(cards: list[dict]) -> list[str]:
     return [c["word"] for c in cards if c["revealed"]]
 
 
-def _board_words_upper(cards: list[dict]) -> set[str]:
-    return {c["word"].upper() for c in cards}
-
-
-def _clue_conflicts_with_board(clue: str, board_words: set[str]) -> bool:
-    if clue in board_words:
-        return True
-    for word in board_words:
-        if len(clue) >= 3 and (clue in word or word in clue):
-            return True
-    return False
-
-
-def _is_valid_clue_word(clue: str, board_words: set[str]) -> bool:
-    return bool(clue) and len(clue.split()) == 1 and not _clue_conflicts_with_board(clue, board_words)
-
-
 def _game_situation(state: dict, team: str) -> tuple[int, int, str]:
     opponent = _opponent_team(team)
     team_remaining = state["red_remaining"] if team == "red" else state["blue_remaining"]
@@ -135,7 +123,7 @@ def _validate_spymaster_response(
     avoid_words: list[str],
 ) -> tuple[str, int, list[str]] | None:
     clue = str(data.get("clue", "")).strip().upper()
-    if not _is_valid_clue_word(clue, board_words):
+    if validate_clue_word(clue, board_words) is not None:
         return None
 
     try:
@@ -405,14 +393,14 @@ Use card index values 0-24. Only unrevealed cards. Confidence is 0.0-1.0."""
 
 
 def _random_generic_clue(state: dict) -> str:
-    board_words = _board_words_upper(state["cards"])
-    options = [word for word in FALLBACK_CLUES if not _clue_conflicts_with_board(word, board_words)]
+    board_words = board_words_upper(state["cards"])
+    options = [word for word in FALLBACK_CLUES if conflicting_board_word(word, board_words) is None]
     if options:
         return random.choice(options)
 
     while True:
         word = "".join(random.choices(string.ascii_uppercase, k=5))
-        if not _clue_conflicts_with_board(word, board_words):
+        if conflicting_board_word(word, board_words) is None:
             return word
 
 
@@ -471,7 +459,7 @@ async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
     if not targets:
         return _random_generic_clue(state), 1, []
 
-    board_words = _board_words_upper(state["cards"])
+    board_words = board_words_upper(state["cards"])
     avoid = _avoid_clue_words(state["cards"], team)
     other_board_words = [c["word"] for c in state["cards"] if c["word"] not in targets]
 
@@ -505,7 +493,7 @@ Respond ONLY with JSON:
 async def ai_spymaster_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
     cards = state["cards"]
     targets = _unrevealed_team_words(cards, team)
-    board_words = _board_words_upper(cards)
+    board_words = board_words_upper(cards)
     avoid = _avoid_clue_words(cards, team)
 
     if not targets:
