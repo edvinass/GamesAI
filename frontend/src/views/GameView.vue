@@ -84,7 +84,7 @@ function sendAction(data: Record<string, unknown>) {
       v-if="gameState && room"
       :game-state="gameState"
       :room="room"
-      :player-id="playerId"
+      :player-id="playerStore.playerId"
       @action="sendAction"
     />
 
