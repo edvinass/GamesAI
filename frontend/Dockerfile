@@ -1,12 +1,20 @@
-FROM node:22-alpine
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci
 
 COPY . .
+RUN npm run build
 
-EXPOSE 5173
+FROM nginx:alpine
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY docker-entrypoint.sh /custom-entrypoint.sh
+RUN chmod +x /custom-entrypoint.sh
+
+EXPOSE 8080
+
+ENTRYPOINT ["/custom-entrypoint.sh"]

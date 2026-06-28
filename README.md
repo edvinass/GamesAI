@@ -71,6 +71,53 @@ The Vite dev server proxies `/api` and `/ws` to `http://localhost:8000`. Update 
 | `SECRET_KEY` | Session signing key |
 | `CORS_ORIGINS` | Comma-separated allowed origins |
 
+## Deploy to Railway
+
+GamesAI deploys as **three Railway services**: Postgres, backend, and frontend. The frontend nginx container serves the Vue app and proxies `/api` and `/ws` to the backend over Railway private networking.
+
+### 1. Create the project
+
+1. Create a new Railway project from this repo.
+2. Add a **Postgres** plugin.
+3. Add a **backend** service with Root Directory set to `backend`.
+4. Add a **frontend** service with Root Directory set to `frontend`.
+
+Each service picks up its [`railway.toml`](backend/railway.toml) for health checks.
+
+### 2. Configure environment variables
+
+**backend service**
+
+| Variable | Value |
+|----------|-------|
+| `DATABASE_URL` | Reference from Postgres plugin |
+| `SECRET_KEY` | Strong random value |
+| `DEEPSEEK_API_KEY` | Your DeepSeek API key |
+| `CORS_ORIGINS` | Frontend public URL |
+
+**frontend service**
+
+| Variable | Value |
+|----------|-------|
+| `BACKEND_URL` | `http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}` |
+
+Replace `backend` in the reference with your backend service name if different.
+
+### 3. Publish the frontend URL
+
+Generate a public domain for the **frontend** service. That URL is what players use to create and join rooms.
+
+The backend does not need a public domain for normal gameplay (nginx proxies API and WebSocket traffic).
+
+### 4. Verify the deployment
+
+- `https://<frontend>/api/health` returns `{"status":"ok"}`
+- `https://<frontend>/` loads the app
+- Creating a room opens a WebSocket at `wss://<frontend>/ws/rooms/...`
+- Deep links like `/room/<id>` load correctly
+
+See [`.env.example`](.env.example) for the full variable reference.
+
 ## Architecture
 
 - **Frontend:** Vue 3 + Vite + Pinia + Vue Router
