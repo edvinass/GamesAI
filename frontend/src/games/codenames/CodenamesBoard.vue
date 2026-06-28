@@ -120,7 +120,7 @@ watch(
           const next = new Set(poppingCards.value)
           next.delete(card.index)
           poppingCards.value = next
-        }, 500)
+        }, 650)
       }
     }
   },
@@ -540,11 +540,25 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 .card-btn.revealed::after {
   content: '✓';
   position: absolute;
-  top: 3px;
-  right: 5px;
-  font-size: 0.6rem;
+  top: 2px;
+  right: 4px;
+  font-size: clamp(0.9rem, 2.2vw, 1.15rem);
+  font-weight: 800;
   line-height: 1;
-  opacity: 0.85;
+  opacity: 1;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  animation: tick-in 0.4s var(--ease-bounce) 0.08s backwards;
+}
+
+@keyframes tick-in {
+  from {
+    opacity: 0;
+    transform: scale(0.2) rotate(-25deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
 }
 
 .card-btn.revealed.red {
@@ -582,15 +596,29 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
   border-style: solid;
 }
 
-.card-btn.pop {
-  animation: card-pop 0.45s var(--ease-bounce);
+.card-btn.revealed.pop {
+  animation: card-pop 0.6s var(--ease-bounce);
   z-index: 1;
 }
 
 @keyframes card-pop {
-  0% { transform: scale(1); }
-  45% { transform: scale(1.12); }
-  100% { transform: scale(1); }
+  0% {
+    transform: scale(1);
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.2);
+  }
+  30% {
+    transform: scale(1.24);
+    box-shadow:
+      0 0 28px rgba(255, 255, 255, 0.55),
+      inset 0 0 0 3px rgba(255, 255, 255, 0.45);
+  }
+  55% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.2);
+  }
 }
 
 .card-btn.can-guess:hover {

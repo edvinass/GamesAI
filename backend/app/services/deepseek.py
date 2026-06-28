@@ -41,7 +41,7 @@ async def deepseek_chat(
             payload["thinking"] = {"type": "disabled"}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
-        payload["max_tokens"] = 2048
+        payload["max_tokens"] = 1024
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(url, headers=headers, json=payload)
@@ -50,8 +50,8 @@ async def deepseek_chat(
 
     choice = data["choices"][0]
     content = (choice["message"].get("content") or "").strip()
+    finish_reason = choice.get("finish_reason", "unknown")
     if not content:
-        finish_reason = choice.get("finish_reason", "unknown")
         logger.warning(
             "DeepSeek returned empty content (finish_reason=%s, json_mode=%s, thinking=%s)",
             finish_reason,
@@ -59,4 +59,11 @@ async def deepseek_chat(
             use_thinking,
         )
         raise RuntimeError(f"DeepSeek returned empty content (finish_reason={finish_reason})")
+    if finish_reason == "length":
+        logger.warning(
+            "DeepSeek response truncated (json_mode=%s, content_len=%s)",
+            json_mode,
+            len(content),
+        )
+        raise RuntimeError("DeepSeek response truncated (finish_reason=length)")
     return content

@@ -200,8 +200,8 @@ Rules:
 - if unresolved targets remain from a prior clue, consider a follow-up clue for those words
 - if any risky_words are opponent, neutral, or assassin words, pick a different clue
 
-Think step by step, then respond ONLY with JSON:
-{{"reasoning": "brief explanation", "clue": "WORD", "number": N, "targets": ["TARGET1"], "risky_words": ["MAYBE1"]}}"""
+Respond ONLY with compact JSON (no extra keys):
+{{"clue": "WORD", "number": N, "targets": ["TARGET1"], "risky_words": ["MAYBE1"]}}"""
 
 
 def _format_clue_entry(entry: dict, *, current: bool = False) -> str:
@@ -387,8 +387,8 @@ Pick up to {limit} unrevealed card indices related to "{clue_word}", ordered by 
 Stop early if unsure — guessing an opponent, neutral, or assassin word ends your turn.
 You may guess at most {clue_number} cards unless very confident about a bonus guess (confidence >= 0.75).
 
-Think step by step, then respond ONLY with JSON:
-{{"reasoning": "brief explanation", "guesses": [{{"index": 0, "confidence": 0.9}}, ...]}}
+Respond ONLY with compact JSON (no extra keys):
+{{"guesses": [{{"index": 0, "confidence": 0.9}}, ...]}}
 Use card index values 0-24. Only unrevealed cards. Confidence is 0.0-1.0."""
 
 
