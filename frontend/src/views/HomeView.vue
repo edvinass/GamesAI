@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePlayerStore } from '@/stores/player'
 import { useRoom } from '@/composables/useRoom'
 import GameRulesModal from '@/components/GameRulesModal.vue'
+import { getGameMeta } from '@/games/gameMeta'
 
 const router = useRouter()
 const playerStore = usePlayerStore()
@@ -17,6 +18,8 @@ const games = ref<Array<{ id: string; name: string; description: string }>>([
 const joinRoomId = ref('')
 const mode = ref<'create' | 'join'>('create')
 const showRules = ref(false)
+
+const selectedGameMeta = computed(() => getGameMeta(gameType.value))
 
 onMounted(async () => {
   try {
@@ -90,6 +93,7 @@ function switchToJoin() {
 
         <div class="feature-chips stagger-in">
           <span class="chip">🎯 Codenames</span>
+          <span class="chip">🕵️ Spyfall</span>
           <span class="chip">🤖 AI players</span>
           <span class="chip">🔗 Share a link</span>
         </div>
@@ -97,8 +101,8 @@ function switchToJoin() {
         <ol class="steps stagger-in">
           <li><span class="step-num">1</span> Pick a nickname</li>
           <li><span class="step-num">2</span> Create or join a room</li>
-          <li><span class="step-num">3</span> Voice chat with friends</li>
-          <li><span class="step-num">4</span> Play!</li>
+          <li><span class="step-num">3</span> Skim the rules if you're new</li>
+          <li><span class="step-num">4</span> Play — voice chat optional</li>
         </ol>
       </section>
 
@@ -146,6 +150,7 @@ function switchToJoin() {
                   Rules
                 </button>
               </div>
+              <p v-if="selectedGameMeta.description" class="game-blurb">{{ selectedGameMeta.description }}</p>
             </label>
             <label v-show="mode === 'join'">
               Room ID
@@ -428,6 +433,13 @@ label {
   color: var(--text-muted);
   font-size: 0.85rem;
   margin: -0.25rem 0 0;
+}
+
+.game-blurb {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0.35rem 0 0;
+  line-height: 1.45;
 }
 
 .mode-btn:disabled {

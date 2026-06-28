@@ -116,6 +116,7 @@ function backToLobby() {
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"
+      @show-rules="showRules = true"
     />
 
     <div v-else class="container-wide loading">

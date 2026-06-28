@@ -2,26 +2,61 @@ import type { GameRules } from '../codenames/rules'
 
 export const spyfallRules: GameRules = {
   title: 'Spyfall',
+  subtitle: 'Find the spy hiding at a secret location',
+  quickStart: [
+    'When the round starts, read your assignment — Spy or Resident.',
+    'Residents share one location and each get a role; the Spy sees only a list of possible locations.',
+    'Take turns asking one other player a question; they must answer in the chat.',
+    'Accuse someone to start a vote, or (as Spy) guess the location to end the round.',
+  ],
   sections: [
     {
-      heading: 'Overview',
-      body: 'Most players share a secret location and role. One player is the Spy and does not know the location. Everyone asks questions to figure out who the Spy is — while the Spy tries to guess the location.',
+      heading: 'Your assignment',
+      body: 'At the start of each round you are either the Spy or a Resident. This app shows your assignment clearly before play begins.',
+      bullets: [
+        'Resident: you know the location and your role. You are not the Spy.',
+        'Spy: you do not know the location. Use the location list on the right to reference possibilities.',
+      ],
     },
     {
-      heading: 'Questioning',
-      body: 'Players take turns asking one other player a question. The target must answer in character. Use questions to probe who really knows the location without giving away too much yourself.',
+      heading: 'Questioning phase',
+      body: 'Players take turns. On your turn, pick one other player and ask a single question. They must reply in character.',
+      bullets: [
+        'Residents: ask questions that test whether others know the location — without naming it yourself.',
+        'Spy: ask vague questions that could fit many locations. Bluff if you need to.',
+        'All Q&A appears in the public conversation log.',
+      ],
     },
     {
       heading: 'Accusation & voting',
-      body: 'Any player can call for a vote during questioning. Everyone votes for who they think is the Spy. A majority vote for the Spy means the residents win; otherwise the Spy wins.',
+      body: 'Any player can call an accusation during questioning. Everyone then votes once for who they think is the Spy.',
+      bullets: [
+        'Majority votes for the Spy → Residents win.',
+        'Wrong target or a tie → Spy wins the vote.',
+        'You may abstain, but that counts as your vote.',
+      ],
     },
     {
-      heading: 'Spy guess',
-      body: 'The Spy can guess the location at any time during questioning. A correct guess wins for the Spy; a wrong guess wins for the residents.',
+      heading: 'Spy location guess',
+      body: 'The Spy can guess the location at any time during questioning — from the action panel or by selecting from the location list.',
+      bullets: [
+        'Correct guess → Spy wins immediately.',
+        'Wrong guess → Residents win immediately.',
+      ],
     },
     {
       heading: 'Timer',
-      body: 'When the round timer runs out, voting begins automatically. Use your time wisely!',
+      body: 'If a round timer is enabled, questioning ends automatically when time runs out and voting begins.',
     },
+    {
+      heading: 'AI & solo practice',
+      body: 'Need a full table? The host can add AI players in the lobby, or enable solo practice for a 3-player game (you + 2 AI).',
+    },
+  ],
+  tips: [
+    'Read your assignment carefully before dismissing the reveal screen.',
+    'Residents: answer naturally for your role — overly perfect answers can make you look suspicious.',
+    'Spy: keep the location list open and narrow down based on others\' answers.',
+    'Voice chat is optional — all questions and answers happen in the app.',
   ],
 }

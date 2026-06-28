@@ -10,6 +10,7 @@ import LobbyTeamPanel from '@/components/lobby/LobbyTeamPanel.vue'
 import SpyfallLobby from '@/games/spyfall/SpyfallLobby.vue'
 import { validateLobby as validateCodenamesLobby } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
+import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
 const route = useRoute()
@@ -64,6 +65,8 @@ const isHost = computed(() => room.value?.host_player_id === playerStore.playerI
 
 const isSpyfall = computed(() => room.value?.game_type === 'spyfall')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
+
+const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
 
 const lobbyValidation = computed(() => {
   if (!room.value) return { valid: false, message: '', issues: [] }
@@ -141,7 +144,7 @@ async function copyUrl() {
         <div class="header-title">
           <h1>Lobby</h1>
           <div class="meta-row">
-            <span class="game-tag">{{ room.game_type }}</span>
+            <span class="game-tag">{{ gameMeta.emoji }} {{ gameMeta.name }}</span>
             <span class="player-count">{{ room.players.length }} players</span>
             <span class="connection" :class="{ online: connected }">
               <span class="connection-dot" />
@@ -154,6 +157,8 @@ async function copyUrl() {
           <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
         </div>
       </header>
+
+      <p class="lobby-game-hint">{{ gameMeta.lobbyHint }}</p>
 
       <div class="toolbar card">
         <div class="share-block">
@@ -290,6 +295,13 @@ async function copyUrl() {
 .lobby-header h1 {
   font-size: 2rem;
   font-weight: 700;
+}
+
+.lobby-game-hint {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin: -0.5rem 0 1rem;
+  line-height: 1.5;
 }
 
 .meta-row {

@@ -1,39 +1,62 @@
 export interface GameRulesSection {
   heading: string
   body: string
+  bullets?: string[]
 }
 
 export interface GameRules {
   title: string
+  subtitle?: string
+  quickStart?: string[]
   sections: GameRulesSection[]
+  tips?: string[]
 }
 
 export const codenamesRules: GameRules = {
   title: 'Codenames',
+  subtitle: 'Team word-guessing on a shared board',
+  quickStart: [
+    'Split into red and blue: one Spymaster and at least one Operative per team.',
+    'Spymasters see all word colors; Operatives only see words until they are revealed.',
+    'On your team\'s turn, the Spymaster gives a one-word clue and a number.',
+    'Operatives guess words; wrong guesses end your turn immediately.',
+  ],
   sections: [
     {
-      heading: 'Overview',
-      body: 'Two teams compete to find all of their secret words on a 5×5 board. One player per team is the Spymaster; everyone else is an Operative. Spymasters know which words belong to which team — operatives do not.',
+      heading: 'Board setup',
+      body: 'The board has 25 words. Each team has words to find — 9 for the team that starts, 8 for the other. There are also neutral words and one black Assassin card.',
     },
     {
-      heading: 'Setup',
-      body: 'Each team has 8 words to find (9 for the team that goes first). There are also neutral words and one black Assassin card. Teams alternate turns until one team finds all its words or someone hits the Assassin.',
+      heading: 'Spymaster clues',
+      body: 'Give a single-word clue and a number (how many unrevealed words relate to it). Examples: OCEAN 3, FRUIT 2.',
+      bullets: [
+        'Clue must be one word only — no proper names or made-up words.',
+        'Clue cannot match or closely resemble any word still on the board (including plurals and suffixes like BUG → BUGS).',
+        'The app validates clues and rejects invalid ones.',
+      ],
     },
     {
-      heading: 'Spymaster',
-      body: 'On your team\'s turn, the Spymaster gives a one-word clue and a number (e.g. "OCEAN 3"). The number is how many board words relate to the clue. The clue must be a single word and cannot match or contain any word on the board — including plurals and similar forms (e.g. if BUG is on the board, BUGS and BUGGY are not allowed).',
-    },
-    {
-      heading: 'Operatives',
-      body: 'Operatives discuss and tap words they think match the clue. You may make one extra guess beyond the number given. After each guess, the card is revealed — if it is your team\'s color, you may keep guessing; if it is wrong, your turn ends immediately.',
-    },
-    {
-      heading: 'Ending a turn',
-      body: 'Operatives can stop guessing at any time by ending the turn, even if they have guesses remaining. When guesses run out or a wrong card is revealed, play passes to the other team.',
+      heading: 'Operative guesses',
+      body: 'Tap words you think match the clue. Your team may guess one extra word beyond the number given.',
+      bullets: [
+        'Correct team color: you may keep guessing.',
+        'Wrong color or neutral: your turn ends.',
+        'Assassin: your team loses instantly.',
+        'You can end the turn early at any time.',
+      ],
     },
     {
       heading: 'Winning',
-      body: 'Find all of your team\'s words to win. If any team reveals the Assassin, they lose instantly and the other team wins.',
+      body: 'Reveal all of your team\'s words to win. Hit the Assassin and you lose on the spot.',
     },
+    {
+      heading: 'AI & solo practice',
+      body: 'The host can add AI players to empty slots, or enable solo practice to play as the red Operative against AI teammates.',
+    },
+  ],
+  tips: [
+    'Use voice chat to discuss guesses — the app handles clues and reveals.',
+    'Spymasters: track which clues already led to wrong guesses before giving a new one.',
+    'Operatives: say your reasoning out loud so teammates can agree before you tap.',
   ],
 }

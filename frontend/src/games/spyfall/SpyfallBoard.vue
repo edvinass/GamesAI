@@ -10,6 +10,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   action: [data: Record<string, unknown>]
+  showRules: []
 }>()
 
 const questionText = ref('')
@@ -122,6 +123,27 @@ const statusMessage = computed(() => {
   if (isMyTurnToAsk.value) return 'Your turn — ask a question'
   const actor = currentActor.value
   return actor ? `Waiting for ${actor.nickname}` : 'Waiting…'
+})
+
+const phaseHint = computed(() => {
+  if (isGameOver.value) return ''
+  if (props.gameState.phase === 'voting') {
+    return 'Vote for who you think is the Spy. Majority must agree to catch them.'
+  }
+  if (isMyTurnToAnswer.value) {
+    return isSpy.value
+      ? 'Bluff with a vague answer — don\'t reveal that you don\'t know the location.'
+      : 'Answer in character for your role. Don\'t say the location name.'
+  }
+  if (isMyTurnToAsk.value) {
+    return isSpy.value
+      ? 'Ask something vague that fits many locations, or pick up on what others have said.'
+      : 'Ask a question that tests whether they really belong here.'
+  }
+  if (isSpy.value) {
+    return 'Watch the conversation and use the location list when you\'re ready to guess.'
+  }
+  return 'Listen for vague or inconsistent answers — then call an accusation when you\'re ready.'
 })
 
 const winMessage = computed(() => {
@@ -273,6 +295,9 @@ watch(
             <button type="button" class="btn-primary role-reveal-btn" @click="dismissRoleReveal">
               I'm ready — start playing
             </button>
+            <button type="button" class="btn-secondary role-rules-btn" @click="emit('showRules')">
+              View full rules
+            </button>
           </div>
         </div>
       </Transition>
@@ -315,6 +340,7 @@ watch(
             <span v-if="isAiTurn" class="ai-icon">🤖</span>
             {{ statusMessage }}
           </p>
+          <p v-if="phaseHint" class="phase-hint">{{ phaseHint }}</p>
           <div v-if="gameState.pending_question" class="pending-q card-inner">
             <p class="q-label">Pending question</p>
             <p>
@@ -581,6 +607,23 @@ watch(
   width: 100%;
   font-size: 1rem;
   padding: 0.85rem;
+}
+
+.role-rules-btn {
+  width: 100%;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.phase-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface-elevated);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--accent);
 }
 
 .role-reveal-enter-active {
