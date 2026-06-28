@@ -51,6 +51,9 @@ watch(lastMessage, (msg) => {
   if (!msg) return
   if (msg.room) room.value = msg.room
   if (msg.game_state !== undefined) gameState.value = msg.game_state
+  if (msg.type === 'game_started' && msg.room) {
+    room.value = msg.room
+  }
   if (msg.type === 'returned_to_lobby' && msg.room) {
     router.push(`/room/${roomId.value}`)
   }

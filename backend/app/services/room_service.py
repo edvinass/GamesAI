@@ -303,27 +303,26 @@ class RoomService:
         settings = game.validate_settings(room.settings)
         players_data = [self._player_data(p) for p in room.players]
 
-        if room.status == RoomStatus.LOBBY:
-            lobby_error = game.validate_lobby(players_data, settings)
-            if lobby_error:
-                raise ValueError(lobby_error)
+        lobby_error = game.validate_lobby(players_data, settings)
+        if lobby_error:
+            raise ValueError(lobby_error)
 
-            if settings.get("solo_practice"):
-                if room.game_type == "codenames":
-                    await self._setup_solo_practice(room)
-                elif room.game_type == "spyfall":
-                    await self._setup_spyfall_solo(room)
-                await self.db.refresh(room, ["players"])
+        if settings.get("solo_practice"):
+            if room.game_type == "codenames":
+                await self._setup_solo_practice(room)
+            elif room.game_type == "spyfall":
+                await self._setup_spyfall_solo(room)
+            await self.db.refresh(room, ["players"])
 
-            players_data = [self._player_data(p) for p in room.players]
-            players_data = game.assign_lobby_roles(players_data, settings)
+        players_data = [self._player_data(p) for p in room.players]
+        players_data = game.assign_lobby_roles(players_data, settings)
 
-            for p in room.players:
-                pdata = next(d for d in players_data if d["id"] == str(p.id))
-                if pdata.get("team"):
-                    p.team = Team(pdata["team"])
-                if pdata.get("role"):
-                    p.role = Role(pdata["role"])
+        for p in room.players:
+            pdata = next(d for d in players_data if d["id"] == str(p.id))
+            if pdata.get("team"):
+                p.team = Team(pdata["team"])
+            if pdata.get("role"):
+                p.role = Role(pdata["role"])
 
         state = game.create_initial_state(players_data, settings)
         if room.game_state:

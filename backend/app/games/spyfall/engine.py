@@ -1,5 +1,6 @@
 import json
 import random
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,7 @@ class SpyfallEngine(GamePlugin):
         return {
             "players": players,
             "settings": settings,
+            "round_id": str(uuid.uuid4()),
             "phase": "questioning",
             "location": {"name": location["name"], "roles": location["roles"]},
             "spy_id": spy_id,
@@ -111,7 +113,7 @@ class SpyfallEngine(GamePlugin):
         state["current_turn_index"] = (state["current_turn_index"] + 1) % len(state["turn_order"])
 
     def _is_spy(self, state: dict, player_id: str) -> bool:
-        return state["spy_id"] == player_id
+        return str(state["spy_id"]) == str(player_id)
 
     def _check_timer_expired(self, state: dict) -> bool:
         timer_ends_at = state.get("timer_ends_at")
@@ -295,7 +297,7 @@ class SpyfallEngine(GamePlugin):
     def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
         viewer_id = viewer_player["id"] if viewer_player else None
         game_over = state.get("phase") == "finished" or bool(state.get("winner"))
-        is_spy = viewer_id == state["spy_id"] if viewer_id else False
+        is_spy = str(viewer_id) == str(state["spy_id"]) if viewer_id else False
 
         viewer_location = None
         viewer_role = None
@@ -304,7 +306,7 @@ class SpyfallEngine(GamePlugin):
                 pass
             else:
                 viewer_location = state["location"]["name"]
-                viewer_role = state.get("assignments", {}).get(viewer_id)
+                viewer_role = state.get("assignments", {}).get(str(viewer_id))
 
         all_voted = len(state.get("votes", {})) >= len(state.get("players", []))
         votes_visible = game_over or all_voted
@@ -322,6 +324,7 @@ class SpyfallEngine(GamePlugin):
 
         return {
             "phase": state["phase"],
+            "round_id": state.get("round_id"),
             "question_log": state.get("question_log", []),
             "pending_question": state.get("pending_question"),
             "turn_order": state.get("turn_order", []),

@@ -18,8 +18,13 @@ const selectedTarget = ref('')
 const selectedLocation = ref('')
 const logRef = ref<HTMLElement | null>(null)
 const timeRemaining = ref('')
+const locationSearch = ref('')
+const showLocationPanel = ref(true)
+const roleRevealDismissedFor = ref<string | null>(null)
 
 const me = computed(() => props.room.players.find((p) => p.id === props.playerId))
+
+const isHost = computed(() => props.room.host_player_id === props.playerId)
 
 const isGameOver = computed(() => props.gameState.phase === 'finished' || Boolean(props.gameState.winner))
 
@@ -58,6 +63,46 @@ const hasVoted = computed(() => {
 const otherPlayers = computed(() =>
   props.room.players.filter((p) => p.id !== props.playerId),
 )
+
+const isSpy = computed(() => props.gameState.is_spy === true)
+
+const isResident = computed(() => props.gameState.is_spy === false)
+
+const showRoleReveal = computed(() => {
+  if (isGameOver.value || props.gameState.is_spy == null) return false
+  const roundId = props.gameState.round_id
+  if (!roundId) return false
+  return roleRevealDismissedFor.value !== roundId
+})
+
+function dismissRoleReveal() {
+  if (props.gameState.round_id) {
+    roleRevealDismissedFor.value = props.gameState.round_id
+  }
+}
+
+watch(
+  () => props.gameState.round_id,
+  (roundId) => {
+    if (roundId && roleRevealDismissedFor.value && roleRevealDismissedFor.value !== roundId) {
+      roleRevealDismissedFor.value = null
+    }
+  },
+)
+
+const sortedLocations = computed(() =>
+  [...(props.gameState.location_names ?? [])].sort((a, b) => a.localeCompare(b)),
+)
+
+const filteredLocations = computed(() => {
+  const q = locationSearch.value.trim().toLowerCase()
+  if (!q) return sortedLocations.value
+  return sortedLocations.value.filter((loc) => loc.toLowerCase().includes(q))
+})
+
+function selectLocationForGuess(loc: string) {
+  selectedLocation.value = loc
+}
 
 const statusMessage = computed(() => {
   if (isGameOver.value) return 'Game over'
@@ -124,6 +169,10 @@ function guessLocation() {
   selectedLocation.value = ''
 }
 
+function startNewGame() {
+  emit('action', { type: 'start_game' })
+}
+
 function playerLabel(id: string) {
   return props.room.players.find((p) => p.id === id)?.nickname ?? '?'
 }
@@ -185,22 +234,75 @@ watch(
           </li>
         </ul>
       </div>
+      <button v-if="isHost" class="btn-primary new-game-btn" @click="startNewGame">
+        Play Again
+      </button>
+      <p v-else class="waiting-host">Waiting for host to start a new game…</p>
     </div>
 
     <template v-else>
-      <div class="top-row">
-        <div class="secret-card card">
-          <h3>Your secret</h3>
-          <template v-if="gameState.is_spy">
-            <p class="spy-label">You are the <strong>Spy</strong></p>
-            <p class="muted">Guess the location from the list below.</p>
-            <div v-if="gameState.location_names" class="location-list">
-              <span v-for="loc in gameState.location_names" :key="loc" class="loc-chip">{{ loc }}</span>
+      <Transition name="role-reveal">
+        <div v-if="showRoleReveal" class="role-reveal-overlay">
+          <div class="role-reveal card" :class="isSpy ? 'spy' : 'resident'">
+            <p class="role-reveal-label">Your assignment</p>
+            <div v-if="isSpy" class="role-reveal-body">
+              <div class="role-reveal-icon">🕵️</div>
+              <h2>You are the <span class="highlight">Spy</span></h2>
+              <p class="role-reveal-desc">
+                You do <strong>not</strong> know the secret location or your role.
+                Listen to others, ask vague questions, and guess the location — or try to avoid detection.
+              </p>
             </div>
+            <div v-else class="role-reveal-body">
+              <div class="role-reveal-icon">🏠</div>
+              <h2>You are a <span class="highlight">Resident</span></h2>
+              <p class="role-reveal-desc">
+                You are <strong>not</strong> the spy. Everyone else at the table shares this location with you.
+              </p>
+              <div class="role-reveal-details">
+                <div class="detail-row">
+                  <span class="detail-label">Location</span>
+                  <span class="detail-value">{{ gameState.viewer_location }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Your role</span>
+                  <span class="detail-value">{{ gameState.viewer_role }}</span>
+                </div>
+              </div>
+            </div>
+            <button type="button" class="btn-primary role-reveal-btn" @click="dismissRoleReveal">
+              I'm ready — start playing
+            </button>
+          </div>
+        </div>
+      </Transition>
+
+      <div class="play-layout" :class="{ 'has-location-panel': isSpy, dimmed: showRoleReveal }">
+        <div class="main-column">
+      <div class="top-row">
+        <div class="secret-card card" :class="isSpy ? 'spy-card' : 'resident-card'">
+          <div class="role-badge" :class="isSpy ? 'spy' : 'resident'">
+            {{ isSpy ? '🕵️ Spy' : '🏠 Resident' }}
+          </div>
+          <h3>Your secret</h3>
+          <template v-if="isSpy">
+            <p class="spy-label">You don't know the location</p>
+            <p class="muted">Blend in and deduce the location — or guess when you're confident.</p>
+            <button
+              type="button"
+              class="btn-secondary toggle-locations-btn"
+              @click="showLocationPanel = !showLocationPanel"
+            >
+              {{ showLocationPanel ? 'Hide' : 'Show' }} all locations ({{ sortedLocations.length }})
+            </button>
+          </template>
+          <template v-else-if="isResident">
+            <p class="location-name">{{ gameState.viewer_location }}</p>
+            <p class="role-name">Your role: <strong>{{ gameState.viewer_role }}</strong></p>
+            <p class="muted resident-note">You are not the spy.</p>
           </template>
           <template v-else>
-            <p class="location-name">{{ gameState.viewer_location }}</p>
-            <p class="role-name">Role: <strong>{{ gameState.viewer_role }}</strong></p>
+            <p class="muted">Loading your assignment…</p>
           </template>
         </div>
 
@@ -274,11 +376,14 @@ watch(
             </button>
           </div>
 
-          <div v-if="gameState.is_spy" class="action-block spy-guess">
+          <div v-if="isSpy" class="action-block spy-guess">
             <h4>Guess location</h4>
+            <p v-if="selectedLocation" class="selected-location">
+              Selected: <strong>{{ selectedLocation }}</strong>
+            </p>
             <select v-model="selectedLocation">
               <option value="" disabled>Select location</option>
-              <option v-for="loc in gameState.location_names ?? []" :key="loc" :value="loc">{{ loc }}</option>
+              <option v-for="loc in sortedLocations" :key="loc" :value="loc">{{ loc }}</option>
             </select>
             <button class="btn-secondary" :disabled="!selectedLocation" @click="guessLocation">Guess location</button>
           </div>
@@ -317,6 +422,42 @@ watch(
           <p v-else class="muted">Vote cast — waiting for others ({{ gameState.votes_cast_count }}/{{ gameState.votes_total }})</p>
         </template>
       </div>
+        </div>
+
+        <aside v-if="isSpy && showLocationPanel" class="location-panel card">
+          <div class="location-panel-header">
+            <h3>All locations</h3>
+            <span class="location-count">{{ filteredLocations.length }}/{{ sortedLocations.length }}</span>
+          </div>
+          <input
+            v-model="locationSearch"
+            type="search"
+            class="location-search"
+            placeholder="Search locations…"
+          />
+          <ul class="location-checklist">
+            <li v-for="loc in filteredLocations" :key="loc">
+              <button
+                type="button"
+                class="location-item"
+                :class="{ selected: selectedLocation === loc }"
+                @click="selectLocationForGuess(loc)"
+              >
+                {{ loc }}
+              </button>
+            </li>
+          </ul>
+          <p v-if="!filteredLocations.length" class="muted no-results">No locations match your search.</p>
+          <button
+            v-if="selectedLocation && gameState.phase === 'questioning'"
+            type="button"
+            class="btn-primary guess-from-panel-btn"
+            @click="guessLocation"
+          >
+            Guess "{{ selectedLocation }}"
+          </button>
+        </aside>
+      </div>
     </template>
   </div>
 </template>
@@ -327,6 +468,279 @@ watch(
   flex-direction: column;
   gap: 1rem;
   padding-bottom: 2rem;
+}
+
+.play-layout.dimmed {
+  pointer-events: none;
+  opacity: 0.35;
+  filter: blur(2px);
+}
+
+.role-reveal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+}
+
+.role-reveal {
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+  padding: 2rem 1.75rem;
+  border-width: 2px;
+}
+
+.role-reveal.spy {
+  border-color: var(--warning, #e6a700);
+  background: linear-gradient(180deg, rgba(230, 167, 0, 0.12) 0%, var(--surface) 40%);
+}
+
+.role-reveal.resident {
+  border-color: var(--success);
+  background: linear-gradient(180deg, rgba(61, 214, 140, 0.12) 0%, var(--surface) 40%);
+}
+
+.role-reveal-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.role-reveal-icon {
+  font-size: 3rem;
+  margin-bottom: 0.5rem;
+}
+
+.role-reveal h2 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+
+.role-reveal h2 .highlight {
+  color: var(--accent);
+}
+
+.role-reveal.spy h2 .highlight {
+  color: var(--warning, #e6a700);
+}
+
+.role-reveal.resident h2 .highlight {
+  color: var(--success);
+}
+
+.role-reveal-desc {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 1.25rem;
+}
+
+.role-reveal-details {
+  text-align: left;
+  background: var(--surface-elevated);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0;
+}
+
+.detail-row + .detail-row {
+  border-top: 1px solid var(--border);
+  margin-top: 0.35rem;
+  padding-top: 0.65rem;
+}
+
+.detail-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detail-value {
+  font-weight: 700;
+  text-align: right;
+}
+
+.role-reveal-btn {
+  width: 100%;
+  font-size: 1rem;
+  padding: 0.85rem;
+}
+
+.role-reveal-enter-active {
+  animation: fadeInUp 0.35s var(--ease-smooth);
+}
+
+.role-reveal-leave-active {
+  animation: fadeInUp 0.2s reverse;
+}
+
+.secret-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.secret-card.spy-card {
+  border-color: rgba(230, 167, 0, 0.45);
+}
+
+.secret-card.resident-card {
+  border-color: rgba(61, 214, 140, 0.35);
+}
+
+.role-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  margin-bottom: 0.65rem;
+}
+
+.role-badge.spy {
+  background: rgba(230, 167, 0, 0.2);
+  color: var(--warning, #e6a700);
+}
+
+.role-badge.resident {
+  background: rgba(61, 214, 140, 0.15);
+  color: var(--success);
+}
+
+.resident-note {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.play-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.play-layout.has-location-panel {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .play-layout.has-location-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+.main-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.location-panel {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.location-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.location-panel-header h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.location-count {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.location-search {
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.location-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.location-item {
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  border: none;
+  border-radius: var(--radius, 6px);
+  background: transparent;
+  color: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.location-item:hover {
+  background: var(--surface-elevated);
+}
+
+.location-item.selected {
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.no-results {
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.guess-from-panel-btn {
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.toggle-locations-btn {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.selected-location {
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-muted);
 }
 
 .top-row {
@@ -362,23 +776,6 @@ watch(
 
 .spy-label {
   font-size: 1.25rem;
-}
-
-.location-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-top: 0.75rem;
-  max-height: 8rem;
-  overflow-y: auto;
-}
-
-.loc-chip {
-  font-size: 0.7rem;
-  padding: 0.2rem 0.5rem;
-  background: var(--surface-elevated);
-  border-radius: 999px;
-  border: 1px solid var(--border);
 }
 
 .status-bar {
@@ -568,6 +965,16 @@ watch(
 
 .role-list li {
   padding: 0.25rem 0;
+}
+
+.new-game-btn {
+  margin-top: 1.25rem;
+}
+
+.waiting-host {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
 }
 
 .muted {

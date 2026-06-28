@@ -51,6 +51,7 @@ export interface SpyfallQuestionEntry {
 
 export interface SpyfallGameState {
   phase: 'questioning' | 'voting' | 'finished'
+  round_id: string | null
   question_log: SpyfallQuestionEntry[]
   pending_question: { from_id: string; to_id: string; question: string } | null
   turn_order: string[]
