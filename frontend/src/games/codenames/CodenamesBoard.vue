@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { GameState, Room } from '@/types'
+import type { CodenamesGameState, Room } from '@/types'
 import TeamPanel from './TeamPanel.vue'
 import ClueInput from './ClueInput.vue'
 import FlowSlot from '@/components/FlowSlot.vue'
 
 const props = defineProps<{
-  gameState: GameState
+  gameState: CodenamesGameState
   room: Room
   playerId: string
 }>()

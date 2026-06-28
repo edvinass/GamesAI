@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlayerStore } from '@/stores/player'
 import { useRoom } from '@/composables/useRoom'
 import { useWebSocket } from '@/composables/useWebSocket'
 import CodenamesBoard from '@/games/codenames/CodenamesBoard.vue'
+import SpyfallBoard from '@/games/spyfall/SpyfallBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
-import type { Room, GameState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState } from '@/types'
+import { isCodenamesState, isSpyfallState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +23,21 @@ const showRules = ref(false)
 
 const wsToken = computed(() => playerStore.sessionToken)
 const { connected, lastMessage, error, send } = useWebSocket(roomId, wsToken)
+
+const gameTitle = computed(() => {
+  const type = room.value?.game_type
+  if (type === 'spyfall') return 'Spyfall'
+  if (type === 'codenames') return 'Codenames'
+  return type ?? 'Game'
+})
+
+const codenamesState = computed(() =>
+  gameState.value && isCodenamesState(gameState.value) ? gameState.value as CodenamesGameState : null,
+)
+
+const spyfallState = computed(() =>
+  gameState.value && isSpyfallState(gameState.value) ? gameState.value as SpyfallGameState : null,
+)
 
 onMounted(async () => {
   try {
@@ -66,14 +83,14 @@ function backToLobby() {
   <div class="game-page">
     <header class="game-header container-wide">
       <div class="header-left">
-        <h1>Codenames</h1>
+        <h1>{{ gameTitle }}</h1>
         <div class="header-meta">
           <span class="room-id">Room {{ roomId.slice(0, 8) }}…</span>
           <span class="connection" :class="{ online: connected }">
             <span class="connection-dot" />
             {{ connected ? 'Live' : 'Reconnecting' }}
           </span>
-          <span class="av-hint">💬 Voice chat recommended</span>
+          <span class="av-hint">💬 Voice chat optional — text Q&amp;A built in</span>
         </div>
       </div>
       <div class="header-actions">
@@ -83,8 +100,16 @@ function backToLobby() {
     </header>
 
     <CodenamesBoard
-      v-if="gameState && room"
-      :game-state="gameState"
+      v-if="codenamesState && room"
+      :game-state="codenamesState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <SpyfallBoard
+      v-else-if="spyfallState && room"
+      :game-state="spyfallState"
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"

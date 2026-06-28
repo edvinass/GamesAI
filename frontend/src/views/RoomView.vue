@@ -7,7 +7,9 @@ import { useWebSocket } from '@/composables/useWebSocket'
 import { useLeaveRoom } from '@/composables/useLeaveRoom'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import LobbyTeamPanel from '@/components/lobby/LobbyTeamPanel.vue'
-import { validateLobby } from '@/games/codenames/lobbyValidation'
+import SpyfallLobby from '@/games/spyfall/SpyfallLobby.vue'
+import { validateLobby as validateCodenamesLobby } from '@/games/codenames/lobbyValidation'
+import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import type { Room } from '@/types'
 
 const route = useRoute()
@@ -60,9 +62,14 @@ watch(lastMessage, (msg) => {
 const roomUrl = computed(() => `${window.location.origin}/room/${roomId.value}`)
 const isHost = computed(() => room.value?.host_player_id === playerStore.playerId)
 
-const lobbyValidation = computed(() =>
-  room.value ? validateLobby(room.value) : { valid: false, message: '', issues: [] },
-)
+const isSpyfall = computed(() => room.value?.game_type === 'spyfall')
+const isCodenames = computed(() => room.value?.game_type === 'codenames')
+
+const lobbyValidation = computed(() => {
+  if (!room.value) return { valid: false, message: '', issues: [] }
+  if (room.value.game_type === 'spyfall') return validateSpyfallLobby(room.value)
+  return validateCodenamesLobby(room.value)
+})
 
 const soloPractice = computed({
   get: () => Boolean(room.value?.settings?.solo_practice),
@@ -87,8 +94,12 @@ function updateSettings(settings: Record<string, unknown>) {
   send({ type: 'update_settings', settings })
 }
 
-function addAi(team: string, role: string) {
-  send({ type: 'add_ai_player', team, role })
+function addAi(team?: string, role?: string) {
+  if (team && role) {
+    send({ type: 'add_ai_player', team, role })
+  } else {
+    send({ type: 'add_ai_player' })
+  }
 }
 
 function removePlayer(id: string) {
@@ -154,62 +165,78 @@ async function copyUrl() {
             </button>
           </div>
         </div>
-        <div v-if="isHost" class="settings-block">
+        <div v-if="isHost && isCodenames" class="settings-block">
           <span class="toolbar-label">Host settings</span>
           <label class="checkbox-label">
             <input type="checkbox" v-model="soloPractice" />
             Solo practice (play against AI)
           </label>
         </div>
-        <p v-else class="av-tip">
+        <p v-else-if="!isHost" class="av-tip">
           💬 Use Discord, Zoom, or your favorite chat while you play
         </p>
       </div>
 
-      <div v-if="soloPractice" class="solo-notice card">
-        <p>Solo practice auto-builds teams when you start. You will play as the red operative against AI.</p>
-      </div>
+      <SpyfallLobby
+        v-if="isSpyfall"
+        v-model:solo-practice="soloPractice"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+      />
 
-      <template v-else>
-        <p v-if="isHost" class="arrange-hint">
-          Assign each team one spymaster and at least one operative. Use slot buttons to move players or add AI.
-        </p>
-
-        <div class="teams stagger-in">
-          <LobbyTeamPanel
-            team="red"
-            :players="room.players"
-            :is-host="isHost"
-            :current-player-id="playerStore.playerId"
-            :host-player-id="room.host_player_id"
-            @assign="assignPlayer"
-            @add-ai="addAi"
-            @remove="removePlayer"
-          />
-          <LobbyTeamPanel
-            team="blue"
-            :players="room.players"
-            :is-host="isHost"
-            :current-player-id="playerStore.playerId"
-            :host-player-id="room.host_player_id"
-            @assign="assignPlayer"
-            @add-ai="addAi"
-            @remove="removePlayer"
-          />
+      <template v-else-if="isCodenames">
+        <div v-if="soloPractice" class="solo-notice card">
+          <p>Solo practice auto-builds teams when you start. You will play as the red operative against AI.</p>
         </div>
 
-        <div
-          class="validation-banner card"
-          :class="{ valid: lobbyValidation.valid, invalid: !lobbyValidation.valid }"
-        >
-          <span class="validation-icon">{{ lobbyValidation.valid ? '✓' : '!' }}</span>
-          <div>
-            <p class="validation-message">{{ lobbyValidation.message }}</p>
-            <ul v-if="!lobbyValidation.valid && lobbyValidation.issues.length > 1" class="validation-issues">
-              <li v-for="issue in lobbyValidation.issues" :key="issue">{{ issue }}</li>
-            </ul>
+        <template v-else>
+          <p v-if="isHost" class="arrange-hint">
+            Assign each team one spymaster and at least one operative. Use slot buttons to move players or add AI.
+          </p>
+
+          <div class="teams stagger-in">
+            <LobbyTeamPanel
+              team="red"
+              :players="room.players"
+              :is-host="isHost"
+              :current-player-id="playerStore.playerId"
+              :host-player-id="room.host_player_id"
+              @assign="assignPlayer"
+              @add-ai="addAi"
+              @remove="removePlayer"
+            />
+            <LobbyTeamPanel
+              team="blue"
+              :players="room.players"
+              :is-host="isHost"
+              :current-player-id="playerStore.playerId"
+              :host-player-id="room.host_player_id"
+              @assign="assignPlayer"
+              @add-ai="addAi"
+              @remove="removePlayer"
+            />
           </div>
-        </div>
+
+          <div
+            class="validation-banner card"
+            :class="{ valid: lobbyValidation.valid, invalid: !lobbyValidation.valid }"
+          >
+            <span class="validation-icon">{{ lobbyValidation.valid ? '✓' : '!' }}</span>
+            <div>
+              <p class="validation-message">{{ lobbyValidation.message }}</p>
+              <ul v-if="!lobbyValidation.valid && lobbyValidation.issues.length > 1" class="validation-issues">
+                <li v-for="issue in lobbyValidation.issues" :key="issue">{{ issue }}</li>
+              </ul>
+            </div>
+          </div>
+        </template>
       </template>
 
       <button

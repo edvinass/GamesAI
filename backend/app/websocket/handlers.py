@@ -152,7 +152,7 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
 
             elif action_type == "add_ai_player":
                 room = await service.add_ai_player(
-                    room_id, pid, data["team"], data["role"]
+                    room_id, pid, data.get("team"), data.get("role")
                 )
                 await manager.broadcast(str(room_id), {
                     "type": "room_updated",
@@ -195,18 +195,11 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                     "room": room_to_dict(room),
                 })
 
-            elif action_type in ("submit_clue", "guess_word", "end_turn"):
+            else:
+                # Game actions — delegate to the active game plugin
                 room, state, events = await service.apply_game_action(room_id, pid, data)
                 await broadcast_room_state(room, events)
                 schedule_ai_turn(room_id)
-
-            else:
-                await manager.active.get(str(room_id), {}).get(player_id, None)
-                if str(room_id) in manager.active and player_id in manager.active[str(room_id)]:
-                    await manager.active[str(room_id)][player_id].send_json({
-                        "type": "error",
-                        "message": f"Unknown action: {action_type}",
-                    })
 
         except ValueError as e:
             if str(room_id) in manager.active and player_id in manager.active[str(room_id)]:

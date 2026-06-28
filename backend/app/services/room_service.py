@@ -11,6 +11,8 @@ from sqlalchemy.orm import selectinload
 from app.db.session import async_session
 from app.games.codenames.ai import ai_operative_guesses, ai_spymaster_clue, fallback_clue
 from app.games.codenames.engine import CodenamesEngine
+from app.games.spyfall.ai import ai_answer_question, ai_ask_question, ai_cast_vote, ai_spy_guess
+from app.games.spyfall.engine import SpyfallEngine
 from app.games.registry import get_game
 from app.models import GameState, Room, RoomPlayer, RoomStatus, Role, Team
 from app.utils import generate_session_token, hash_session_token, player_to_dict
@@ -63,8 +65,8 @@ class RoomService:
             room_id=room.id,
             nickname=nickname,
             session_token_hash=hash_session_token(token),
-            team=Team.RED,
-            role=Role.SPYMASTER,
+            team=Team.RED if game_type != "spyfall" else None,
+            role=Role.SPYMASTER if game_type != "spyfall" else None,
             is_ai=False,
             is_connected=True,
         )
@@ -99,7 +101,10 @@ class RoomService:
         await self.db.refresh(room, ["players"])
         return room, player, token
 
-    def _assign_lobby_slot(self, room: Room) -> tuple[Team, Role]:
+    def _assign_lobby_slot(self, room: Room) -> tuple[Team | None, Role | None]:
+        if room.game_type == "spyfall":
+            return None, None
+
         red = [p for p in room.players if p.team == Team.RED]
         blue = [p for p in room.players if p.team == Team.BLUE]
 
@@ -146,7 +151,13 @@ class RoomService:
         await self.db.refresh(room, ["players"])
         return room
 
-    async def add_ai_player(self, room_id: uuid.UUID, host_id: uuid.UUID, team: str, role: str) -> Room:
+    async def add_ai_player(
+        self,
+        room_id: uuid.UUID,
+        host_id: uuid.UUID,
+        team: str | None = None,
+        role: str | None = None,
+    ) -> Room:
         room = await self._load_room(room_id)
         if not room:
             raise ValueError("Room not found")
@@ -154,6 +165,30 @@ class RoomService:
             raise ValueError("Only host can add AI players")
         if room.status != RoomStatus.LOBBY:
             raise ValueError("Cannot add AI after game started")
+
+        if room.game_type == "spyfall":
+            settings = get_game(room.game_type).validate_settings(room.settings)
+            if len(room.players) >= settings["max_players"]:
+                raise ValueError(f"Maximum {settings['max_players']} players allowed")
+
+            ai_count = sum(1 for p in room.players if p.is_ai)
+            token = generate_session_token()
+            player = RoomPlayer(
+                room_id=room.id,
+                nickname=f"🤖 AI Player {ai_count + 1}",
+                session_token_hash=hash_session_token(token),
+                team=None,
+                role=None,
+                is_ai=True,
+                is_connected=True,
+            )
+            self.db.add(player)
+            await self.db.commit()
+            await self.db.refresh(room, ["players"])
+            return room
+
+        if team is None or role is None:
+            raise ValueError("Team and role required for this game")
 
         team_enum = Team(team)
         role_enum = Role(role)
@@ -274,7 +309,10 @@ class RoomService:
                 raise ValueError(lobby_error)
 
             if settings.get("solo_practice"):
-                await self._setup_solo_practice(room)
+                if room.game_type == "codenames":
+                    await self._setup_solo_practice(room)
+                elif room.game_type == "spyfall":
+                    await self._setup_spyfall_solo(room)
                 await self.db.refresh(room, ["players"])
 
             players_data = [self._player_data(p) for p in room.players]
@@ -348,6 +386,27 @@ class RoomService:
             )
         await self.db.flush()
 
+    async def _setup_spyfall_solo(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+        for i in range(2):
+            token = generate_session_token()
+            self.db.add(
+                RoomPlayer(
+                    room_id=room.id,
+                    nickname=f"🤖 AI Player {i + 1}",
+                    session_token_hash=hash_session_token(token),
+                    team=None,
+                    role=None,
+                    is_ai=True,
+                    is_connected=True,
+                )
+            )
+        await self.db.flush()
+
     def _player_data(self, player: RoomPlayer) -> dict:
         return {
             "id": str(player.id),
@@ -402,6 +461,169 @@ AI_CLUE_THINK_PAUSE_SEC = 2.0
 AI_GUESS_THINK_PAUSE_SEC = 1.5
 AI_REVEAL_PAUSE_SEC = 1.8
 AI_TURN_PAUSE_SEC = 0.8
+AI_SPYFALL_THINK_PAUSE_SEC = 2.0
+
+
+async def _process_codenames_ai_turn(
+    service: RoomService,
+    room_id: uuid.UUID,
+    room: Room,
+    broadcast_fn,
+) -> bool:
+    """Run one Codenames AI action. Returns True if an action was taken."""
+    engine: CodenamesEngine = get_game("codenames")  # type: ignore
+    state = room.game_state.state
+    if state.get("winner"):
+        return False
+
+    actor_data = engine.get_current_actor(state)
+    if not actor_data or not actor_data.get("is_ai"):
+        return False
+
+    actor = next((p for p in room.players if str(p.id) == actor_data["id"]), None)
+    if not actor:
+        return False
+
+    if state["phase"] == "clue":
+        await asyncio.sleep(AI_CLUE_THINK_PAUSE_SEC)
+        clue, number, targets = await ai_spymaster_clue(state, actor.team.value)
+        action: dict[str, Any] = {
+            "type": "submit_clue",
+            "clue_word": clue,
+            "clue_number": number,
+        }
+        if targets:
+            action["targets"] = targets
+        try:
+            room, state, events = await service.apply_game_action(
+                room_id, actor.id, action, allow_ai=True
+            )
+        except ValueError:
+            clue, number, targets = await fallback_clue(state, actor.team.value)
+            action = {
+                "type": "submit_clue",
+                "clue_word": clue,
+                "clue_number": number,
+            }
+            if targets:
+                action["targets"] = targets
+            room, state, events = await service.apply_game_action(
+                room_id, actor.id, action, allow_ai=True
+            )
+        await broadcast_fn(room, events)
+        await asyncio.sleep(AI_TURN_PAUSE_SEC)
+        return True
+
+    await asyncio.sleep(AI_GUESS_THINK_PAUSE_SEC)
+    guesses = await ai_operative_guesses(
+        state, actor.team.value, state.get("guesses_remaining", 1)
+    )
+    if not guesses:
+        await asyncio.sleep(AI_TURN_PAUSE_SEC)
+        room, state, events = await service.apply_game_action(
+            room_id, actor.id, {"type": "end_turn"}, allow_ai=True
+        )
+        await broadcast_fn(room, events)
+        await asyncio.sleep(AI_TURN_PAUSE_SEC)
+        return True
+
+    for idx in guesses:
+        room = await service._load_room(room_id)
+        if not room or not room.game_state:
+            return False
+        state = room.game_state.state
+        if state.get("winner") or state["phase"] != "guess":
+            break
+        room, state, events = await service.apply_game_action(
+            room_id,
+            actor.id,
+            {"type": "guess_word", "card_index": idx},
+            allow_ai=True,
+        )
+        await broadcast_fn(room, events)
+        if state.get("winner"):
+            return False
+        if state["phase"] == "clue":
+            break
+        await asyncio.sleep(AI_REVEAL_PAUSE_SEC)
+
+    await asyncio.sleep(AI_TURN_PAUSE_SEC)
+    return True
+
+
+async def _process_spyfall_ai_turn(
+    service: RoomService,
+    room_id: uuid.UUID,
+    room: Room,
+    broadcast_fn,
+) -> bool:
+    """Run one Spyfall AI action. Returns True if an action was taken."""
+    engine: SpyfallEngine = get_game("spyfall")  # type: ignore
+    state = room.game_state.state
+    if state.get("winner"):
+        return False
+
+    actor_data = engine.get_current_actor(state)
+    if not actor_data or not actor_data.get("is_ai"):
+        return False
+
+    actor = next((p for p in room.players if str(p.id) == actor_data["id"]), None)
+    if not actor:
+        return False
+
+    await asyncio.sleep(AI_SPYFALL_THINK_PAUSE_SEC)
+    phase = state.get("phase")
+
+    if phase == "questioning" and state.get("pending_question"):
+        answer = await ai_answer_question(state, actor_data)
+        room, state, events = await service.apply_game_action(
+            room_id,
+            actor.id,
+            {"type": "answer_question", "answer": answer},
+            allow_ai=True,
+        )
+        await broadcast_fn(room, events)
+        await asyncio.sleep(AI_TURN_PAUSE_SEC)
+        return True
+
+    if phase == "questioning":
+        if engine._is_spy(state, actor_data["id"]):
+            guess = await ai_spy_guess(state, actor_data)
+            if guess:
+                room, state, events = await service.apply_game_action(
+                    room_id,
+                    actor.id,
+                    {"type": "spy_guess_location", "location_name": guess},
+                    allow_ai=True,
+                )
+                await broadcast_fn(room, events)
+                await asyncio.sleep(AI_TURN_PAUSE_SEC)
+                return True
+
+        target_id, question = await ai_ask_question(state, actor_data)
+        room, state, events = await service.apply_game_action(
+            room_id,
+            actor.id,
+            {"type": "ask_question", "target_player_id": target_id, "question": question},
+            allow_ai=True,
+        )
+        await broadcast_fn(room, events)
+        await asyncio.sleep(AI_TURN_PAUSE_SEC)
+        return True
+
+    if phase == "voting":
+        vote_for = await ai_cast_vote(state, actor_data)
+        room, state, events = await service.apply_game_action(
+            room_id,
+            actor.id,
+            {"type": "cast_vote", "vote_for_player_id": vote_for},
+            allow_ai=True,
+        )
+        await broadcast_fn(room, events)
+        await asyncio.sleep(AI_TURN_PAUSE_SEC)
+        return True
+
+    return False
 
 
 async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
@@ -417,89 +639,17 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                 if not room or room.status != RoomStatus.PLAYING or not room.game_state:
                     return
 
-                if room.game_type != "codenames":
-                    return
-
-                engine: CodenamesEngine = get_game("codenames")  # type: ignore
-                state = room.game_state.state
-                if state.get("winner"):
-                    return
-
-                actor_data = engine.get_current_actor(state)
-                if not actor_data or not actor_data.get("is_ai"):
-                    return
-
-                actor = next((p for p in room.players if str(p.id) == actor_data["id"]), None)
-                if not actor:
-                    return
-
                 try:
-                    if state["phase"] == "clue":
-                        await asyncio.sleep(AI_CLUE_THINK_PAUSE_SEC)
-                        clue, number, targets = await ai_spymaster_clue(state, actor.team.value)
-                        action: dict[str, Any] = {
-                            "type": "submit_clue",
-                            "clue_word": clue,
-                            "clue_number": number,
-                        }
-                        if targets:
-                            action["targets"] = targets
-                        try:
-                            room, state, events = await service.apply_game_action(
-                                room_id, actor.id, action, allow_ai=True
-                            )
-                        except ValueError:
-                            clue, number, targets = await fallback_clue(state, actor.team.value)
-                            action = {
-                                "type": "submit_clue",
-                                "clue_word": clue,
-                                "clue_number": number,
-                            }
-                            if targets:
-                                action["targets"] = targets
-                            room, state, events = await service.apply_game_action(
-                                room_id, actor.id, action, allow_ai=True
-                            )
-                        await broadcast_fn(room, events)
-                        await asyncio.sleep(AI_TURN_PAUSE_SEC)
-                        continue
+                    acted = False
+                    if room.game_type == "codenames":
+                        acted = await _process_codenames_ai_turn(service, room_id, room, broadcast_fn)
+                    elif room.game_type == "spyfall":
+                        acted = await _process_spyfall_ai_turn(service, room_id, room, broadcast_fn)
+                    else:
+                        return
 
-                    await asyncio.sleep(AI_GUESS_THINK_PAUSE_SEC)
-                    guesses = await ai_operative_guesses(
-                        state, actor.team.value, state.get("guesses_remaining", 1)
-                    )
-                    if not guesses:
-                        await asyncio.sleep(AI_TURN_PAUSE_SEC)
-                        room, state, events = await service.apply_game_action(
-                            room_id, actor.id, {"type": "end_turn"}, allow_ai=True
-                        )
-                        await broadcast_fn(room, events)
-                        await asyncio.sleep(AI_TURN_PAUSE_SEC)
-                        continue
-
-                    for idx in guesses:
-                        room = await service._load_room(room_id)
-                        if not room or not room.game_state:
-                            return
-                        state = room.game_state.state
-                        if state.get("winner") or state["phase"] != "guess":
-                            break
-                        room, state, events = await service.apply_game_action(
-                            room_id,
-                            actor.id,
-                            {"type": "guess_word", "card_index": idx},
-                            allow_ai=True,
-                        )
-                        await broadcast_fn(room, events)
-                        if state.get("winner"):
-                            return
-                        if state["phase"] == "clue":
-                            break
-                        await asyncio.sleep(AI_REVEAL_PAUSE_SEC)
-
-                    await asyncio.sleep(AI_TURN_PAUSE_SEC)
-                    continue
-
+                    if not acted:
+                        return
                 except Exception as e:
                     logger.exception("AI turn failed: %s", e)
                     return

@@ -23,7 +23,7 @@ export interface Card {
   color?: string
 }
 
-export interface GameState {
+export interface CodenamesGameState {
   cards: Card[]
   starting_team: string
   current_team: string
@@ -38,6 +38,52 @@ export interface GameState {
   players: Player[]
   viewer_role: string | null
   viewer_team: string | null
+}
+
+export interface SpyfallQuestionEntry {
+  from_id: string
+  to_id: string
+  from_nickname: string
+  to_nickname: string
+  question: string
+  answer: string
+}
+
+export interface SpyfallGameState {
+  phase: 'questioning' | 'voting' | 'finished'
+  question_log: SpyfallQuestionEntry[]
+  pending_question: { from_id: string; to_id: string; question: string } | null
+  turn_order: string[]
+  current_turn_index: number
+  current_turn_player_id: string | null
+  timer_ends_at: string | null
+  votes: Record<string, string | null>
+  votes_cast_count: number
+  votes_total: number
+  accused_player_id: string | null
+  accusation_caller_id: string | null
+  winner: 'spy' | 'residents' | null
+  win_reason: string | null
+  last_action: Record<string, unknown> | null
+  players: Player[]
+  is_spy: boolean | null
+  viewer_location: string | null
+  viewer_role: string | null
+  location_names: string[] | null
+  revealed_location: string | null
+  revealed_spy_id: string | null
+  revealed_assignments: Record<string, { role: string | null; is_spy: boolean }> | null
+  viewer_id: string | null
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState
+
+export function isCodenamesState(state: GameState): state is CodenamesGameState {
+  return 'cards' in state
+}
+
+export function isSpyfallState(state: GameState): state is SpyfallGameState {
+  return 'question_log' in state
 }
 
 export interface WsMessage {
