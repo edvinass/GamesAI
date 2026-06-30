@@ -6,9 +6,10 @@ import { useRoom } from '@/composables/useRoom'
 import { useWebSocket } from '@/composables/useWebSocket'
 import CodenamesBoard from '@/games/codenames/CodenamesBoard.vue'
 import SpyfallBoard from '@/games/spyfall/SpyfallBoard.vue'
+import SnakeBoard from '@/games/snake/SnakeBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState } from '@/types'
-import { isCodenamesState, isSpyfallState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +29,7 @@ const gameTitle = computed(() => {
   const type = room.value?.game_type
   if (type === 'spyfall') return 'Spyfall'
   if (type === 'codenames') return 'Codenames'
+  if (type === 'snake') return 'Multiplayer Snake'
   return type ?? 'Game'
 })
 
@@ -37,6 +39,10 @@ const codenamesState = computed(() =>
 
 const spyfallState = computed(() =>
   gameState.value && isSpyfallState(gameState.value) ? gameState.value as SpyfallGameState : null,
+)
+
+const snakeState = computed(() =>
+  gameState.value && isSnakeState(gameState.value) ? gameState.value as SnakeGameState : null,
 )
 
 onMounted(async () => {
@@ -117,6 +123,14 @@ function backToLobby() {
       :player-id="playerStore.playerId"
       @action="sendAction"
       @show-rules="showRules = true"
+    />
+
+    <SnakeBoard
+      v-else-if="snakeState && room"
+      :game-state="snakeState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
     />
 
     <div v-else class="container-wide loading">

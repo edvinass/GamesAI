@@ -8,6 +8,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session
+from app.games.registry import get_game
+from app.services.game_loop import start_game_loop, stop_game_loop
 from app.services.room_service import RoomService, process_ai_turns
 from app.utils import player_to_dict, room_to_dict
 
@@ -50,6 +52,14 @@ manager = ConnectionManager()
 
 def schedule_ai_turn(room_id: uuid.UUID) -> None:
     asyncio.create_task(process_ai_turns(room_id, broadcast_room_state))
+
+
+def schedule_game_updates(room_id: uuid.UUID, game_type: str) -> None:
+    game = get_game(game_type)
+    if game.tick_interval_ms():
+        start_game_loop(room_id, broadcast_room_state)
+    else:
+        schedule_ai_turn(room_id)
 
 
 async def broadcast_room_state(room, events: list[dict] | None = None) -> None:
@@ -111,7 +121,7 @@ async def handle_websocket(websocket: WebSocket, room_id: uuid.UUID, token: str)
                     "player_id": player_id,
                 })
                 if room.status.value == "playing":
-                    schedule_ai_turn(room_id)
+                    schedule_game_updates(room_id, room.game_type)
 
         while True:
             data = await websocket.receive_json()
@@ -186,9 +196,10 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                     "room": room_to_dict(room),
                 })
                 await broadcast_room_state(room, [{"type": "game_started"}])
-                schedule_ai_turn(room_id)
+                schedule_game_updates(room_id, room.game_type)
 
             elif action_type == "return_to_lobby":
+                stop_game_loop(room_id)
                 room = await service.return_to_lobby(room_id, pid)
                 await manager.broadcast(str(room_id), {
                     "type": "returned_to_lobby",
@@ -199,7 +210,8 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                 # Game actions — delegate to the active game plugin
                 room, state, events = await service.apply_game_action(room_id, pid, data)
                 await broadcast_room_state(room, events)
-                schedule_ai_turn(room_id)
+                if room.game_type != "snake":
+                    schedule_ai_turn(room_id)
 
         except ValueError as e:
             if str(room_id) in manager.active and player_id in manager.active[str(room_id)]:

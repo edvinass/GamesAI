@@ -65,8 +65,8 @@ class RoomService:
             room_id=room.id,
             nickname=nickname,
             session_token_hash=hash_session_token(token),
-            team=Team.RED if game_type != "spyfall" else None,
-            role=Role.SPYMASTER if game_type != "spyfall" else None,
+            team=Team.RED if game_type not in ("spyfall", "snake") else None,
+            role=Role.SPYMASTER if game_type not in ("spyfall", "snake") else None,
             is_ai=False,
             is_connected=True,
         )
@@ -102,7 +102,7 @@ class RoomService:
         return room, player, token
 
     def _assign_lobby_slot(self, room: Room) -> tuple[Team | None, Role | None]:
-        if room.game_type == "spyfall":
+        if room.game_type in ("spyfall", "snake"):
             return None, None
 
         red = [p for p in room.players if p.team == Team.RED]
@@ -166,7 +166,7 @@ class RoomService:
         if room.status != RoomStatus.LOBBY:
             raise ValueError("Cannot add AI after game started")
 
-        if room.game_type == "spyfall":
+        if room.game_type in ("spyfall", "snake"):
             settings = get_game(room.game_type).validate_settings(room.settings)
             if len(room.players) >= settings["max_players"]:
                 raise ValueError(f"Maximum {settings['max_players']} players allowed")
@@ -312,6 +312,8 @@ class RoomService:
                 await self._setup_solo_practice(room)
             elif room.game_type == "spyfall":
                 await self._setup_spyfall_solo(room)
+            elif room.game_type == "snake":
+                await self._setup_snake_solo(room)
             await self.db.refresh(room, ["players"])
 
         players_data = [self._player_data(p) for p in room.players]
@@ -406,6 +408,27 @@ class RoomService:
             )
         await self.db.flush()
 
+    async def _setup_snake_solo(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+        for i in range(2):
+            token = generate_session_token()
+            self.db.add(
+                RoomPlayer(
+                    room_id=room.id,
+                    nickname=f"🤖 AI Player {i + 1}",
+                    session_token_hash=hash_session_token(token),
+                    team=None,
+                    role=None,
+                    is_ai=True,
+                    is_connected=True,
+                )
+            )
+        await self.db.flush()
+
     def _player_data(self, player: RoomPlayer) -> dict:
         return {
             "id": str(player.id),
@@ -417,6 +440,26 @@ class RoomService:
         }
 
     async def apply_game_action(
+        self, room_id: uuid.UUID, player_id: uuid.UUID, action: dict, *, allow_ai: bool = False
+    ) -> tuple[Room, dict, list[dict]]:
+        room = await self._load_room(room_id)
+        if not room:
+            raise ValueError("Room not found")
+        if room.status != RoomStatus.PLAYING or not room.game_state:
+            raise ValueError("Game not in progress")
+
+        game = get_game(room.game_type)
+        if game.tick_interval_ms():
+            lock = _get_ai_lock(str(room_id))
+            async with lock:
+                return await self._apply_game_action_unlocked(
+                    room_id, player_id, action, allow_ai=allow_ai
+                )
+        return await self._apply_game_action_unlocked(
+            room_id, player_id, action, allow_ai=allow_ai
+        )
+
+    async def _apply_game_action_unlocked(
         self, room_id: uuid.UUID, player_id: uuid.UUID, action: dict, *, allow_ai: bool = False
     ) -> tuple[Room, dict, list[dict]]:
         room = await self._load_room(room_id)
@@ -444,6 +487,28 @@ class RoomService:
         await self.db.commit()
         await self.db.refresh(room, ["players", "game_state"])
         return room, state, events
+
+    async def apply_game_tick(
+        self, room_id: uuid.UUID
+    ) -> tuple[Room, dict, list[dict]]:
+        lock = _get_ai_lock(str(room_id))
+        async with lock:
+            room = await self._load_room(room_id)
+            if not room:
+                raise ValueError("Room not found")
+            if room.status != RoomStatus.PLAYING or not room.game_state:
+                raise ValueError("Game not in progress")
+
+            game = get_game(room.game_type)
+            state, events = game.tick(copy.deepcopy(room.game_state.state))
+            room.game_state.state = state
+            room.game_state.version += 1
+            if state.get("winner"):
+                room.status = RoomStatus.FINISHED
+
+            await self.db.commit()
+            await self.db.refresh(room, ["players", "game_state"])
+            return room, state, events
 
     def get_viewer_state(self, room: Room, viewer: RoomPlayer | None) -> dict | None:
         if not room.game_state:

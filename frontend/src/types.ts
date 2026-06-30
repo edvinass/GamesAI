@@ -77,7 +77,31 @@ export interface SpyfallGameState {
   viewer_id: string | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState
+export interface SnakeSegment {
+  body: number[][]
+  direction: string
+  next_direction: string
+  alive: boolean
+  score: number
+  color: string
+}
+
+export interface SnakeGameState {
+  phase: 'countdown' | 'playing' | 'finished'
+  countdown_ends_at: string | null
+  tick: number
+  grid_width: number
+  grid_height: number
+  food: [number, number] | null
+  snakes: Record<string, SnakeSegment>
+  players: Player[]
+  winner: string | null
+  win_reason: string | null
+  last_action: Record<string, unknown> | null
+  viewer_id: string | null
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -85,6 +109,10 @@ export function isCodenamesState(state: GameState): state is CodenamesGameState 
 
 export function isSpyfallState(state: GameState): state is SpyfallGameState {
   return 'question_log' in state
+}
+
+export function isSnakeState(state: GameState): state is SnakeGameState {
+  return 'snakes' in state
 }
 
 export interface WsMessage {

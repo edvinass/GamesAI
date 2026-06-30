@@ -34,3 +34,9 @@ class GamePlugin(ABC):
 
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
         return None
+
+    def tick_interval_ms(self) -> int | None:
+        return None
+
+    def tick(self, state: dict) -> tuple[dict, list[dict]]:
+        return state, []

@@ -18,6 +18,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '🕵️',
     lobbyHint: 'Need 3–8 players. Share the link or add AI to fill seats.',
   },
+  snake: {
+    name: 'Multiplayer Snake',
+    description: 'Battle on a shared grid — last snake standing.',
+    emoji: '🐍',
+    lobbyHint: 'Need 2–8 players. Share the link or add AI to fill seats.',
+  },
 }
 
 export function getGameMeta(gameType: string): GameMeta {

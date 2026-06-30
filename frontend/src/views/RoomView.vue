@@ -8,8 +8,10 @@ import { useLeaveRoom } from '@/composables/useLeaveRoom'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import LobbyTeamPanel from '@/components/lobby/LobbyTeamPanel.vue'
 import SpyfallLobby from '@/games/spyfall/SpyfallLobby.vue'
+import SnakeLobby from '@/games/snake/SnakeLobby.vue'
 import { validateLobby as validateCodenamesLobby } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
+import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
@@ -64,6 +66,7 @@ const roomUrl = computed(() => `${window.location.origin}/room/${roomId.value}`)
 const isHost = computed(() => room.value?.host_player_id === playerStore.playerId)
 
 const isSpyfall = computed(() => room.value?.game_type === 'spyfall')
+const isSnake = computed(() => room.value?.game_type === 'snake')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
@@ -71,12 +74,18 @@ const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
 const lobbyValidation = computed(() => {
   if (!room.value) return { valid: false, message: '', issues: [] }
   if (room.value.game_type === 'spyfall') return validateSpyfallLobby(room.value)
+  if (room.value.game_type === 'snake') return validateSnakeLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
 const soloPractice = computed({
   get: () => Boolean(room.value?.settings?.solo_practice),
   set: (val: boolean) => updateSettings({ solo_practice: val }),
+})
+
+const tickMs = computed({
+  get: () => Number(room.value?.settings?.tick_ms ?? 150),
+  set: (val: number) => updateSettings({ tick_ms: val }),
 })
 
 async function handleJoin() {
@@ -185,6 +194,21 @@ async function copyUrl() {
       <SpyfallLobby
         v-if="isSpyfall"
         v-model:solo-practice="soloPractice"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+      />
+
+      <SnakeLobby
+        v-else-if="isSnake"
+        v-model:solo-practice="soloPractice"
+        v-model:tick-ms="tickMs"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"
