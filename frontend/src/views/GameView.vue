@@ -7,9 +7,10 @@ import { useWebSocket } from '@/composables/useWebSocket'
 import CodenamesBoard from '@/games/codenames/CodenamesBoard.vue'
 import SpyfallBoard from '@/games/spyfall/SpyfallBoard.vue'
 import SnakeBoard from '@/games/snake/SnakeBoard.vue'
+import DuelBoard from '@/games/duel/DuelBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,6 +31,7 @@ const gameTitle = computed(() => {
   if (type === 'spyfall') return 'Spyfall'
   if (type === 'codenames') return 'Codenames'
   if (type === 'snake') return 'Multiplayer Snake'
+  if (type === 'duel') return 'Side Duel'
   return type ?? 'Game'
 })
 
@@ -44,6 +46,12 @@ const spyfallState = computed(() =>
 const snakeState = computed(() =>
   gameState.value && isSnakeState(gameState.value) ? gameState.value as SnakeGameState : null,
 )
+
+const duelState = computed(() =>
+  gameState.value && isDuelState(gameState.value) ? gameState.value as DuelGameState : null,
+)
+
+const isFullscreenGame = computed(() => Boolean(snakeState.value || duelState.value))
 
 onMounted(async () => {
   try {
@@ -89,8 +97,8 @@ function backToLobby() {
 </script>
 
 <template>
-  <div class="game-page" :class="{ 'game-page--snake': snakeState }">
-    <header class="game-header" :class="{ 'game-header--snake': snakeState }">
+  <div class="game-page" :class="{ 'game-page--snake': isFullscreenGame }">
+    <header class="game-header" :class="{ 'game-header--snake': isFullscreenGame }">
       <div class="header-left">
         <h1>{{ gameTitle }}</h1>
         <div class="header-meta">
@@ -128,6 +136,14 @@ function backToLobby() {
     <SnakeBoard
       v-else-if="snakeState && room"
       :game-state="snakeState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <DuelBoard
+      v-else-if="duelState && room"
+      :game-state="duelState"
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"

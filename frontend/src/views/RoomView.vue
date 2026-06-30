@@ -9,9 +9,11 @@ import GameRulesModal from '@/components/GameRulesModal.vue'
 import LobbyTeamPanel from '@/components/lobby/LobbyTeamPanel.vue'
 import SpyfallLobby from '@/games/spyfall/SpyfallLobby.vue'
 import SnakeLobby from '@/games/snake/SnakeLobby.vue'
+import DuelLobby from '@/games/duel/DuelLobby.vue'
 import { validateLobby as validateCodenamesLobby } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
+import { validateLobby as validateDuelLobby } from '@/games/duel/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
@@ -67,6 +69,7 @@ const isHost = computed(() => room.value?.host_player_id === playerStore.playerI
 
 const isSpyfall = computed(() => room.value?.game_type === 'spyfall')
 const isSnake = computed(() => room.value?.game_type === 'snake')
+const isDuel = computed(() => room.value?.game_type === 'duel')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
@@ -75,6 +78,7 @@ const lobbyValidation = computed(() => {
   if (!room.value) return { valid: false, message: '', issues: [] }
   if (room.value.game_type === 'spyfall') return validateSpyfallLobby(room.value)
   if (room.value.game_type === 'snake') return validateSnakeLobby(room.value)
+  if (room.value.game_type === 'duel') return validateDuelLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
@@ -207,6 +211,21 @@ async function copyUrl() {
 
       <SnakeLobby
         v-else-if="isSnake"
+        v-model:solo-practice="soloPractice"
+        v-model:tick-ms="tickMs"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+      />
+
+      <DuelLobby
+        v-else-if="isDuel"
         v-model:solo-practice="soloPractice"
         v-model:tick-ms="tickMs"
         :room="room"

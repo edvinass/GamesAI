@@ -210,7 +210,7 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                 # Game actions — delegate to the active game plugin
                 room, state, events = await service.apply_game_action(room_id, pid, data)
                 await broadcast_room_state(room, events)
-                if room.game_type != "snake":
+                if room.game_type not in ("snake", "duel"):
                     schedule_ai_turn(room_id)
 
         except ValueError as e:

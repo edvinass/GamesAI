@@ -101,7 +101,42 @@ export interface SnakeGameState {
   viewer_id: string | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState
+export interface DuelFighter {
+  x: number
+  y: number
+  side: 'left' | 'right'
+  alive: boolean
+  move_direction: string
+  pending_shoot: boolean
+  cooldown_until_tick: number
+  color: string
+}
+
+export interface DuelBullet {
+  id: number
+  x: number
+  y: number
+  vx: number
+  owner_id: string
+}
+
+export interface DuelGameState {
+  phase: 'countdown' | 'playing' | 'finished'
+  countdown_ends_at: string | null
+  tick: number
+  grid_width: number
+  grid_height: number
+  fighter_height: number
+  fighters: Record<string, DuelFighter>
+  bullets: DuelBullet[]
+  players: Player[]
+  winner: string | null
+  win_reason: string | null
+  last_action: Record<string, unknown> | null
+  viewer_id: string | null
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -113,6 +148,10 @@ export function isSpyfallState(state: GameState): state is SpyfallGameState {
 
 export function isSnakeState(state: GameState): state is SnakeGameState {
   return 'snakes' in state
+}
+
+export function isDuelState(state: GameState): state is DuelGameState {
+  return 'fighters' in state
 }
 
 export interface WsMessage {

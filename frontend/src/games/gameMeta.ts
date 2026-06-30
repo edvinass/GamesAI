@@ -24,6 +24,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '🐍',
     lobbyHint: 'Need 2–8 players. Share the link or add AI to fill seats.',
   },
+  duel: {
+    name: 'Side Duel',
+    description: 'Shoot from opposite sides — dodge bullets and land the hit.',
+    emoji: '⚔️',
+    lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
+  },
 }
 
 export function getGameMeta(gameType: string): GameMeta {
