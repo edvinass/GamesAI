@@ -25,6 +25,8 @@ class DuelEngine(GamePlugin):
             "countdown_sec": 3,
             "shoot_cooldown_ticks": 10,
             "fighter_height": FIGHTER_HEIGHT,
+            "ai_move_interval_ticks": 2,
+            "ai_reaction_interval_ticks": 2,
             "solo_practice": False,
         }
 
@@ -39,6 +41,8 @@ class DuelEngine(GamePlugin):
         merged["countdown_sec"] = max(1, min(10, int(merged.get("countdown_sec", 3))))
         merged["shoot_cooldown_ticks"] = max(4, min(30, int(merged.get("shoot_cooldown_ticks", 10))))
         merged["fighter_height"] = max(1, min(5, int(merged.get("fighter_height", FIGHTER_HEIGHT))))
+        merged["ai_move_interval_ticks"] = max(1, min(4, int(merged.get("ai_move_interval_ticks", 2))))
+        merged["ai_reaction_interval_ticks"] = max(1, min(4, int(merged.get("ai_reaction_interval_ticks", 2))))
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
         return merged
 
@@ -134,13 +138,21 @@ class DuelEngine(GamePlugin):
 
         return state, events
 
+    def _player_by_id(self, state: dict, player_id: str) -> dict | None:
+        return next((p for p in state["players"] if p["id"] == player_id), None)
+
     def _apply_ai_inputs(self, state: dict) -> None:
+        reaction_interval = int(state["settings"].get("ai_reaction_interval_ticks", 2))
+        rethink = reaction_interval <= 1 or state["tick"] % reaction_interval == 0
+
         for player in state["players"]:
             if not player.get("is_ai"):
                 continue
             pid = player["id"]
             fighter = state["fighters"].get(pid)
             if not fighter or not fighter.get("alive"):
+                continue
+            if not rethink:
                 continue
             move, shoot = choose_ai_actions(state, pid, fighter)
             fighter["move_direction"] = move
@@ -217,11 +229,21 @@ class DuelEngine(GamePlugin):
         grid_height = state["grid_height"]
         fighters = state["fighters"]
         fighter_height = self._fighter_height(state)
+        move_interval = int(state["settings"].get("ai_move_interval_ticks", 2))
 
         for pid, fighter in fighters.items():
-            if fighter.get("alive"):
+            if not fighter.get("alive"):
+                continue
+            player = self._player_by_id(state, pid)
+            is_ai = player.get("is_ai") if player else False
+            can_move = (
+                not is_ai
+                or move_interval <= 1
+                or state["tick"] % move_interval == 0
+            )
+            if can_move:
                 self._move_fighter(fighter, grid_height, fighter_height)
-                self._try_shoot(state, fighter, pid)
+            self._try_shoot(state, fighter, pid)
 
         remaining_bullets: list[dict] = []
         for bullet in state["bullets"]:

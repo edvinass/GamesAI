@@ -96,6 +96,25 @@ def test_bullet_hits_any_fighter_bar(engine: DuelEngine, state: dict) -> None:
     assert any(e["type"] == "player_hit" for e in events)
 
 
+def test_ai_moves_slower_than_humans(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["ai_move_interval_ticks"] = 2
+    state["players"][1]["is_ai"] = True
+    human = state["fighters"]["p0"]
+    ai = state["fighters"]["p1"]
+    human["move_direction"] = "down"
+    ai["move_direction"] = "down"
+    human_y = human["y"]
+    ai_y = ai["y"]
+
+    state, _ = engine.tick(state)
+    assert human["y"] == human_y + 1
+    assert ai["y"] == ai_y + 1
+
+    state, _ = engine.tick(state)
+    assert human["y"] == human_y + 2
+    assert ai["y"] == ai_y + 1
+
+
 def test_cooldown_blocks_rapid_fire(engine: DuelEngine, state: dict) -> None:
     left = state["fighters"]["p0"]
     left["pending_shoot"] = True

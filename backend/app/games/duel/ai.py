@@ -79,6 +79,20 @@ def _shot_aligns_with_enemy(shoot_row: int, enemy_top: int, height: int) -> bool
     return shoot_row in _fighter_rows(enemy_top, height)
 
 
+def _enemy_aim_centers(
+    enemy: dict[str, Any],
+    fighter: dict[str, Any],
+    height: int,
+    grid_height: int,
+) -> tuple[int, int]:
+    travel = _travel_ticks_to_enemy(fighter, enemy)
+    lead_ticks = min(max(travel, 1), 24)
+    predicted_top = _predict_enemy_top(enemy, height, grid_height, lead_ticks)
+    current_center = _fighter_center(enemy["y"], height)
+    lead_center = _fighter_center(predicted_top, height)
+    return current_center, lead_center
+
+
 def _bullet_threatens_move(
     bullet: dict,
     fighter: dict[str, Any],
@@ -152,7 +166,6 @@ def _score_move(
         old_gap = abs(bullet_y - old_center)
         new_gap = abs(bullet_y - new_center)
 
-        # Only dodge away from bullets that are actually near our line
         if abs(bullet_y - old_center) <= height + 2 and ticks <= 14:
             score += (new_gap - old_gap) * 35.0
             if ticks <= 8:
@@ -161,34 +174,39 @@ def _score_move(
     if incoming and direction == "stop":
         score -= 120.0
 
-    # Prefer having room to maneuver — avoid hugging top/bottom walls
     edge_clearance = min(new_top, max_y - new_top)
-    score += edge_clearance * 22.0
+    score += edge_clearance * 12.0
 
     if new_top == 0 or new_top == max_y:
-        wall_penalty = 140.0 if immediate_danger else 220.0
+        wall_penalty = 140.0 if immediate_danger else 180.0
         score -= wall_penalty
 
-    # When not in immediate danger, drift back toward arena center
-    if not immediate_danger:
-        score -= abs(new_center - arena_center) * 16.0
+    if enemy is not None and not immediate_danger:
+        current_center, lead_center = _enemy_aim_centers(enemy, fighter, height, grid_height)
+        primary_target = lead_center
+
+        score -= abs(new_center - primary_target) * 55.0
+        score -= abs(new_center - current_center) * 30.0
+
+        if new_center < primary_target and direction == "down":
+            score += 55.0
+        elif new_center > primary_target and direction == "up":
+            score += 55.0
+
+        if _shot_aligns_with_enemy(new_center, enemy["y"], height):
+            score += 80.0
+
+        if edge_clearance <= 1 and direction != "stop":
+            if (direction == "down" and current_center > new_center) or (
+                direction == "up" and current_center < new_center
+            ):
+                score += 60.0
+    elif not immediate_danger:
+        score -= abs(new_center - arena_center) * 14.0
         if y == 0 and direction == "down":
             score += 90.0
         if y == max_y and direction == "up":
             score += 90.0
-        if edge_clearance <= 1 and direction != "stop":
-            toward_center = "down" if new_center < arena_center else "up"
-            if direction == toward_center:
-                score += 70.0
-
-    if enemy is not None and not immediate_danger:
-        travel = _travel_ticks_to_enemy(fighter, enemy)
-        target_top = _predict_enemy_top(enemy, height, grid_height, min(travel, 12))
-        target_center = _fighter_center(target_top, height)
-        score -= abs(new_center - target_center) * 6.0
-    elif enemy is not None and not immediate_danger and incoming == 0:
-        target_center = _fighter_center(enemy["y"], height)
-        score -= abs(new_center - target_center) * 4.0
 
     return score
 
@@ -200,7 +218,6 @@ def _choose_move(
     bullets: list[dict],
     enemy: dict[str, Any] | None,
 ) -> str:
-    arena_center = _arena_center_row(grid_height, height)
     max_y = grid_height - height
 
     scored: list[tuple[str, float]] = []
@@ -214,18 +231,24 @@ def _choose_move(
     ]
 
     if safe_moves:
-        candidates = [(d, s) for d, s in scored if d in safe_moves]
-        best_center_dist = float("inf")
+        if enemy is not None:
+            _, lead_center = _enemy_aim_centers(enemy, fighter, height, grid_height)
+            pursuit_target = lead_center
+        else:
+            pursuit_target = _arena_center_row(grid_height, height)
+
         best_direction = safe_moves[0]
         best_score = float("-inf")
+        best_target_dist = float("inf")
 
-        for direction, score in candidates:
+        for direction, score in scored:
+            if direction not in safe_moves:
+                continue
             new_top = _top_after_move(fighter["y"], direction, max_y)
-            center_dist = abs(_fighter_center(new_top, height) - arena_center)
-            # Among similarly safe options, prefer center and higher score
-            if score > best_score or (score >= best_score - 30 and center_dist < best_center_dist):
+            target_dist = abs(_fighter_center(new_top, height) - pursuit_target)
+            if score > best_score or (score >= best_score - 25 and target_dist < best_target_dist):
                 best_score = score
-                best_center_dist = center_dist
+                best_target_dist = target_dist
                 best_direction = direction
         return best_direction
 
@@ -237,15 +260,18 @@ def _should_shoot(
     fighter: dict[str, Any],
     enemy: dict[str, Any],
     height: int,
+    move_direction: str,
 ) -> bool:
     tick = state["tick"]
     if tick < fighter.get("cooldown_until_tick", 0):
         return False
 
     grid_height = state["grid_height"]
-    travel = _travel_ticks_to_enemy(fighter, enemy)
-    shoot_row = _fighter_center(fighter["y"], height)
+    max_y = grid_height - height
+    shoot_top = _top_after_move(fighter["y"], move_direction, max_y)
+    shoot_row = _fighter_center(shoot_top, height)
 
+    travel = _travel_ticks_to_enemy(fighter, enemy)
     predicted_top = _predict_enemy_top(enemy, height, grid_height, travel)
     if _shot_aligns_with_enemy(shoot_row, predicted_top, height):
         return True
@@ -260,13 +286,13 @@ def _should_shoot(
         if _shot_aligns_with_enemy(shoot_row, next_top, height):
             return True
 
-    if travel <= 15:
+    if travel <= 20:
         predicted_top = _predict_enemy_top(enemy, height, grid_height, travel)
         if _shot_aligns_with_enemy(shoot_row, predicted_top, height):
             return True
 
     enemy_center = _fighter_center(current_top, height)
-    if abs(shoot_row - enemy_center) <= 1 and random.random() < 0.5:
+    if abs(shoot_row - enemy_center) <= 1:
         return True
 
     return False
@@ -286,6 +312,6 @@ def choose_ai_actions(
 
     shoot = False
     if enemy is not None:
-        shoot = _should_shoot(state, fighter, enemy, height)
+        shoot = _should_shoot(state, fighter, enemy, height, move)
 
     return move, shoot

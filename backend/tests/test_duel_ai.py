@@ -127,8 +127,56 @@ def test_ai_prefers_center_among_safe_dodges() -> None:
     ai["side"] = "right"
     ai["x"] = 46
     ai["y"] = 1
-    # Bullet aimed low — both up (toward center) and staying are safe from row 20
     state["bullets"] = [{"id": 0, "x": 10, "y": 20, "vx": 1, "owner_id": "human"}]
 
     move, _ = choose_ai_actions(state, "ai", ai)
     assert move == "down"
+
+
+def test_ai_follows_enemy_moving_down() -> None:
+    state = make_state()
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["side"] = "right"
+    ai["x"] = 46
+    ai["y"] = 5
+    human["x"] = 1
+    human["y"] = 18
+    human["move_direction"] = "down"
+    state["bullets"] = []
+
+    move, _ = choose_ai_actions(state, "ai", ai)
+    assert move == "down"
+
+
+def test_ai_follows_enemy_moving_up() -> None:
+    state = make_state()
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["side"] = "right"
+    ai["x"] = 46
+    ai["y"] = 15
+    human["x"] = 1
+    human["y"] = 2
+    human["move_direction"] = "up"
+    state["bullets"] = []
+
+    move, _ = choose_ai_actions(state, "ai", ai)
+    assert move == "up"
+
+
+def test_ai_shoots_after_moving_into_alignment() -> None:
+    state = make_state()
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["side"] = "right"
+    ai["x"] = 46
+    ai["y"] = 8
+    human["x"] = 1
+    human["y"] = 10
+    ai["cooldown_until_tick"] = 0
+    state["bullets"] = []
+
+    move, shoot = choose_ai_actions(state, "ai", ai)
+    assert move == "down"
+    assert shoot is True
