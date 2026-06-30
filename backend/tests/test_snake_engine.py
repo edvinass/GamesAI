@@ -71,6 +71,20 @@ def test_direction_queuing(engine: SnakeEngine, state: dict) -> None:
     assert state["snakes"][pid]["next_direction"] == "up"
 
 
+def test_rapid_corner_turn(engine: SnakeEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    snake = state["snakes"][pid]
+    snake["direction"] = "right"
+    snake["next_direction"] = "right"
+
+    state, _ = engine.apply_action(state, {"type": "set_direction", "direction": "up"}, player)
+    assert state["snakes"][pid]["next_direction"] == "up"
+
+    state, _ = engine.apply_action(state, {"type": "set_direction", "direction": "left"}, player)
+    assert state["snakes"][pid]["next_direction"] == "left"
+
+
 def test_direction_ignored_when_dead(engine: SnakeEngine, state: dict) -> None:
     player = state["players"][0]
     pid = player["id"]
@@ -80,20 +94,19 @@ def test_direction_ignored_when_dead(engine: SnakeEngine, state: dict) -> None:
     assert state["snakes"][pid]["next_direction"] == state["snakes"][pid]["direction"]
 
 
-def test_wall_collision(engine: SnakeEngine, state: dict) -> None:
+def test_wrap_around(engine: SnakeEngine, state: dict) -> None:
     pid = state["players"][0]["id"]
-    other_pid = state["players"][1]["id"]
     snake = state["snakes"][pid]
-    snake["body"] = [[0, 0], [1, 0], [2, 0]]
+    grid_width = state["grid_width"]
+    snake["body"] = [[0, 5], [1, 5], [2, 5]]
     snake["direction"] = "left"
     snake["next_direction"] = "left"
-    assert state["snakes"][other_pid]["alive"]
+    state["snakes"][state["players"][1]["id"]]["alive"] = False
 
     state, events = engine.tick(state)
-    assert not state["snakes"][pid]["alive"]
-    assert state["snakes"][other_pid]["alive"]
-    assert any(e["type"] == "player_died" for e in events)
-    assert state["winner"] == other_pid
+    assert state["snakes"][pid]["alive"]
+    assert state["snakes"][pid]["body"][0] == [grid_width - 1, 5]
+    assert not any(e["type"] == "player_died" for e in events)
 
 
 def test_food_eaten_grows_score(engine: SnakeEngine, state: dict) -> None:

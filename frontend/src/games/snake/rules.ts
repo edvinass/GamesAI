@@ -7,17 +7,18 @@ export const snakeRules: GameRules = {
     'Join a room with 2–8 players (or add AI bots).',
     'Use arrow keys or WASD to steer your snake.',
     'Eat food to grow and score points.',
-    'Avoid walls, your own body, and other snakes.',
+    'Pass through walls — you wrap to the opposite side.',
+    'Avoid your own body and other snakes.',
     'Last snake alive wins; ties go to highest score.',
   ],
   sections: [
     {
       heading: 'Controls',
-      body: 'Your snake moves continuously once the countdown ends. Press arrow keys or WASD to change direction. You cannot reverse 180° instantly.',
+      body: 'Your snake moves continuously once the countdown ends. Press arrow keys or WASD to change direction. You cannot reverse 180° in one tick, but you can queue turns while moving in a straight line.',
     },
     {
       heading: 'Battle arena',
-      body: 'All snakes share one grid. Colliding with a wall, yourself, or another snake\'s body eliminates you.',
+      body: 'All snakes share one grid. Leaving one edge wraps you to the opposite side. Hitting yourself or another snake\'s body eliminates you.',
     },
     {
       heading: 'Food',
@@ -33,8 +34,8 @@ export const snakeRules: GameRules = {
     },
   ],
   tips: [
-    'Plan ahead — your snake keeps moving every tick.',
-    'Cut off opponents by blocking their path.',
+    'Use wrap-around walls to escape tight spots.',
+    'Queue your next turn early — e.g. right then up then left for a quick corner.',
     'Growing longer makes tight turns riskier.',
   ],
 }

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.games.base import GamePlugin
-from app.games.snake.ai import choose_ai_direction
+from app.games.snake.ai import choose_ai_direction, wrap_pos
 
 DIRECTIONS = {
     "up": (0, -1),
@@ -31,6 +31,14 @@ SNAKE_COLORS = [
 ]
 
 INITIAL_LENGTH = 3
+
+
+def _wrap_pos(x: int, y: int, grid_width: int, grid_height: int) -> tuple[int, int]:
+    return wrap_pos(x, y, grid_width, grid_height)
+
+
+def _is_reverse(direction: str, facing: str) -> bool:
+    return direction == OPPOSITE.get(facing)
 
 
 class SnakeEngine(GamePlugin):
@@ -185,8 +193,8 @@ class SnakeEngine(GamePlugin):
         if direction not in DIRECTIONS:
             return state, events
 
-        current = snake["direction"]
-        if direction == OPPOSITE.get(current):
+        facing = snake.get("next_direction", snake["direction"])
+        if _is_reverse(direction, facing):
             return state, events
 
         snake["next_direction"] = direction
@@ -202,8 +210,8 @@ class SnakeEngine(GamePlugin):
             if not snake or not snake.get("alive"):
                 continue
             direction = choose_ai_direction(state, pid, snake)
-            current = snake["direction"]
-            if direction != OPPOSITE.get(current):
+            facing = snake.get("next_direction", snake["direction"])
+            if not _is_reverse(direction, facing):
                 snake["next_direction"] = direction
 
     def _alive_snakes(self, state: dict) -> list[str]:
@@ -252,11 +260,12 @@ class SnakeEngine(GamePlugin):
             if not snake.get("alive"):
                 continue
             direction = snake["next_direction"]
-            if direction != OPPOSITE.get(snake["direction"]):
+            if not _is_reverse(direction, snake["direction"]):
                 snake["direction"] = direction
             dx, dy = DIRECTIONS[snake["direction"]]
             head = snake["body"][0]
-            new_heads[pid] = [head[0] + dx, head[1] + dy]
+            nx, ny = _wrap_pos(head[0] + dx, head[1] + dy, grid_width, grid_height)
+            new_heads[pid] = [nx, ny]
 
         food = state.get("food")
         will_eat: set[str] = set()
@@ -286,11 +295,6 @@ class SnakeEngine(GamePlugin):
                 snake["alive"] = False
                 died.add(pid)
                 events.append({"type": "player_died", "player_id": pid, "reason": "head_on"})
-                continue
-            if x < 0 or x >= grid_width or y < 0 or y >= grid_height:
-                snake["alive"] = False
-                died.add(pid)
-                events.append({"type": "player_died", "player_id": pid, "reason": "wall"})
                 continue
             if (x, y) in body_cells:
                 snake["alive"] = False
