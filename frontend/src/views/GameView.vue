@@ -89,8 +89,8 @@ function backToLobby() {
 </script>
 
 <template>
-  <div class="game-page">
-    <header class="game-header container-wide">
+  <div class="game-page" :class="{ 'game-page--snake': snakeState }">
+    <header class="game-header" :class="{ 'game-header--snake': snakeState }">
       <div class="header-left">
         <h1>{{ gameTitle }}</h1>
         <div class="header-meta">
@@ -156,6 +156,36 @@ function backToLobby() {
   padding-bottom: 1.5rem;
 }
 
+.game-page--snake {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 100vh;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.game-page--snake .game-header {
+  flex-shrink: 0;
+  margin-bottom: 0;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.game-header--snake {
+  max-width: none;
+  margin: 0;
+}
+
+.game-header:not(.game-header--snake) {
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+  max-width: 1440px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
 .game-header {
   padding-top: 1rem;
   padding-bottom: 0.75rem;
@@ -163,9 +193,12 @@ function backToLobby() {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+  animation: fadeInUp 0.4s var(--ease-smooth);
+}
+
+.game-header:not(.game-header--snake) {
   border-bottom: 1px solid var(--border);
   margin-bottom: 0.75rem;
-  animation: fadeInUp 0.4s var(--ease-smooth);
 }
 
 .game-header h1 {
