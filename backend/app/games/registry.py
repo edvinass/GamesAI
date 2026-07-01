@@ -19,10 +19,17 @@ def get_game(game_type: str) -> GamePlugin:
     return plugin
 
 
+_GAME_LIST_META: dict[str, dict[str, str]] = {
+    "codenames": {"name": "Codenames", "description": "Team word guessing game"},
+    "spyfall": {"name": "Spyfall", "description": "Social deduction at a secret location"},
+    "snake": {"name": "Multiplayer Snake", "description": "Battle on a shared grid — last snake standing"},
+    "duel": {"name": "Side Duel", "description": "Two players shoot from opposite sides — dodge and fire"},
+}
+
+
 def list_games() -> list[dict]:
     return [
-        {"id": "codenames", "name": "Codenames", "description": "Team word guessing game"},
-        {"id": "spyfall", "name": "Spyfall", "description": "Social deduction at a secret location"},
-        {"id": "snake", "name": "Multiplayer Snake", "description": "Battle on a shared grid — last snake standing"},
-        {"id": "duel", "name": "Side Duel", "description": "Two players shoot from opposite sides — dodge and fire"},
+        {"id": game_id, **_GAME_LIST_META[game_id]}
+        for game_id in _REGISTRY
+        if game_id in _GAME_LIST_META
     ]

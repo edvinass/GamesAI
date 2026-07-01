@@ -71,7 +71,14 @@ export function useRoom() {
 
   async function fetchGames() {
     const res = await fetch(`${API}/rooms/games`)
-    return await res.json()
+    if (!res.ok) {
+      throw new Error(`Failed to load games (${res.status})`)
+    }
+    const data = await res.json()
+    if (!Array.isArray(data)) {
+      throw new Error('Invalid games response')
+    }
+    return data
   }
 
   return { loading, error, createRoom, joinRoom, fetchRoom, fetchGames }

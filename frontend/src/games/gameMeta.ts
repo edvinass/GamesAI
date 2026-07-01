@@ -32,6 +32,20 @@ const metaByGameType: Record<string, GameMeta> = {
   },
 }
 
+export interface GameListItem {
+  id: string
+  name: string
+  description: string
+}
+
+export function listKnownGames(): GameListItem[] {
+  return Object.entries(metaByGameType).map(([id, meta]) => ({
+    id,
+    name: meta.name,
+    description: meta.description,
+  }))
+}
+
 export function getGameMeta(gameType: string): GameMeta {
   return (
     metaByGameType[gameType] ?? {

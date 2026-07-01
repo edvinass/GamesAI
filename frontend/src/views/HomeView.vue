@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { usePlayerStore } from '@/stores/player'
 import { useRoom } from '@/composables/useRoom'
 import GameRulesModal from '@/components/GameRulesModal.vue'
-import { getGameMeta } from '@/games/gameMeta'
+import { getGameMeta, listKnownGames } from '@/games/gameMeta'
 
 const router = useRouter()
 const playerStore = usePlayerStore()
@@ -12,9 +12,7 @@ const { createRoom, joinRoom, fetchGames, loading, error } = useRoom()
 
 const nickname = ref(playerStore.nickname || '')
 const gameType = ref('codenames')
-const games = ref<Array<{ id: string; name: string; description: string }>>([
-  { id: 'codenames', name: 'Codenames', description: 'Team word guessing game' },
-])
+const games = ref(listKnownGames())
 const joinRoomId = ref('')
 const mode = ref<'create' | 'join'>('create')
 const showRules = ref(false)
