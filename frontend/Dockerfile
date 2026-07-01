@@ -8,10 +8,10 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
+FROM caddy:2-alpine
 
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /app/dist /usr/share/caddy
+COPY Caddyfile /etc/caddy/Caddyfile
 COPY docker-entrypoint.sh /custom-entrypoint.sh
 RUN chmod +x /custom-entrypoint.sh
 

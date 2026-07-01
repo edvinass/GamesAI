@@ -6,4 +6,11 @@ if [ -z "$BACKEND_URL" ]; then
     exit 1
 fi
 
-exec /docker-entrypoint.sh nginx -g 'daemon off;'
+# Strip accidental quotes from Railway variable values.
+BACKEND_URL=$(printf '%s' "$BACKEND_URL" | tr -d '"')
+export BACKEND_URL
+export PORT="${PORT:-8080}"
+
+echo "Starting Caddy on port ${PORT}, proxying API to ${BACKEND_URL}"
+
+exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

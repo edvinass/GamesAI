@@ -1,0 +1,21 @@
+{
+	admin off
+}
+
+:{$PORT} {
+	root * /usr/share/caddy
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy {$BACKEND_URL}
+	}
+
+	handle /ws/* {
+		reverse_proxy {$BACKEND_URL}
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

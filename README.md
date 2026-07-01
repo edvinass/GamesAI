@@ -73,7 +73,7 @@ The Vite dev server proxies `/api` and `/ws` to `http://localhost:8000`. Update 
 
 ## Deploy to Railway
 
-GamesAI deploys as **three Railway services**: Postgres, backend, and frontend. The frontend nginx container serves the Vue app and proxies `/api` and `/ws` to the backend over Railway private networking.
+GamesAI deploys as **three Railway services**: Postgres, backend, and frontend. The frontend Caddy container serves the Vue app and proxies `/api` and `/ws` to the backend over Railway private networking.
 
 ### 1. Create the project
 
@@ -107,7 +107,7 @@ Replace `backend` in the reference with your backend service name if different.
 
 Generate a public domain for the **frontend** service. That URL is what players use to create and join rooms.
 
-The backend does not need a public domain for normal gameplay (nginx proxies API and WebSocket traffic).
+The backend does not need a public domain for normal gameplay (Caddy proxies API and WebSocket traffic).
 
 ### 4. Verify the deployment
 
