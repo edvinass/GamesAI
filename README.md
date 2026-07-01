@@ -99,15 +99,15 @@ Each service picks up its [`railway.toml`](backend/railway.toml) for health chec
 
 | Variable | Value |
 |----------|-------|
-| `BACKEND_URL` | `http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}` |
+| `BACKEND_URL` | `https://${{backend.RAILWAY_PUBLIC_DOMAIN}}` |
 
-Replace `backend` in the reference with your backend service name if different.
+Replace `backend` with your backend service name. **Generate a public domain for the backend service** (Railway → backend → Settings → Networking → Generate Domain).
+
+> If private networking works in your project, you can use `http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}` instead. If you see **502 Bad Gateway**, switch to the public `https://` URL above.
 
 ### 3. Publish the frontend URL
 
 Generate a public domain for the **frontend** service. That URL is what players use to create and join rooms.
-
-The backend does not need a public domain for normal gameplay (Caddy proxies API and WebSocket traffic).
 
 ### 4. Verify the deployment
 
@@ -115,6 +115,14 @@ The backend does not need a public domain for normal gameplay (Caddy proxies API
 - `https://<frontend>/` loads the app
 - Creating a room opens a WebSocket at `wss://<frontend>/ws/rooms/...`
 - Deep links like `/room/<id>` load correctly
+
+### Troubleshooting 502 Bad Gateway
+
+1. **Backend healthy?** Backend deploy logs should show `GET /api/health HTTP/1.1" 200 OK`.
+2. **`BACKEND_URL` on the frontend service only** — not on the backend. No quotes around the value.
+3. **Use the backend public URL** — set `BACKEND_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}` and generate a public domain for the backend.
+4. **Check frontend deploy logs** — look for `Starting Caddy on port 8080, proxying API to https://...`
+5. **Service name in references** — if your backend service is named `gamesai-backend`, use `${{gamesai-backend.RAILWAY_PUBLIC_DOMAIN}}`.
 
 See [`.env.example`](.env.example) for the full variable reference.
 
