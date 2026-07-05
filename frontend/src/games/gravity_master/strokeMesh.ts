@@ -38,12 +38,12 @@ export function strokeOutline(points: Point[], halfWidth: number): Point[] {
   const outline: Point[] = [...left]
   const capSteps = 8
   for (let i = 1; i < capSteps; i++) {
-    const a = endAngle + Math.PI / 2 + (Math.PI * i) / capSteps
+    const a = endAngle + Math.PI / 2 - (Math.PI * i) / capSteps
     outline.push({ x: end.x + Math.cos(a) * halfWidth, y: end.y + Math.sin(a) * halfWidth })
   }
   outline.push(...right.reverse())
   for (let i = capSteps - 1; i > 0; i--) {
-    const a = startAngle - Math.PI / 2 + (Math.PI * i) / capSteps
+    const a = startAngle - Math.PI / 2 - (Math.PI * i) / capSteps
     outline.push({ x: start.x + Math.cos(a) * halfWidth, y: start.y + Math.sin(a) * halfWidth })
   }
   return outline

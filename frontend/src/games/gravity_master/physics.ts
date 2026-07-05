@@ -142,8 +142,8 @@ function createLevelStatic(world: PlanckWorld, spec: GravityStaticBody): void {
   addStaticBox(world, spec.x, spec.y, spec.width ?? 40, spec.height ?? 16, spec.angle ?? 0)
 }
 
-const BALL_COLLISION_SPEED = 2.5
-const SHAPE_COLLISION_SPEED = 1.8
+const BALL_COLLISION_SPEED = 3.5
+const SHAPE_COLLISION_SPEED = 2.8
 /** Cap for normalizing collision intensity. */
 const MAX_IMPACT_SPEED = 18
 

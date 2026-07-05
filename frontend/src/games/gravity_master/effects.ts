@@ -179,21 +179,21 @@ export class VisualEffects {
 
     for (const r of this.ripples) {
       ctx.save()
-      ctx.globalAlpha = r.life * 0.85
+      ctx.globalAlpha = r.life * 0.5
       ctx.strokeStyle = r.color
       ctx.lineWidth = r.lineWidth * r.life
       ctx.beginPath()
-      ctx.arc(r.x, r.y, Math.max(1, r.radius), 0, Math.PI * 2)
+      ctx.arc(r.x, r.y, Math.max(0.5, r.radius), 0, Math.PI * 2)
       ctx.stroke()
       ctx.restore()
     }
 
     for (const p of this.particles) {
       ctx.save()
-      ctx.globalAlpha = Math.min(1, p.life * 1.2)
+      ctx.globalAlpha = Math.min(0.55, p.life * 0.7)
       ctx.fillStyle = p.color
       ctx.beginPath()
-      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2)
+      ctx.arc(p.x, p.y, Math.max(0.4, p.size * p.life), 0, Math.PI * 2)
       ctx.fill()
       ctx.restore()
     }
