@@ -2,6 +2,12 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, GravityMasterGameState } from '@/types'
 import {
+  DESIGN_HEIGHT,
+  DESIGN_WIDTH,
+  scaleLevelToViewport,
+  scaledStrokeWidth,
+} from './levels'
+import {
   strokeCentroid,
   triangulateStroke,
   worldToLocal,
@@ -17,6 +23,7 @@ import {
   releaseBall,
   removeAllDrawnShapes,
   removeShapeFromWorld,
+  restoreBallMotion,
   type DrawnShape,
   type PhysicsWorld,
 } from './physics'
@@ -34,6 +41,8 @@ const emit = defineEmits<{
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const canvasWrapRef = ref<HTMLElement | null>(null)
 const physicsLoading = ref(true)
+const viewportWidth = ref(0)
+const viewportHeight = ref(0)
 
 const strokes = ref<{ x: number; y: number }[][]>([])
 const drawnShapes = ref<DrawnShape[]>([])
@@ -48,6 +57,11 @@ let simTimer = 0
 let settledFrames = 0
 
 const level = computed(() => props.gameState.level)
+const activeLevel = computed(() => {
+  if (viewportWidth.value <= 0 || viewportHeight.value <= 0) return level.value
+  return scaleLevelToViewport(level.value, viewportWidth.value, viewportHeight.value)
+})
+const layoutScale = computed(() => activeLevel.value.layout_scale ?? 1)
 const phase = computed(() => props.gameState.phase)
 const isFinished = computed(() => phase.value === 'finished')
 const isHost = computed(() => props.room.host_player_id === props.playerId)
@@ -62,11 +76,9 @@ function canvasPoint(e: MouseEvent): { x: number; y: number } | null {
   const canvas = canvasRef.value
   if (!canvas) return null
   const rect = canvas.getBoundingClientRect()
-  const scaleX = canvas.width / rect.width
-  const scaleY = canvas.height / rect.height
   return {
-    x: (e.clientX - rect.left) * scaleX,
-    y: (e.clientY - rect.top) * scaleY,
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top,
   }
 }
 
@@ -84,7 +96,7 @@ function moveStroke(e: MouseEvent) {
   if (!pt) return
   const prev = currentStroke.value[currentStroke.value.length - 1]
   const delta = Math.hypot(pt.x - prev.x, pt.y - prev.y)
-  if (delta < 3) return
+  if (delta < 3 * layoutScale.value) return
   currentStroke.value.push(pt)
   drawFrame()
 }
@@ -158,13 +170,46 @@ function initPhysics() {
   stopPhysics()
   physicsLoading.value = true
   try {
-    physics = createPhysicsWorld(level.value, onWin)
+    physics = createPhysicsWorld(activeLevel.value, onWin)
     ballReleased.value = false
     runLoop()
   } finally {
     physicsLoading.value = false
     drawFrame()
   }
+}
+
+function rebuildPhysicsFromStrokes(options?: {
+  ballReleased?: boolean
+  ballPosition?: { x: number; y: number }
+  ballVelocity?: { x: number; y: number }
+  ballAngle?: number
+  ballAngularVelocity?: number
+}) {
+  stopPhysics()
+  drawnShapes.value = []
+  physics = createPhysicsWorld(activeLevel.value, onWin)
+
+  for (const stroke of strokes.value) {
+    const shape = addStrokeToWorld(physics, stroke)
+    if (shape) drawnShapes.value.push(shape)
+  }
+
+  if (options?.ballReleased) {
+    releaseBall(physics)
+    ballReleased.value = true
+    restoreBallMotion(physics, {
+      position: options.ballPosition ?? { x: activeLevel.value.ball.x, y: activeLevel.value.ball.y },
+      velocity: options.ballVelocity ?? { x: 0, y: 0 },
+      angle: options.ballAngle ?? 0,
+      angularVelocity: options.ballAngularVelocity ?? 0,
+    })
+  } else {
+    ballReleased.value = false
+  }
+
+  runLoop()
+  drawFrame()
 }
 
 function stopPhysics() {
@@ -202,6 +247,24 @@ function runLoop() {
   animFrame = requestAnimationFrame(tick)
 }
 
+function drawBall(ctx: CanvasRenderingContext2D) {
+  if (!physics) return
+  const { x, y } = getBallCanvasTransform(physics)
+  const radius = activeLevel.value.ball.radius
+  const scale = layoutScale.value
+  ctx.beginPath()
+  ctx.arc(x, y, radius, 0, Math.PI * 2)
+  ctx.fillStyle = ballReleased.value ? '#ef4444' : 'rgba(239, 68, 68, 0.55)'
+  ctx.fill()
+  ctx.strokeStyle = '#fca5a5'
+  ctx.lineWidth = 2 * scale
+  if (!ballReleased.value) {
+    ctx.setLineDash([4 * scale, 4 * scale])
+  }
+  ctx.stroke()
+  ctx.setLineDash([])
+}
+
 function drawShape(ctx: CanvasRenderingContext2D, shape: DrawnShape) {
   if (!physics || shape.localPolygon.length < 3) return
   const { x, y, angle } = getShapeCanvasTransform(shape)
@@ -217,25 +280,9 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: DrawnShape) {
   ctx.fillStyle = '#f59e0b'
   ctx.fill()
   ctx.strokeStyle = '#d97706'
-  ctx.lineWidth = 1.5
+  ctx.lineWidth = 1.5 * layoutScale.value
   ctx.stroke()
   ctx.restore()
-}
-
-function drawBall(ctx: CanvasRenderingContext2D) {
-  if (!physics) return
-  const { x, y } = getBallCanvasTransform(physics)
-  ctx.beginPath()
-  ctx.arc(x, y, level.value.ball.radius, 0, Math.PI * 2)
-  ctx.fillStyle = ballReleased.value ? '#ef4444' : 'rgba(239, 68, 68, 0.55)'
-  ctx.fill()
-  ctx.strokeStyle = '#fca5a5'
-  ctx.lineWidth = 2
-  if (!ballReleased.value) {
-    ctx.setLineDash([4, 4])
-  }
-  ctx.stroke()
-  ctx.setLineDash([])
 }
 
 function drawFrame() {
@@ -244,8 +291,15 @@ function drawFrame() {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const w = level.value.world_width
-  const h = level.value.world_height
+  const dpr = window.devicePixelRatio || 1
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+
+  const w = viewportWidth.value
+  const h = viewportHeight.value
+  if (w <= 0 || h <= 0) return
+
+  const levelData = activeLevel.value
+  const scale = layoutScale.value
 
   ctx.clearRect(0, 0, w, h)
 
@@ -255,33 +309,33 @@ function drawFrame() {
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, w, h)
 
-  for (const body of level.value.static_bodies) {
+  for (const body of levelData.static_bodies) {
     ctx.save()
     ctx.translate(body.x, body.y)
     if (body.angle) ctx.rotate(body.angle)
     ctx.fillStyle = '#64748b'
     if (body.type === 'circle') {
       ctx.beginPath()
-      ctx.arc(0, 0, body.radius ?? 20, 0, Math.PI * 2)
+      ctx.arc(0, 0, body.radius ?? 20 * scale, 0, Math.PI * 2)
       ctx.fill()
     } else {
-      ctx.fillRect(-(body.width ?? 40) / 2, -(body.height ?? 16) / 2, body.width ?? 40, body.height ?? 16)
+      ctx.fillRect(-(body.width ?? 40 * scale) / 2, -(body.height ?? 16 * scale) / 2, body.width ?? 40 * scale, body.height ?? 16 * scale)
     }
     ctx.restore()
   }
 
-  const target = level.value.target
+  const target = levelData.target
   ctx.beginPath()
   ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2)
   ctx.fillStyle = 'rgba(34, 197, 94, 0.35)'
   ctx.fill()
   ctx.strokeStyle = '#22c55e'
-  ctx.lineWidth = 3
+  ctx.lineWidth = 3 * scale
   ctx.stroke()
   ctx.fillStyle = '#22c55e'
-  ctx.font = 'bold 13px system-ui, sans-serif'
+  ctx.font = `bold ${Math.max(11, 13 * scale)}px system-ui, sans-serif`
   ctx.textAlign = 'center'
-  ctx.fillText('TARGET', target.x, target.y + 4)
+  ctx.fillText('TARGET', target.x, target.y + 4 * scale)
 
   if (physics) {
     for (const shape of physics.drawnShapes) {
@@ -293,7 +347,7 @@ function drawFrame() {
   if (currentStroke.value.length >= 2) {
     const center = strokeCentroid(currentStroke.value)
     const local = worldToLocal(center, currentStroke.value)
-    const preview = triangulateStroke(local)
+    const preview = triangulateStroke(local, scaledStrokeWidth(levelData))
     if (preview) {
       ctx.save()
       ctx.translate(center.x, center.y)
@@ -306,7 +360,7 @@ function drawFrame() {
       ctx.fillStyle = 'rgba(245, 158, 11, 0.35)'
       ctx.fill()
       ctx.strokeStyle = 'rgba(245, 158, 11, 0.8)'
-      ctx.lineWidth = 1.5
+      ctx.lineWidth = 1.5 * scale
       ctx.stroke()
       ctx.restore()
     }
@@ -316,9 +370,17 @@ function drawFrame() {
     ctx.fillStyle = 'rgba(15, 23, 42, 0.65)'
     ctx.fillRect(0, 0, w, h)
     ctx.fillStyle = '#e2e8f0'
-    ctx.font = '600 16px system-ui, sans-serif'
+    ctx.font = `600 ${Math.max(14, 16 * scale)}px system-ui, sans-serif`
     ctx.textAlign = 'center'
     ctx.fillText('Loading physics…', w / 2, h / 2)
+  }
+}
+
+function fitCanvasSize(wrapW: number, wrapH: number) {
+  const scale = Math.min(wrapW / DESIGN_WIDTH, wrapH / DESIGN_HEIGHT)
+  return {
+    width: Math.floor(DESIGN_WIDTH * scale),
+    height: Math.floor(DESIGN_HEIGHT * scale),
   }
 }
 
@@ -327,20 +389,67 @@ function resizeCanvas() {
   const wrap = canvasWrapRef.value
   if (!canvas || !wrap) return
 
-  const worldW = level.value.world_width
-  const worldH = level.value.world_height
-  canvas.width = worldW
-  canvas.height = worldH
-
   const wrapW = wrap.clientWidth
   const wrapH = wrap.clientHeight
   if (wrapW <= 0 || wrapH <= 0) return
 
-  const scale = Math.min(wrapW / worldW, wrapH / worldH)
-  canvas.style.width = `${Math.floor(worldW * scale)}px`
-  canvas.style.height = `${Math.floor(worldH * scale)}px`
+  const { width: displayW, height: displayH } = fitCanvasSize(wrapW, wrapH)
 
-  drawFrame()
+  const prevW = viewportWidth.value
+  const prevH = viewportHeight.value
+  const sizeChanged = prevW !== displayW || prevH !== displayH
+
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = Math.floor(displayW * dpr)
+  canvas.height = Math.floor(displayH * dpr)
+  canvas.style.width = `${displayW}px`
+  canvas.style.height = `${displayH}px`
+
+  viewportWidth.value = displayW
+  viewportHeight.value = displayH
+
+  if (!sizeChanged) {
+    drawFrame()
+    return
+  }
+
+  if (prevW <= 0 || prevH <= 0) {
+    drawFrame()
+    return
+  }
+
+  const s = displayW / prevW
+
+  let ballSnapshot: {
+    ballReleased: boolean
+    ballPosition?: { x: number; y: number }
+    ballVelocity?: { x: number; y: number }
+    ballAngle?: number
+    ballAngularVelocity?: number
+  } | null = null
+
+  if (physics && ballReleased.value) {
+    const pos = physics.ballBody.getPosition()
+    const vel = physics.ballBody.getLinearVelocity()
+    ballSnapshot = {
+      ballReleased: true,
+      ballPosition: { x: pos.x * s, y: pos.y * s },
+      ballVelocity: { x: vel.x * s, y: vel.y * s },
+      ballAngle: physics.ballBody.getAngle(),
+      ballAngularVelocity: physics.ballBody.getAngularVelocity(),
+    }
+  }
+
+  strokes.value = strokes.value.map((stroke) =>
+    stroke.map((p) => ({ x: p.x * s, y: p.y * s })),
+  )
+  currentStroke.value = currentStroke.value.map((p) => ({ x: p.x * s, y: p.y * s }))
+
+  if (physics) {
+    rebuildPhysicsFromStrokes(ballSnapshot ?? undefined)
+  } else {
+    drawFrame()
+  }
 }
 
 function resetLevelLocal() {
@@ -377,12 +486,12 @@ watch(
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
-  resizeCanvas()
-  initPhysics()
   if (canvasWrapRef.value) {
     resizeObserver = new ResizeObserver(() => resizeCanvas())
     resizeObserver.observe(canvasWrapRef.value)
   }
+  resizeCanvas()
+  initPhysics()
 })
 
 onUnmounted(() => {
@@ -540,17 +649,19 @@ onUnmounted(() => {
 }
 
 .canvas-wrap {
+  position: relative;
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .game-canvas {
   display: block;
+  flex-shrink: 0;
   border-radius: var(--radius);
 }
 

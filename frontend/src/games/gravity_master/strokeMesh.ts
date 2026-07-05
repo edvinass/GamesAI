@@ -55,10 +55,10 @@ export interface StrokeMesh {
 }
 
 /** Triangulate stroke outline into convex triangles for one welded rigid body. */
-export function triangulateStroke(localCenterline: Point[]): StrokeMesh | null {
+export function triangulateStroke(localCenterline: Point[], strokeWidth = STROKE_WIDTH): StrokeMesh | null {
   if (localCenterline.length < 2) return null
 
-  const outline = strokeOutline(localCenterline, STROKE_WIDTH / 2)
+  const outline = strokeOutline(localCenterline, strokeWidth / 2)
   if (outline.length < 3) return null
 
   const flat: number[] = []

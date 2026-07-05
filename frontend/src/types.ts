@@ -191,6 +191,7 @@ export interface GravityMasterLevel {
     radius?: number
     angle?: number
   }>
+  layout_scale?: number
 }
 
 export interface GravityMasterGameState {

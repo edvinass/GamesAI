@@ -47,7 +47,7 @@ def test_initial_state(engine: GravityMasterEngine) -> None:
     game = engine.create_initial_state(make_players(1), {})
     assert game["phase"] == "drawing"
     assert game["level_index"] == 0
-    assert game["levels_total"] == 5
+    assert game["levels_total"] == 50
     assert game["level"]["id"] == 1
     assert game["level"]["ball"]["radius"] == 14
 

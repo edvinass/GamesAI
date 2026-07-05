@@ -1,5 +1,6 @@
 import planck from 'planck'
 import type { GravityLevel, GravityStaticBody } from './levels'
+import { DESIGN_HEIGHT, scaledStrokeWidth } from './levels'
 import {
   strokeCentroid,
   triangulateStroke,
@@ -28,6 +29,8 @@ export interface PhysicsWorld {
   world: PlanckWorld
   worldWidth: number
   worldHeight: number
+  strokeWidth: number
+  layoutScale: number
   ballBody: PlanckBody
   targetBody: PlanckBody
   drawnShapes: DrawnShape[]
@@ -53,7 +56,7 @@ export function addStrokeToWorld(world: PhysicsWorld, stroke: Point[]): DrawnSha
 
   const center = strokeCentroid(stroke)
   const localCenterline = worldToLocal(center, stroke)
-  const mesh = triangulateStroke(localCenterline)
+  const mesh = triangulateStroke(localCenterline, world.strokeWidth)
   if (!mesh || mesh.triangles.length === 0) return null
 
   const body = world.world.createBody({
@@ -121,8 +124,8 @@ function addStaticCircle(world: PlanckWorld, x: number, y: number, radius: numbe
   body.createFixture(planck.Circle(radius), { friction: 0.9 })
 }
 
-function createBoundaries(world: PlanckWorld, width: number, height: number): void {
-  const thickness = 24
+function createBoundaries(world: PlanckWorld, width: number, height: number, layoutScale: number): void {
+  const thickness = 24 * layoutScale
   addStaticBox(world, width / 2, height + thickness / 2, width, thickness)
   addStaticBox(world, -thickness / 2, height / 2, thickness, height * 2)
   addStaticBox(world, width + thickness / 2, height / 2, thickness, height * 2)
@@ -137,9 +140,11 @@ function createLevelStatic(world: PlanckWorld, spec: GravityStaticBody): void {
 }
 
 export function createPhysicsWorld(level: GravityLevel, onWin: () => void): PhysicsWorld {
-  const world = planck.World({ gravity: planck.Vec2(0, GRAVITY) })
+  const layoutScale = level.layout_scale ?? 1
+  const heightScale = level.world_height / DESIGN_HEIGHT
+  const world = planck.World({ gravity: planck.Vec2(0, GRAVITY * heightScale) })
 
-  createBoundaries(world, level.world_width, level.world_height)
+  createBoundaries(world, level.world_width, level.world_height, layoutScale)
   for (const spec of level.static_bodies) {
     createLevelStatic(world, spec)
   }
@@ -166,6 +171,8 @@ export function createPhysicsWorld(level: GravityLevel, onWin: () => void): Phys
     world,
     worldWidth: level.world_width,
     worldHeight: level.world_height,
+    strokeWidth: scaledStrokeWidth(level),
+    layoutScale,
     ballBody,
     targetBody,
     drawnShapes: [],
@@ -199,16 +206,33 @@ export function releaseBall(world: PhysicsWorld): void {
   world.ballReleased = true
 }
 
+export function restoreBallMotion(
+  world: PhysicsWorld,
+  state: {
+    position: { x: number; y: number }
+    velocity: { x: number; y: number }
+    angle: number
+    angularVelocity: number
+  },
+): void {
+  world.ballBody.setPosition(planck.Vec2(state.position.x, state.position.y))
+  world.ballBody.setLinearVelocity(planck.Vec2(state.velocity.x, state.velocity.y))
+  world.ballBody.setAngle(state.angle)
+  world.ballBody.setAngularVelocity(state.angularVelocity)
+}
+
 export function isBallReleased(world: PhysicsWorld): boolean {
   return world.ballReleased
 }
 
 export function isBallLost(world: PhysicsWorld): boolean {
   const pos = world.ballBody.getPosition()
+  const margin = 60 * world.layoutScale
+  const fallMargin = 80 * world.layoutScale
   return (
-    pos.y > world.worldHeight + 80 ||
-    pos.x < -60 ||
-    pos.x > world.worldWidth + 60
+    pos.y > world.worldHeight + fallMargin ||
+    pos.x < -margin ||
+    pos.x > world.worldWidth + margin
   )
 }
 
