@@ -69,6 +69,35 @@ def test_initial_state_per_player_boards(engine: TetrisEngine) -> None:
         assert len(board["grid"]) == 20
 
 
+def test_multiplayer_players_receive_same_piece_sequence(engine: TetrisEngine) -> None:
+    players = make_players(3)
+    game = engine.create_initial_state(players, {"countdown_sec": 0})
+    assert "piece_sequence" in game
+
+    boards = list(game["boards"].values())
+    assert boards[0]["active"]["type"] == boards[1]["active"]["type"]
+    assert boards[1]["active"]["type"] == boards[2]["active"]["type"]
+    assert boards[0]["next_queue"] == boards[1]["next_queue"] == boards[2]["next_queue"]
+
+    game["phase"] = "playing"
+    for _ in range(120):
+        game, _ = engine.tick(game)
+
+    for board in boards:
+        if board["alive"] and board["active"]:
+            assert board["active"]["type"] == boards[0]["active"]["type"]
+            assert board["next_queue"] == boards[0]["next_queue"]
+            break
+    else:
+        pytest.fail("expected at least one board to still be alive with an active piece")
+
+
+def test_single_player_uses_independent_piece_bags(engine: TetrisEngine) -> None:
+    players = make_players(1)
+    game = engine.create_initial_state(players, {"countdown_sec": 0, "single_player": True})
+    assert "piece_sequence" not in game
+
+
 def test_move_and_rotate(engine: TetrisEngine, state: dict) -> None:
     player = state["players"][0]
     pid = player["id"]

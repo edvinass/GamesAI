@@ -115,7 +115,27 @@ class TetrisEngine(GamePlugin):
             return f"Maximum {settings['max_players']} players allowed"
         return None
 
-    def _next_piece(self, board: dict) -> str:
+    def _append_bag_to_sequence(self, state: dict) -> None:
+        bag = list(PIECE_SHAPES.keys())
+        random.shuffle(bag)
+        state["piece_sequence"].extend(bag)
+
+    def _ensure_sequence_length(self, state: dict, length: int) -> None:
+        sequence = state.setdefault("piece_sequence", [])
+        while len(sequence) < length:
+            self._append_bag_to_sequence(state)
+
+    def _uses_shared_pieces(self, state: dict | None) -> bool:
+        return state is not None and "piece_sequence" in state
+
+    def _next_piece(self, board: dict, state: dict | None = None) -> str:
+        if self._uses_shared_pieces(state):
+            index = board.get("piece_index", 0)
+            self._ensure_sequence_length(state, index + 1)
+            piece_type = state["piece_sequence"][index]
+            board["piece_index"] = index + 1
+            return piece_type
+
         if not board.get("bag"):
             board["bag"] = []
         if not board["bag"]:
@@ -124,16 +144,18 @@ class TetrisEngine(GamePlugin):
             board["bag"] = bag
         return board["bag"].pop()
 
-    def _take_next_piece(self, board: dict) -> str:
+    def _take_next_piece(self, board: dict, state: dict | None = None) -> str:
         queue = board.setdefault("next_queue", [])
         if not queue:
-            queue.append(self._next_piece(board))
+            queue.append(self._next_piece(board, state))
         piece_type = queue.pop(0)
-        queue.append(self._next_piece(board))
+        queue.append(self._next_piece(board, state))
         return piece_type
 
-    def _spawn_piece(self, board: dict, width: int, height: int) -> dict | None:
-        piece_type = self._take_next_piece(board)
+    def _spawn_piece(
+        self, board: dict, width: int, height: int, state: dict | None = None
+    ) -> dict | None:
+        piece_type = self._take_next_piece(board, state)
         active = {
             "type": piece_type,
             "rotation": 0,
@@ -173,21 +195,11 @@ class TetrisEngine(GamePlugin):
         width = settings["board_width"]
         height = settings["board_height"]
 
+        use_shared_pieces = not settings.get("single_player")
+
         boards: dict[str, dict] = {}
-        for i, player in enumerate(players):
-            board = self._create_board(i, width, height)
-            board["next_queue"] = [self._next_piece(board), self._next_piece(board)]
-            self._spawn_piece(board, width, height)
-            boards[player["id"]] = board
-
-        countdown_sec = settings["countdown_sec"]
-        countdown_ends_at = (
-            datetime.now(timezone.utc) + timedelta(seconds=countdown_sec)
-        ).isoformat()
-
-        return {
+        initial_state: dict[str, Any] = {
             "phase": "countdown",
-            "countdown_ends_at": countdown_ends_at,
             "tick": 0,
             "board_width": width,
             "board_height": height,
@@ -199,6 +211,30 @@ class TetrisEngine(GamePlugin):
             "last_action": None,
             "game_started_at_tick": None,
         }
+        if use_shared_pieces:
+            initial_state["piece_sequence"] = []
+
+        for i, player in enumerate(players):
+            board = self._create_board(i, width, height)
+            board["piece_index"] = 0
+            board["next_queue"] = [
+                self._next_piece(board, initial_state if use_shared_pieces else None),
+                self._next_piece(board, initial_state if use_shared_pieces else None),
+            ]
+            self._spawn_piece(
+                board,
+                width,
+                height,
+                initial_state if use_shared_pieces else None,
+            )
+            boards[player["id"]] = board
+
+        countdown_sec = settings["countdown_sec"]
+        initial_state["countdown_ends_at"] = (
+            datetime.now(timezone.utc) + timedelta(seconds=countdown_sec)
+        ).isoformat()
+
+        return initial_state
 
     def _cells_valid(
         self,
@@ -228,11 +264,13 @@ class TetrisEngine(GamePlugin):
         cells = piece_cells(active["type"], active["rotation"], active["x"], active["y"] + 1)
         return self._cells_valid(board, cells, width, height)
 
-    def _lock_active_piece(self, board: dict, width: int, height: int) -> tuple[int, bool]:
+    def _lock_active_piece(
+        self, board: dict, width: int, height: int, state: dict | None = None
+    ) -> tuple[int, bool]:
         """Lock the active piece, spawn the next one. Returns (lines_cleared, still_alive)."""
         lines = self._lock_piece(board, width, height)
         board["ai_has_plan"] = False
-        still_alive = self._spawn_or_eliminate(board, width, height)
+        still_alive = self._spawn_or_eliminate(board, width, height, state)
         board["drop_counter"] = 0
         board["lock_counter"] = 0
         return lines, still_alive
@@ -294,12 +332,14 @@ class TetrisEngine(GamePlugin):
         board["lock_counter"] = 0
         return lines
 
-    def _spawn_or_eliminate(self, board: dict, width: int, height: int) -> bool:
+    def _spawn_or_eliminate(
+        self, board: dict, width: int, height: int, state: dict | None = None
+    ) -> bool:
         if not board.get("alive"):
             return False
         if board.get("active"):
             return True
-        spawned = self._spawn_piece(board, width, height)
+        spawned = self._spawn_piece(board, width, height, state)
         if spawned is None:
             board["alive"] = False
             return False
@@ -374,13 +414,14 @@ class TetrisEngine(GamePlugin):
         tick: int = 0,
         max_inputs_per_tick: int | None = None,
         action_delay_ticks: int | None = None,
+        state: dict | None = None,
     ) -> list[dict]:
         events: list[dict] = []
         if not board.get("alive"):
             return events
 
         if not board.get("active"):
-            if not self._spawn_or_eliminate(board, width, height):
+            if not self._spawn_or_eliminate(board, width, height, state):
                 events.append({"type": "player_eliminated", "reason": "topped_out"})
             return events
 
@@ -397,7 +438,7 @@ class TetrisEngine(GamePlugin):
             if action_delay_ticks is not None:
                 board["ai_next_action_tick"] = tick + action_delay_ticks
             if action.get("type") == "hard_drop":
-                lines, still_alive = self._lock_active_piece(board, width, height)
+                lines, still_alive = self._lock_active_piece(board, width, height, state)
                 if lines:
                     events.append({"type": "lines_cleared", "lines": lines})
                 if not still_alive:
@@ -424,7 +465,7 @@ class TetrisEngine(GamePlugin):
         if board.get("active") and not self._can_move_down(board, width, height):
             board["lock_counter"] += 1
             if board["lock_counter"] >= LOCK_DELAY_TICKS:
-                lines, still_alive = self._lock_active_piece(board, width, height)
+                lines, still_alive = self._lock_active_piece(board, width, height, state)
                 if lines:
                     events.append({"type": "lines_cleared", "lines": lines})
                 if not still_alive:
@@ -498,6 +539,7 @@ class TetrisEngine(GamePlugin):
                 tick=state["tick"],
                 max_inputs_per_tick=max_inputs,
                 action_delay_ticks=action_delay,
+                state=state,
             )
             for ev in board_events:
                 events.append({**ev, "player_id": pid})
