@@ -13,6 +13,14 @@ import {
   worldToLocal,
 } from './strokeMesh'
 import {
+  VisualEffects,
+  drawBackground,
+  drawBall,
+  drawDrawnShape,
+  drawStaticBody,
+  drawTarget,
+} from './effects'
+import {
   addStrokeToWorld,
   createPhysicsWorld,
   getBallCanvasTransform,
@@ -24,6 +32,7 @@ import {
   removeAllDrawnShapes,
   removeShapeFromWorld,
   restoreBallMotion,
+  type CollisionEvent,
   type DrawnShape,
   type PhysicsWorld,
 } from './physics'
@@ -55,6 +64,19 @@ let physics: PhysicsWorld | null = null
 let animFrame = 0
 let simTimer = 0
 let settledFrames = 0
+const visualEffects = new VisualEffects()
+const ballTrail: { x: number; y: number }[] = []
+let effectShakeX = 0
+let effectShakeY = 0
+const TRAIL_LENGTH = 8
+
+function handleCollision(event: CollisionEvent) {
+  visualEffects.spawnCollision(event, layoutScale.value)
+}
+
+function createWorld() {
+  return createPhysicsWorld(activeLevel.value, onWin, handleCollision)
+}
 
 const level = computed(() => props.gameState.level)
 const activeLevel = computed(() => {
@@ -136,6 +158,7 @@ function dropBall() {
   if (!physics || ballReleased.value || isFinished.value) return
   releaseBall(physics)
   ballReleased.value = true
+  ballTrail.length = 0
   simMessage.value = ''
   settledFrames = 0
   emit('action', { type: 'start_simulation' })
@@ -159,6 +182,8 @@ function restartGame() {
 function onWin() {
   if (simMessage.value === 'Level complete!') return
   simMessage.value = 'Level complete!'
+  const target = activeLevel.value.target
+  visualEffects.spawnWin(target.x, target.y, layoutScale.value)
   if (simTimer) {
     window.clearTimeout(simTimer)
     simTimer = 0
@@ -170,8 +195,10 @@ function initPhysics() {
   stopPhysics()
   physicsLoading.value = true
   try {
-    physics = createPhysicsWorld(activeLevel.value, onWin)
+    physics = createWorld()
     ballReleased.value = false
+    ballTrail.length = 0
+    visualEffects.clear()
     runLoop()
   } finally {
     physicsLoading.value = false
@@ -188,7 +215,7 @@ function rebuildPhysicsFromStrokes(options?: {
 }) {
   stopPhysics()
   drawnShapes.value = []
-  physics = createPhysicsWorld(activeLevel.value, onWin)
+  physics = createWorld()
 
   for (const stroke of strokes.value) {
     const shape = addStrokeToWorld(physics, stroke)
@@ -229,7 +256,12 @@ function runLoop() {
   const tick = () => {
     if (!physics) return
     physics.step()
+
     if (ballReleased.value && isBallReleased(physics)) {
+      const { x, y } = getBallCanvasTransform(physics)
+      ballTrail.unshift({ x, y })
+      if (ballTrail.length > TRAIL_LENGTH) ballTrail.pop()
+
       if (isBallLost(physics)) {
         simMessage.value = 'Ball fell off — retry!'
       } else if (isBallSettled(physics)) {
@@ -241,48 +273,14 @@ function runLoop() {
         settledFrames = 0
       }
     }
+
+    const shake = visualEffects.update()
+    effectShakeX = shake.shakeX
+    effectShakeY = shake.shakeY
     drawFrame()
     animFrame = requestAnimationFrame(tick)
   }
   animFrame = requestAnimationFrame(tick)
-}
-
-function drawBall(ctx: CanvasRenderingContext2D) {
-  if (!physics) return
-  const { x, y } = getBallCanvasTransform(physics)
-  const radius = activeLevel.value.ball.radius
-  const scale = layoutScale.value
-  ctx.beginPath()
-  ctx.arc(x, y, radius, 0, Math.PI * 2)
-  ctx.fillStyle = ballReleased.value ? '#ef4444' : 'rgba(239, 68, 68, 0.55)'
-  ctx.fill()
-  ctx.strokeStyle = '#fca5a5'
-  ctx.lineWidth = 2 * scale
-  if (!ballReleased.value) {
-    ctx.setLineDash([4 * scale, 4 * scale])
-  }
-  ctx.stroke()
-  ctx.setLineDash([])
-}
-
-function drawShape(ctx: CanvasRenderingContext2D, shape: DrawnShape) {
-  if (!physics || shape.localPolygon.length < 3) return
-  const { x, y, angle } = getShapeCanvasTransform(shape)
-  ctx.save()
-  ctx.translate(x, y)
-  ctx.rotate(angle)
-  ctx.beginPath()
-  ctx.moveTo(shape.localPolygon[0].x, shape.localPolygon[0].y)
-  for (let i = 1; i < shape.localPolygon.length; i++) {
-    ctx.lineTo(shape.localPolygon[i].x, shape.localPolygon[i].y)
-  }
-  ctx.closePath()
-  ctx.fillStyle = '#f59e0b'
-  ctx.fill()
-  ctx.strokeStyle = '#d97706'
-  ctx.lineWidth = 1.5 * layoutScale.value
-  ctx.stroke()
-  ctx.restore()
 }
 
 function drawFrame() {
@@ -300,49 +298,44 @@ function drawFrame() {
 
   const levelData = activeLevel.value
   const scale = layoutScale.value
+  const time = performance.now()
 
   ctx.clearRect(0, 0, w, h)
+  ctx.save()
+  ctx.translate(effectShakeX, effectShakeY)
 
-  const gradient = ctx.createLinearGradient(0, 0, 0, h)
-  gradient.addColorStop(0, '#0f172a')
-  gradient.addColorStop(1, '#1e293b')
-  ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, w, h)
+  drawBackground(ctx, w, h, time)
 
   for (const body of levelData.static_bodies) {
-    ctx.save()
-    ctx.translate(body.x, body.y)
-    if (body.angle) ctx.rotate(body.angle)
-    ctx.fillStyle = '#64748b'
-    if (body.type === 'circle') {
-      ctx.beginPath()
-      ctx.arc(0, 0, body.radius ?? 20 * scale, 0, Math.PI * 2)
-      ctx.fill()
-    } else {
-      ctx.fillRect(-(body.width ?? 40 * scale) / 2, -(body.height ?? 16 * scale) / 2, body.width ?? 40 * scale, body.height ?? 16 * scale)
-    }
-    ctx.restore()
+    drawStaticBody(ctx, body, scale)
   }
 
   const target = levelData.target
-  ctx.beginPath()
-  ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(34, 197, 94, 0.35)'
-  ctx.fill()
-  ctx.strokeStyle = '#22c55e'
-  ctx.lineWidth = 3 * scale
-  ctx.stroke()
-  ctx.fillStyle = '#22c55e'
-  ctx.font = `bold ${Math.max(11, 13 * scale)}px system-ui, sans-serif`
-  ctx.textAlign = 'center'
-  ctx.fillText('TARGET', target.x, target.y + 4 * scale)
+  drawTarget(ctx, target.x, target.y, target.radius, scale, time)
 
   if (physics) {
     for (const shape of physics.drawnShapes) {
-      drawShape(ctx, shape)
+      const { x, y, angle } = getShapeCanvasTransform(shape)
+      drawDrawnShape(ctx, shape.localPolygon, x, y, angle, scale)
     }
-    drawBall(ctx)
+
+    const ballTransform = getBallCanvasTransform(physics)
+    const vel = physics.ballBody.getLinearVelocity()
+    drawBall(
+      ctx,
+      ballTransform.x,
+      ballTransform.y,
+      levelData.ball.radius,
+      ballTransform.angle,
+      scale,
+      ballReleased.value,
+      { x: vel.x, y: vel.y },
+      ballReleased.value ? ballTrail : [],
+    )
   }
+
+  visualEffects.draw(ctx)
+  ctx.restore()
 
   if (currentStroke.value.length >= 2) {
     const center = strokeCentroid(currentStroke.value)
@@ -459,6 +452,8 @@ function resetLevelLocal() {
   drawnShapes.value = []
   currentStroke.value = []
   ballReleased.value = false
+  ballTrail.length = 0
+  visualEffects.clear()
   resizeCanvas()
   initPhysics()
 }

@@ -1,4 +1,5 @@
 import planck from 'planck'
+import type { CollisionEvent } from './effects'
 import type { GravityLevel, GravityStaticBody } from './levels'
 import { DESIGN_HEIGHT, scaledStrokeWidth } from './levels'
 import {
@@ -7,6 +8,8 @@ import {
   worldToLocal,
   type Point,
 } from './strokeMesh'
+
+export type { CollisionEvent }
 
 type PlanckWorld = planck.World
 type PlanckBody = planck.Body
@@ -139,7 +142,29 @@ function createLevelStatic(world: PlanckWorld, spec: GravityStaticBody): void {
   addStaticBox(world, spec.x, spec.y, spec.width ?? 40, spec.height ?? 16, spec.angle ?? 0)
 }
 
-export function createPhysicsWorld(level: GravityLevel, onWin: () => void): PhysicsWorld {
+const BALL_COLLISION_SPEED = 2.5
+const SHAPE_COLLISION_SPEED = 1.8
+/** Cap for normalizing collision intensity. */
+const MAX_IMPACT_SPEED = 18
+
+function contactPoint(contact: planck.Contact): { x: number; y: number } | null {
+  const manifold = contact.getWorldManifold(null)
+  if (!manifold || manifold.pointCount === 0) return null
+  const p = manifold.points[0]
+  return { x: p.x, y: p.y }
+}
+
+function relativeImpactSpeed(bodyA: PlanckBody, bodyB: PlanckBody): number {
+  const velA = bodyA.getLinearVelocity()
+  const velB = bodyB.getLinearVelocity()
+  return Math.hypot(velA.x - velB.x, velA.y - velB.y)
+}
+
+export function createPhysicsWorld(
+  level: GravityLevel,
+  onWin: () => void,
+  onCollision?: (event: CollisionEvent) => void,
+): PhysicsWorld {
   const layoutScale = level.layout_scale ?? 1
   const heightScale = level.world_height / DESIGN_HEIGHT
   const world = planck.World({ gravity: planck.Vec2(0, GRAVITY * heightScale) })
@@ -187,14 +212,51 @@ export function createPhysicsWorld(level: GravityLevel, onWin: () => void): Phys
   }
 
   world.on('begin-contact', (contact) => {
-    if (!state.ballReleased) return
     const fixtureA = contact.getFixtureA()
     const fixtureB = contact.getFixtureB()
     const bodyA = fixtureA.getBody()
     const bodyB = fixtureB.getBody()
+
     const ballTouchesTarget =
       (bodyA === ballBody && bodyB === targetBody) || (bodyB === ballBody && bodyA === targetBody)
-    if (ballTouchesTarget) onWin()
+    if (ballTouchesTarget && state.ballReleased) {
+      onWin()
+      return
+    }
+
+    if (!onCollision) return
+
+    const point = contactPoint(contact)
+    if (!point) return
+
+    const impact = relativeImpactSpeed(bodyA, bodyB)
+    const involvesBall = bodyA === ballBody || bodyB === ballBody
+    const involvesDrawnShape = state.drawnShapes.some(
+      (s) => s.body === bodyA || s.body === bodyB,
+    )
+
+    if (involvesBall && state.ballReleased && impact >= BALL_COLLISION_SPEED) {
+      onCollision({
+        x: point.x,
+        y: point.y,
+        intensity: Math.min(1, impact / MAX_IMPACT_SPEED),
+        kind: 'ball',
+      })
+      return
+    }
+
+    if (
+      involvesDrawnShape &&
+      impact >= SHAPE_COLLISION_SPEED &&
+      (bodyA.getType() === 'dynamic' || bodyB.getType() === 'dynamic')
+    ) {
+      onCollision({
+        x: point.x,
+        y: point.y,
+        intensity: Math.min(1, impact / (MAX_IMPACT_SPEED * 0.75)),
+        kind: 'shape',
+      })
+    }
   })
 
   return state
