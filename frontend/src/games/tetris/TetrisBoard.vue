@@ -11,6 +11,7 @@ import {
   type BoardEffect,
   type Particle,
 } from './render'
+import NextPiecePreview from './NextPiecePreview.vue'
 
 const props = defineProps<{
   gameState: TetrisGameState
@@ -85,6 +86,14 @@ const flashingLevels = ref<Record<string, boolean>>({})
 const prevBoardSnapshots = ref<
   Record<string, { lines: number; level: number; alive: boolean; filled: number }>
 >({})
+
+function nextPieceType(board: TetrisBoardState | undefined): string | null {
+  return board?.next_queue?.[0] ?? null
+}
+
+function nextPieceColor(board: TetrisBoardState | undefined): string | null {
+  return board?.next_colors?.[0] ?? null
+}
 
 function setCanvasRef(id: string, el: HTMLCanvasElement | null) {
   canvasRefs.value[id] = el
@@ -374,10 +383,22 @@ onUnmounted(() => {
             · {{ gameState.boards[player.id]?.lines_cleared ?? 0 }} lines
           </span>
         </div>
-        <canvas
-          :ref="(el) => setCanvasRef(player.id, el as HTMLCanvasElement | null)"
-          class="board-canvas"
-        />
+        <div class="board-body">
+          <canvas
+            :ref="(el) => setCanvasRef(player.id, el as HTMLCanvasElement | null)"
+            class="board-canvas"
+          />
+          <div
+            class="next-overlay"
+            :class="{ compact: player.id !== playerId }"
+          >
+            <NextPiecePreview
+              :piece-type="nextPieceType(gameState.boards[player.id])"
+              :color="nextPieceColor(gameState.boards[player.id])"
+              :compact="player.id !== playerId"
+            />
+          </div>
+        </div>
         <Transition name="line-pop">
           <div
             v-if="lineClearPop && player.id === playerId"
@@ -551,10 +572,43 @@ onUnmounted(() => {
 }
 
 .board-canvas {
-  flex: 1;
   width: 100%;
+  height: 100%;
   min-height: 0;
   display: block;
+}
+
+.board-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.next-overlay {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  pointer-events: none;
+  padding: 0.3rem 0.4rem 0.35rem;
+  border-radius: 6px;
+  background: rgba(10, 14, 20, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.next-overlay.compact {
+  top: 0.35rem;
+  right: 0.35rem;
+  padding: 0.2rem 0.28rem 0.25rem;
+}
+
+.board-panel.featured .next-overlay:not(.compact) {
+  top: 0.6rem;
+  right: 0.6rem;
+  padding: 0.35rem 0.45rem 0.4rem;
 }
 
 .line-clear-pop {

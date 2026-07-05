@@ -135,6 +135,32 @@ def test_gravity_tick_advances(engine: TetrisEngine, state: dict) -> None:
     assert state["boards"][pid]["active"]["y"] >= start_y
 
 
+def test_resting_piece_locks_without_hard_drop(engine: TetrisEngine, state: dict) -> None:
+    from app.games.tetris.engine import LOCK_DELAY_TICKS
+
+    player = state["players"][0]
+    pid = player["id"]
+    board = state["boards"][pid]
+    width = state["board_width"]
+    height = state["board_height"]
+
+    for x in range(width):
+        board["grid"][19][x] = "#111111"
+    board["active"] = {"type": "O", "rotation": 0, "x": 4, "y": 17}
+    board["input_queue"] = []
+    board["lock_counter"] = 0
+    board["drop_counter"] = 0
+
+    assert not engine._can_move_down(board, width, height)
+
+    for _ in range(LOCK_DELAY_TICKS):
+        engine.tick(state)
+
+    new_active = state["boards"][pid]["active"]
+    assert new_active is not None
+    assert new_active["y"] == 0
+
+
 def test_ai_tick_does_not_crash(engine: TetrisEngine) -> None:
     players = make_players(2, ai_count=2)
     for p in players:

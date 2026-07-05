@@ -220,6 +220,22 @@ class TetrisEngine(GamePlugin):
             return []
         return piece_cells(active["type"], active["rotation"], active["x"], active["y"])
 
+    def _can_move_down(self, board: dict, width: int, height: int) -> bool:
+        active = board.get("active")
+        if not active:
+            return False
+        cells = piece_cells(active["type"], active["rotation"], active["x"], active["y"] + 1)
+        return self._cells_valid(board, cells, width, height)
+
+    def _lock_active_piece(self, board: dict, width: int, height: int) -> tuple[int, bool]:
+        """Lock the active piece, spawn the next one. Returns (lines_cleared, still_alive)."""
+        lines = self._lock_piece(board, width, height)
+        board["ai_has_plan"] = False
+        still_alive = self._spawn_or_eliminate(board, width, height)
+        board["drop_counter"] = 0
+        board["lock_counter"] = 0
+        return lines, still_alive
+
     def _try_move(self, board: dict, dx: int, dy: int, width: int, height: int) -> bool:
         active = board.get("active")
         if not active:
@@ -377,12 +393,11 @@ class TetrisEngine(GamePlugin):
             if action_delay_ticks is not None:
                 board["ai_next_action_tick"] = tick + action_delay_ticks
             if action.get("type") == "hard_drop":
-                lines = self._lock_piece(board, width, height)
-                board["ai_has_plan"] = False
+                lines, still_alive = self._lock_active_piece(board, width, height)
                 if lines:
                     events.append({"type": "lines_cleared", "lines": lines})
-                self._spawn_or_eliminate(board, width, height)
-                board["drop_counter"] = 0
+                if not still_alive:
+                    events.append({"type": "player_eliminated", "reason": "topped_out"})
                 break
             if moved:
                 board["lock_counter"] = 0
@@ -394,22 +409,21 @@ class TetrisEngine(GamePlugin):
             return events
 
         drop_interval = _drop_interval_ticks(board["level"], base_drop)
-        board["drop_counter"] += 1
-        gravity_step = board["drop_counter"] >= drop_interval
 
-        if gravity_step:
-            board["drop_counter"] = 0
-            if not self._try_move(board, 0, 1, width, height):
-                board["lock_counter"] += 1
-                if board["lock_counter"] >= LOCK_DELAY_TICKS:
-                    lines = self._lock_piece(board, width, height)
-                    board["ai_has_plan"] = False
-                    if lines:
-                        events.append({"type": "lines_cleared", "lines": lines})
-                    if not self._spawn_or_eliminate(board, width, height):
-                        events.append({"type": "player_eliminated", "reason": "topped_out"})
-            else:
-                board["lock_counter"] = 0
+        if not self._can_move_down(board, width, height):
+            board["lock_counter"] += 1
+            if board["lock_counter"] >= LOCK_DELAY_TICKS:
+                lines, still_alive = self._lock_active_piece(board, width, height)
+                if lines:
+                    events.append({"type": "lines_cleared", "lines": lines})
+                if not still_alive:
+                    events.append({"type": "player_eliminated", "reason": "topped_out"})
+        else:
+            board["lock_counter"] = 0
+            board["drop_counter"] += 1
+            if board["drop_counter"] >= drop_interval:
+                board["drop_counter"] = 0
+                self._try_move(board, 0, 1, width, height)
 
         return events
 
