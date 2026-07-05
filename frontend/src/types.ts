@@ -5,6 +5,7 @@ export interface Player {
   role: 'spymaster' | 'operative' | null
   is_ai: boolean
   is_connected: boolean
+  ai_difficulty?: 'easy' | 'normal' | 'hard'
 }
 
 export interface Room {
@@ -136,7 +137,43 @@ export interface DuelGameState {
   viewer_id: string | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState
+export interface TetrisActivePiece {
+  type: string
+  rotation: number
+  x: number
+  y: number
+}
+
+export interface TetrisBoardState {
+  grid: (string | null)[][]
+  active: TetrisActivePiece | null
+  active_color: string | null
+  next_queue: string[]
+  next_colors: string[]
+  alive: boolean
+  lines_cleared: number
+  level: number
+  color: string
+  drop_interval_ticks?: number
+}
+
+export interface TetrisGameState {
+  phase: 'countdown' | 'playing' | 'finished'
+  countdown_ends_at: string | null
+  tick: number
+  board_width: number
+  board_height: number
+  boards: Record<string, TetrisBoardState>
+  players: Player[]
+  settings: Record<string, unknown>
+  winner: string | null
+  win_reason: string | null
+  final_score: number | null
+  last_action: Record<string, unknown> | null
+  viewer_id: string | null
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -152,6 +189,10 @@ export function isSnakeState(state: GameState): state is SnakeGameState {
 
 export function isDuelState(state: GameState): state is DuelGameState {
   return 'fighters' in state
+}
+
+export function isTetrisState(state: GameState): state is TetrisGameState {
+  return 'boards' in state && 'board_width' in state
 }
 
 export interface WsMessage {

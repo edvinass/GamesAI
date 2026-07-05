@@ -8,9 +8,10 @@ import CodenamesBoard from '@/games/codenames/CodenamesBoard.vue'
 import SpyfallBoard from '@/games/spyfall/SpyfallBoard.vue'
 import SnakeBoard from '@/games/snake/SnakeBoard.vue'
 import DuelBoard from '@/games/duel/DuelBoard.vue'
+import TetrisBoard from '@/games/tetris/TetrisBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +33,7 @@ const gameTitle = computed(() => {
   if (type === 'codenames') return 'Codenames'
   if (type === 'snake') return 'Multiplayer Snake'
   if (type === 'duel') return 'Side Duel'
+  if (type === 'tetris') return 'Multiplier Tetris'
   return type ?? 'Game'
 })
 
@@ -51,7 +53,11 @@ const duelState = computed(() =>
   gameState.value && isDuelState(gameState.value) ? gameState.value as DuelGameState : null,
 )
 
-const isFullscreenGame = computed(() => Boolean(snakeState.value || duelState.value))
+const tetrisState = computed(() =>
+  gameState.value && isTetrisState(gameState.value) ? gameState.value as TetrisGameState : null,
+)
+
+const isFullscreenGame = computed(() => Boolean(snakeState.value || duelState.value || tetrisState.value))
 
 onMounted(async () => {
   try {
@@ -144,6 +150,14 @@ function backToLobby() {
     <DuelBoard
       v-else-if="duelState && room"
       :game-state="duelState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <TetrisBoard
+      v-else-if="tetrisState && room"
+      :game-state="tetrisState"
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"

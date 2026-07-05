@@ -30,6 +30,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '⚔️',
     lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
   },
+  tetris: {
+    name: 'Multiplier Tetris',
+    description: 'Each player stacks alone — speed rises, last board standing wins.',
+    emoji: '🧱',
+    lobbyHint: 'Need 2–4 players. Share the link or add AI to fill seats.',
+  },
 }
 
 export interface GameListItem {

@@ -65,8 +65,8 @@ class RoomService:
             room_id=room.id,
             nickname=nickname,
             session_token_hash=hash_session_token(token),
-            team=Team.RED if game_type not in ("spyfall", "snake", "duel") else None,
-            role=Role.SPYMASTER if game_type not in ("spyfall", "snake", "duel") else None,
+            team=Team.RED if game_type not in ("spyfall", "snake", "duel", "tetris") else None,
+            role=Role.SPYMASTER if game_type not in ("spyfall", "snake", "duel", "tetris") else None,
             is_ai=False,
             is_connected=True,
         )
@@ -102,7 +102,7 @@ class RoomService:
         return room, player, token
 
     def _assign_lobby_slot(self, room: Room) -> tuple[Team | None, Role | None]:
-        if room.game_type in ("spyfall", "snake", "duel"):
+        if room.game_type in ("spyfall", "snake", "duel", "tetris"):
             return None, None
 
         red = [p for p in room.players if p.team == Team.RED]
@@ -166,7 +166,7 @@ class RoomService:
         if room.status != RoomStatus.LOBBY:
             raise ValueError("Cannot add AI after game started")
 
-        if room.game_type in ("spyfall", "snake", "duel"):
+        if room.game_type in ("spyfall", "snake", "duel", "tetris"):
             settings = get_game(room.game_type).validate_settings(room.settings)
             if len(room.players) >= settings["max_players"]:
                 raise ValueError(f"Maximum {settings['max_players']} players allowed")
@@ -183,6 +183,13 @@ class RoomService:
                 is_connected=True,
             )
             self.db.add(player)
+            await self.db.flush()
+            if room.game_type == "tetris":
+                settings = dict(room.settings or {})
+                difficulties = dict(settings.get("ai_difficulties") or {})
+                difficulties[str(player.id)] = "normal"
+                settings["ai_difficulties"] = difficulties
+                room.settings = get_game(room.game_type).validate_settings(settings)
             await self.db.commit()
             await self.db.refresh(room, ["players"])
             return room
@@ -235,6 +242,12 @@ class RoomService:
             raise ValueError("Host cannot remove themselves")
 
         await self.db.delete(target)
+        if room.game_type == "tetris":
+            settings = dict(room.settings or {})
+            difficulties = dict(settings.get("ai_difficulties") or {})
+            difficulties.pop(str(target_id), None)
+            settings["ai_difficulties"] = difficulties
+            room.settings = get_game(room.game_type).validate_settings(settings)
         await self.db.commit()
         await self.db.refresh(room, ["players"])
         return room
@@ -316,6 +329,11 @@ class RoomService:
                 await self._setup_snake_solo(room)
             elif room.game_type == "duel":
                 await self._setup_duel_solo(room)
+            elif room.game_type == "tetris":
+                await self._setup_tetris_solo(room)
+            await self.db.refresh(room, ["players"])
+        elif settings.get("single_player") and room.game_type == "tetris":
+            await self._setup_tetris_single_player(room)
             await self.db.refresh(room, ["players"])
 
         players_data = [self._player_data(p) for p in room.players]
@@ -449,6 +467,46 @@ class RoomService:
                 is_connected=True,
             )
         )
+        await self.db.flush()
+
+    async def _setup_tetris_single_player(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+    async def _setup_tetris_solo(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+        for i in range(2):
+            token = generate_session_token()
+            self.db.add(
+                RoomPlayer(
+                    room_id=room.id,
+                    nickname=f"🤖 AI Player {i + 1}",
+                    session_token_hash=hash_session_token(token),
+                    team=None,
+                    role=None,
+                    is_ai=True,
+                    is_connected=True,
+                )
+            )
+        await self.db.flush()
+
+        settings = dict(room.settings or {})
+        difficulties = dict(settings.get("ai_difficulties") or {})
+        solo_defaults = list(settings.get("solo_ai_difficulties") or ["normal", "normal"])
+        ai_index = 0
+        for p in room.players:
+            if p.is_ai:
+                default = solo_defaults[ai_index] if ai_index < len(solo_defaults) else "normal"
+                difficulties.setdefault(str(p.id), default)
+                ai_index += 1
+        settings["ai_difficulties"] = difficulties
+        room.settings = get_game("tetris").validate_settings(settings)
         await self.db.flush()
 
     def _player_data(self, player: RoomPlayer) -> dict:
