@@ -11,11 +11,13 @@ import SpyfallLobby from '@/games/spyfall/SpyfallLobby.vue'
 import SnakeLobby from '@/games/snake/SnakeLobby.vue'
 import DuelLobby from '@/games/duel/DuelLobby.vue'
 import TetrisLobby from '@/games/tetris/TetrisLobby.vue'
+import GravityMasterLobby from '@/games/gravity_master/GravityMasterLobby.vue'
 import { validateLobby as validateCodenamesLobby } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
 import { validateLobby as validateDuelLobby } from '@/games/duel/lobbyValidation'
 import { validateLobby as validateTetrisLobby } from '@/games/tetris/lobbyValidation'
+import { validateLobby as validateGravityMasterLobby } from '@/games/gravity_master/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
@@ -73,6 +75,7 @@ const isSpyfall = computed(() => room.value?.game_type === 'spyfall')
 const isSnake = computed(() => room.value?.game_type === 'snake')
 const isDuel = computed(() => room.value?.game_type === 'duel')
 const isTetris = computed(() => room.value?.game_type === 'tetris')
+const isGravityMaster = computed(() => room.value?.game_type === 'gravity_master')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
@@ -83,6 +86,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'snake') return validateSnakeLobby(room.value)
   if (room.value.game_type === 'duel') return validateDuelLobby(room.value)
   if (room.value.game_type === 'tetris') return validateTetrisLobby(room.value)
+  if (room.value.game_type === 'gravity_master') return validateGravityMasterLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
@@ -291,6 +295,17 @@ async function copyUrl() {
         @add-ai="addAi()"
         @remove="removePlayer"
         @set-ai-difficulty="setAiDifficulty"
+      />
+
+      <GravityMasterLobby
+        v-else-if="isGravityMaster"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
       />
 
       <template v-else-if="isCodenames">
