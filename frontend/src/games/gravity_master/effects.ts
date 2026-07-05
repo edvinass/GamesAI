@@ -380,10 +380,6 @@ export function drawDrawnShape(
   ctx.fillStyle = grad
   ctx.fill()
 
-  ctx.strokeStyle = '#b45309'
-  ctx.lineWidth = 1.8 * scale
-  ctx.stroke()
-
   ctx.clip()
   ctx.fillStyle = 'rgba(255, 255, 255, 0.12)'
   ctx.fillRect(-200 * scale, -200 * scale, 400 * scale, 80 * scale)

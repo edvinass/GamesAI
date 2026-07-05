@@ -373,9 +373,6 @@ function drawFrame() {
       ctx.closePath()
       ctx.fillStyle = 'rgba(245, 158, 11, 0.35)'
       ctx.fill()
-      ctx.strokeStyle = 'rgba(245, 158, 11, 0.8)'
-      ctx.lineWidth = 1.5 * scale
-      ctx.stroke()
       ctx.restore()
     }
   }
