@@ -88,6 +88,27 @@ const boardLayoutClass = computed(() => {
   return 'layout-4'
 })
 
+/** Min grid width to show three Tetris boards in one row (~180px per board + gaps). */
+const LAYOUT_3_ROW_MIN_WIDTH = 560
+const layout3Row = ref(typeof window !== 'undefined' && window.innerWidth >= LAYOUT_3_ROW_MIN_WIDTH)
+
+const boardsGridClass = computed(() => ({
+  [boardLayoutClass.value]: true,
+  'layout-3-row': boardLayoutClass.value === 'layout-3' && layout3Row.value,
+}))
+
+const displayPlayers = computed(() => {
+  const players = props.gameState.players
+  if (players.length !== 3) return players
+
+  const me = players.find((p) => p.id === props.playerId)
+  if (!me) return players
+
+  const others = players.filter((p) => p.id !== props.playerId)
+  if (layout3Row.value) return [others[0], me, others[1]]
+  return [me, ...others]
+})
+
 const overlayState = computed(() => {
   if (props.gameState.phase === 'countdown') return 'countdown'
   if (props.gameState.phase === 'finished') return 'finished'
@@ -400,7 +421,11 @@ function animationLoop(now: number) {
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
   if (gridRef.value) {
-    resizeObserver = new ResizeObserver(() => drawAll())
+    resizeObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0
+      layout3Row.value = width >= LAYOUT_3_ROW_MIN_WIDTH
+      drawAll()
+    })
     resizeObserver.observe(gridRef.value)
   }
   for (const player of props.gameState.players) {
@@ -433,9 +458,9 @@ onUnmounted(() => {
 
 <template>
   <div class="tetris-board">
-    <div ref="gridRef" class="boards-grid" :class="boardLayoutClass">
+    <div ref="gridRef" class="boards-grid" :class="boardsGridClass">
       <div
-        v-for="(player, index) in gameState.players"
+        v-for="(player, index) in displayPlayers"
         :key="player.id"
         class="board-panel stagger-in"
         :style="{ animationDelay: `${index * 0.08}s` }"
@@ -584,6 +609,15 @@ onUnmounted(() => {
 
 .layout-3 .featured {
   grid-column: 1 / -1;
+}
+
+.layout-3.layout-3-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: 1fr;
+}
+
+.layout-3.layout-3-row .featured {
+  grid-column: auto;
 }
 
 .layout-4 {
@@ -918,8 +952,14 @@ onUnmounted(() => {
 
 @media (max-width: 640px) {
   .layout-2,
+  .layout-3,
   .layout-4 {
     grid-template-columns: 1fr;
+    grid-template-rows: unset;
+  }
+
+  .layout-3 .featured {
+    grid-column: auto;
   }
 
   .player-bar {
