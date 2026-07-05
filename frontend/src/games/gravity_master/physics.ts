@@ -12,6 +12,11 @@ type PlanckBody = planck.Body
 
 let nextShapeId = 1
 
+const FIXED_TIMESTEP = 1 / 60
+/** Simulated seconds advanced per animation frame (1 = real-time at 60fps). */
+const PHYSICS_TIME_SCALE = 2
+const GRAVITY = 20
+
 export interface DrawnShape {
   id: number
   body: PlanckBody
@@ -132,7 +137,7 @@ function createLevelStatic(world: PlanckWorld, spec: GravityStaticBody): void {
 }
 
 export function createPhysicsWorld(level: GravityLevel, onWin: () => void): PhysicsWorld {
-  const world = planck.World({ gravity: planck.Vec2(0, 20) })
+  const world = planck.World({ gravity: planck.Vec2(0, GRAVITY) })
 
   createBoundaries(world, level.world_width, level.world_height)
   for (const spec of level.static_bodies) {
@@ -167,7 +172,9 @@ export function createPhysicsWorld(level: GravityLevel, onWin: () => void): Phys
     ballReleased: false,
     onWin,
     step: () => {
-      world.step(1 / 60)
+      for (let i = 0; i < PHYSICS_TIME_SCALE; i++) {
+        world.step(FIXED_TIMESTEP)
+      }
     },
     cleanup: () => {},
   }
@@ -208,5 +215,7 @@ export function isBallLost(world: PhysicsWorld): boolean {
 export function isBallSettled(world: PhysicsWorld): boolean {
   const v = world.ballBody.getLinearVelocity()
   const speed = Math.hypot(v.x, v.y)
-  return speed < 0.8 && Math.abs(world.ballBody.getAngularVelocity()) < 0.05
+  const settleSpeed = 0.8 * PHYSICS_TIME_SCALE
+  const settleSpin = 0.05 * PHYSICS_TIME_SCALE
+  return speed < settleSpeed && Math.abs(world.ballBody.getAngularVelocity()) < settleSpin
 }

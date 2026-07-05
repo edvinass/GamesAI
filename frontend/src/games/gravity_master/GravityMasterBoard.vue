@@ -32,6 +32,7 @@ const emit = defineEmits<{
 }>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const canvasWrapRef = ref<HTMLElement | null>(null)
 const physicsLoading = ref(true)
 
 const strokes = ref<{ x: number; y: number }[][]>([])
@@ -323,9 +324,22 @@ function drawFrame() {
 
 function resizeCanvas() {
   const canvas = canvasRef.value
-  if (!canvas) return
-  canvas.width = level.value.world_width
-  canvas.height = level.value.world_height
+  const wrap = canvasWrapRef.value
+  if (!canvas || !wrap) return
+
+  const worldW = level.value.world_width
+  const worldH = level.value.world_height
+  canvas.width = worldW
+  canvas.height = worldH
+
+  const wrapW = wrap.clientWidth
+  const wrapH = wrap.clientHeight
+  if (wrapW <= 0 || wrapH <= 0) return
+
+  const scale = Math.min(wrapW / worldW, wrapH / worldH)
+  canvas.style.width = `${Math.floor(worldW * scale)}px`
+  canvas.style.height = `${Math.floor(worldH * scale)}px`
+
   drawFrame()
 }
 
@@ -360,15 +374,20 @@ watch(
   },
 )
 
+let resizeObserver: ResizeObserver | null = null
+
 onMounted(() => {
   resizeCanvas()
   initPhysics()
-  window.addEventListener('resize', resizeCanvas)
+  if (canvasWrapRef.value) {
+    resizeObserver = new ResizeObserver(() => resizeCanvas())
+    resizeObserver.observe(canvasWrapRef.value)
+  }
 })
 
 onUnmounted(() => {
   stopPhysics()
-  window.removeEventListener('resize', resizeCanvas)
+  resizeObserver?.disconnect()
 })
 </script>
 
@@ -417,7 +436,7 @@ onUnmounted(() => {
       </ul>
     </aside>
 
-    <div class="canvas-wrap card">
+    <div ref="canvasWrapRef" class="canvas-wrap card">
       <canvas
         ref="canvasRef"
         class="game-canvas"
@@ -434,9 +453,10 @@ onUnmounted(() => {
 <style scoped>
 .gravity-board {
   flex: 1;
+  width: 100%;
   display: flex;
-  gap: 1rem;
-  padding: 0 1rem 1rem;
+  gap: 0.75rem;
+  padding: 0 0.75rem 0.75rem;
   min-height: 0;
   overflow: hidden;
 }
@@ -524,18 +544,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.5rem;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .game-canvas {
-  max-width: 100%;
-  max-height: calc(100vh - 140px);
-  width: auto;
-  height: auto;
-  border-radius: var(--radius);
   display: block;
+  border-radius: var(--radius);
 }
 
 .game-canvas.drawing {
@@ -549,6 +565,13 @@ onUnmounted(() => {
 
   .sidebar {
     width: 100%;
+    flex-shrink: 0;
+    max-height: 40vh;
+  }
+
+  .canvas-wrap {
+    flex: 1;
+    min-height: 0;
   }
 }
 </style>
