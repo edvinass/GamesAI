@@ -173,7 +173,41 @@ export interface TetrisGameState {
   viewer_id: string | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState
+export interface GravityMasterLevel {
+  id: number
+  name: string
+  hint: string
+  world_width: number
+  world_height: number
+  max_ink: number
+  ball: { x: number; y: number; radius: number }
+  target: { x: number; y: number; radius: number }
+  static_bodies: Array<{
+    type: 'rect' | 'circle'
+    x: number
+    y: number
+    width?: number
+    height?: number
+    radius?: number
+    angle?: number
+  }>
+}
+
+export interface GravityMasterGameState {
+  phase: 'drawing' | 'simulating' | 'finished'
+  level_index: number
+  levels_total: number
+  level: GravityMasterLevel
+  ink_used: number
+  players: Player[]
+  settings: Record<string, unknown>
+  winner: string | null
+  win_reason: string | null
+  last_action: Record<string, unknown> | null
+  viewer_id: string | null
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -193,6 +227,10 @@ export function isDuelState(state: GameState): state is DuelGameState {
 
 export function isTetrisState(state: GameState): state is TetrisGameState {
   return 'boards' in state && 'board_width' in state
+}
+
+export function isGravityMasterState(state: GameState): state is GravityMasterGameState {
+  return 'level_index' in state && 'levels_total' in state && 'level' in state
 }
 
 export interface WsMessage {

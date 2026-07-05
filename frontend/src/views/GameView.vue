@@ -9,9 +9,10 @@ import SpyfallBoard from '@/games/spyfall/SpyfallBoard.vue'
 import SnakeBoard from '@/games/snake/SnakeBoard.vue'
 import DuelBoard from '@/games/duel/DuelBoard.vue'
 import TetrisBoard from '@/games/tetris/TetrisBoard.vue'
+import GravityMasterBoard from '@/games/gravity_master/GravityMasterBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +35,7 @@ const gameTitle = computed(() => {
   if (type === 'snake') return 'Multiplayer Snake'
   if (type === 'duel') return 'Side Duel'
   if (type === 'tetris') return 'Multiplier Tetris'
+  if (type === 'gravity_master') return 'Gravity Master'
   return type ?? 'Game'
 })
 
@@ -57,7 +59,11 @@ const tetrisState = computed(() =>
   gameState.value && isTetrisState(gameState.value) ? gameState.value as TetrisGameState : null,
 )
 
-const isFullscreenGame = computed(() => Boolean(snakeState.value || duelState.value || tetrisState.value))
+const gravityMasterState = computed(() =>
+  gameState.value && isGravityMasterState(gameState.value) ? gameState.value as GravityMasterGameState : null,
+)
+
+const isFullscreenGame = computed(() => Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value))
 
 onMounted(async () => {
   try {
@@ -158,6 +164,14 @@ function backToLobby() {
     <TetrisBoard
       v-else-if="tetrisState && room"
       :game-state="tetrisState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <GravityMasterBoard
+      v-else-if="gravityMasterState && room"
+      :game-state="gravityMasterState"
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"

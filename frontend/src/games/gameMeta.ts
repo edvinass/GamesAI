@@ -36,6 +36,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '🧱',
     lobbyHint: 'Need 2–4 players. Share the link or add AI to fill seats.',
   },
+  gravity_master: {
+    name: 'Gravity Master',
+    description: 'Draw shapes that fall and become walls — guide the ball to the target.',
+    emoji: '🪐',
+    lobbyHint: 'Solo puzzle — just you. Start when ready.',
+  },
 }
 
 export interface GameListItem {
