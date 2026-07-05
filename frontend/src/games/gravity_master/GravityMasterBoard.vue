@@ -29,8 +29,6 @@ import {
   isBallReleased,
   isBallSettled,
   releaseBall,
-  removeAllDrawnShapes,
-  removeShapeFromWorld,
   restoreBallMotion,
   type CollisionEvent,
   type DrawnShape,
@@ -137,21 +135,36 @@ function endStroke() {
   drawFrame()
 }
 
+function cancelDrawing() {
+  isDrawing.value = false
+  currentStroke.value = []
+}
+
+function captureBallSnapshot() {
+  if (!physics || !ballReleased.value) return null
+  const pos = physics.ballBody.getPosition()
+  const vel = physics.ballBody.getLinearVelocity()
+  return {
+    ballReleased: true as const,
+    ballPosition: { x: pos.x, y: pos.y },
+    ballVelocity: { x: vel.x, y: vel.y },
+    ballAngle: physics.ballBody.getAngle(),
+    ballAngularVelocity: physics.ballBody.getAngularVelocity(),
+  }
+}
+
 function undoStroke() {
-  if (!canDraw.value || drawnShapes.value.length === 0 || !physics) return
-  const shape = drawnShapes.value.pop()
-  if (shape) removeShapeFromWorld(physics, shape)
+  if (!canDraw.value || strokes.value.length === 0 || !physics) return
+  cancelDrawing()
   strokes.value.pop()
-  drawFrame()
+  rebuildPhysicsFromStrokes(captureBallSnapshot() ?? undefined)
 }
 
 function clearStrokes() {
   if (!canDraw.value || !physics) return
-  removeAllDrawnShapes(physics)
-  drawnShapes.value = []
+  cancelDrawing()
   strokes.value = []
-  currentStroke.value = []
-  drawFrame()
+  rebuildPhysicsFromStrokes(captureBallSnapshot() ?? undefined)
 }
 
 function dropBall() {
@@ -255,30 +268,38 @@ function stopPhysics() {
 function runLoop() {
   const tick = () => {
     if (!physics) return
-    physics.step()
 
-    if (ballReleased.value && isBallReleased(physics)) {
-      const { x, y } = getBallCanvasTransform(physics)
-      ballTrail.unshift({ x, y })
-      if (ballTrail.length > TRAIL_LENGTH) ballTrail.pop()
+    try {
+      physics.step()
 
-      if (isBallLost(physics)) {
-        simMessage.value = 'Ball fell off — retry!'
-      } else if (isBallSettled(physics)) {
-        settledFrames += 1
-        if (settledFrames > 120 && simMessage.value === '') {
-          simMessage.value = 'Ball stopped — draw more or retry!'
+      if (ballReleased.value && isBallReleased(physics)) {
+        const { x, y } = getBallCanvasTransform(physics)
+        ballTrail.unshift({ x, y })
+        if (ballTrail.length > TRAIL_LENGTH) ballTrail.pop()
+
+        if (isBallLost(physics)) {
+          simMessage.value = 'Ball fell off — retry!'
+        } else if (isBallSettled(physics)) {
+          settledFrames += 1
+          if (settledFrames > 120 && simMessage.value === '') {
+            simMessage.value = 'Ball stopped — draw more or retry!'
+          }
+        } else {
+          settledFrames = 0
         }
-      } else {
-        settledFrames = 0
       }
+
+      const shake = visualEffects.update()
+      effectShakeX = shake.shakeX
+      effectShakeY = shake.shakeY
+      drawFrame()
+    } catch (err) {
+      console.error('[GravityMaster] physics tick failed:', err)
     }
 
-    const shake = visualEffects.update()
-    effectShakeX = shake.shakeX
-    effectShakeY = shake.shakeY
-    drawFrame()
-    animFrame = requestAnimationFrame(tick)
+    if (physics) {
+      animFrame = requestAnimationFrame(tick)
+    }
   }
   animFrame = requestAnimationFrame(tick)
 }
@@ -517,15 +538,14 @@ onUnmounted(() => {
         <button type="button" class="btn-secondary" :disabled="!hasDrawnShapes || physicsLoading" @click="clearStrokes">
           Clear
         </button>
+        <button type="button" class="btn-secondary" :disabled="physicsLoading" @click="retryLevel">
+          Retry level
+        </button>
       </div>
 
       <p v-if="simMessage" class="sim-message" :class="{ success: simMessage.includes('complete') }">
         {{ simMessage }}
       </p>
-
-      <div v-if="simMessage && !simMessage.includes('complete') && !isFinished" class="actions">
-        <button type="button" class="btn-primary" @click="retryLevel">Retry level</button>
-      </div>
 
       <div v-if="isFinished" class="victory card-inner">
         <h3>Gravity Master!</h3>

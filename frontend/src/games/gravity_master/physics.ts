@@ -20,6 +20,8 @@ const FIXED_TIMESTEP = 1 / 60
 /** Simulated seconds advanced per animation frame (1 = real-time at 60fps). */
 const PHYSICS_TIME_SCALE = 2
 const GRAVITY = 20
+/** Gravity multiplier for falling bodies (drawn shapes and ball). */
+const FALL_GRAVITY_SCALE = 2.2
 
 export interface DrawnShape {
   id: number
@@ -34,6 +36,7 @@ export interface PhysicsWorld {
   worldHeight: number
   strokeWidth: number
   layoutScale: number
+  ballRadius: number
   ballBody: PlanckBody
   targetBody: PlanckBody
   drawnShapes: DrawnShape[]
@@ -48,7 +51,7 @@ function attachTriangulatedStroke(body: PlanckBody, mesh: ReturnType<typeof tria
   for (const [a, b, c] of mesh.triangles) {
     body.createFixture(
       planck.Polygon([planck.Vec2(a.x, a.y), planck.Vec2(b.x, b.y), planck.Vec2(c.x, c.y)]),
-      { density: 2.0, friction: 0.85, restitution: 0.12 },
+      { density: 2.0, friction: 0.18, restitution: 0.2 },
     )
   }
 }
@@ -65,8 +68,9 @@ export function addStrokeToWorld(world: PhysicsWorld, stroke: Point[]): DrawnSha
   const body = world.world.createBody({
     type: 'dynamic',
     position: planck.Vec2(center.x, center.y),
-    linearDamping: 0.05,
-    angularDamping: 0.08,
+    gravityScale: FALL_GRAVITY_SCALE,
+    linearDamping: 0.02,
+    angularDamping: 0.05,
   })
 
   attachTriangulatedStroke(body, mesh)
@@ -127,13 +131,6 @@ function addStaticCircle(world: PlanckWorld, x: number, y: number, radius: numbe
   body.createFixture(planck.Circle(radius), { friction: 0.9 })
 }
 
-function createBoundaries(world: PlanckWorld, width: number, height: number, layoutScale: number): void {
-  const thickness = 24 * layoutScale
-  addStaticBox(world, width / 2, height + thickness / 2, width, thickness)
-  addStaticBox(world, -thickness / 2, height / 2, thickness, height * 2)
-  addStaticBox(world, width + thickness / 2, height / 2, thickness, height * 2)
-}
-
 function createLevelStatic(world: PlanckWorld, spec: GravityStaticBody): void {
   if (spec.type === 'circle') {
     addStaticCircle(world, spec.x, spec.y, spec.radius ?? 20)
@@ -169,7 +166,6 @@ export function createPhysicsWorld(
   const heightScale = level.world_height / DESIGN_HEIGHT
   const world = planck.World({ gravity: planck.Vec2(0, GRAVITY * heightScale) })
 
-  createBoundaries(world, level.world_width, level.world_height, layoutScale)
   for (const spec of level.static_bodies) {
     createLevelStatic(world, spec)
   }
@@ -177,8 +173,9 @@ export function createPhysicsWorld(
   const ballBody = world.createBody({
     type: 'static',
     position: planck.Vec2(level.ball.x, level.ball.y),
+    gravityScale: FALL_GRAVITY_SCALE,
     linearDamping: 0.02,
-    angularDamping: 0.02,
+    angularDamping: 0.05,
   })
   ballBody.createFixture(planck.Circle(level.ball.radius), {
     density: 2.5,
@@ -198,6 +195,7 @@ export function createPhysicsWorld(
     worldHeight: level.world_height,
     strokeWidth: scaledStrokeWidth(level),
     layoutScale,
+    ballRadius: level.ball.radius,
     ballBody,
     targetBody,
     drawnShapes: [],
@@ -288,13 +286,14 @@ export function isBallReleased(world: PhysicsWorld): boolean {
 }
 
 export function isBallLost(world: PhysicsWorld): boolean {
+  if (!world.ballReleased) return false
   const pos = world.ballBody.getPosition()
-  const margin = 60 * world.layoutScale
-  const fallMargin = 80 * world.layoutScale
+  const r = world.ballRadius
   return (
-    pos.y > world.worldHeight + fallMargin ||
-    pos.x < -margin ||
-    pos.x > world.worldWidth + margin
+    pos.x < -r ||
+    pos.x > world.worldWidth + r ||
+    pos.y < -r ||
+    pos.y > world.worldHeight + r
   )
 }
 
