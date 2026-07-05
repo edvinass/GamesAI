@@ -109,12 +109,16 @@ const baseDropTicks = computed({
 const soloAiDifficulties = computed({
   get: () => {
     const raw = room.value?.settings?.solo_ai_difficulties
-    if (Array.isArray(raw) && raw.length >= 2) {
-      return [String(raw[0]), String(raw[1])]
+    const maxAi = Math.max(0, Number(room.value?.settings?.max_players ?? 4) - 1)
+    if (Array.isArray(raw) && raw.length >= maxAi) {
+      return raw.slice(0, maxAi).map(String)
     }
-    return ['normal', 'normal']
+    return Array.from({ length: maxAi }, () => 'normal')
   },
-  set: (val: string[]) => updateSettings({ solo_ai_difficulties: val.slice(0, 2) }),
+  set: (val: string[]) => {
+    const maxAi = Math.max(0, Number(room.value?.settings?.max_players ?? 4) - 1)
+    updateSettings({ solo_ai_difficulties: val.slice(0, maxAi) })
+  },
 })
 
 async function handleJoin() {

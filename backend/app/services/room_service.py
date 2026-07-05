@@ -476,12 +476,17 @@ class RoomService:
         await self.db.flush()
 
     async def _setup_tetris_solo(self, room: Room) -> None:
+        settings = get_game("tetris").validate_settings(room.settings or {})
+        max_players = settings["max_players"]
+        human_count = sum(1 for p in room.players if not p.is_ai)
+        target_ai = max(0, max_players - human_count)
+
         for p in list(room.players):
             if p.is_ai:
                 await self.db.delete(p)
         await self.db.flush()
 
-        for i in range(2):
+        for i in range(target_ai):
             token = generate_session_token()
             self.db.add(
                 RoomPlayer(
@@ -498,7 +503,7 @@ class RoomService:
 
         settings = dict(room.settings or {})
         difficulties = dict(settings.get("ai_difficulties") or {})
-        solo_defaults = list(settings.get("solo_ai_difficulties") or ["normal", "normal"])
+        solo_defaults = list(settings.get("solo_ai_difficulties") or ["normal", "normal", "normal"])
         ai_index = 0
         for p in room.players:
             if p.is_ai:

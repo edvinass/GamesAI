@@ -51,7 +51,7 @@ class TetrisEngine(GamePlugin):
             "solo_practice": False,
             "single_player": False,
             "ai_difficulties": {},
-            "solo_ai_difficulties": ["normal", "normal"],
+            "solo_ai_difficulties": ["normal", "normal", "normal"],
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -73,11 +73,12 @@ class TetrisEngine(GamePlugin):
             str(player_id): normalize_ai_difficulty(level)
             for player_id, level in raw_difficulties.items()
         }
-        solo_defaults = list(merged.get("solo_ai_difficulties") or ["normal", "normal"])
-        while len(solo_defaults) < 2:
+        solo_defaults = list(merged.get("solo_ai_difficulties") or ["normal", "normal", "normal"])
+        max_ai = merged["max_players"] - 1
+        while len(solo_defaults) < max_ai:
             solo_defaults.append("normal")
         merged["solo_ai_difficulties"] = [
-            normalize_ai_difficulty(level) for level in solo_defaults[:2]
+            normalize_ai_difficulty(level) for level in solo_defaults[:max_ai]
         ]
         return merged
 
@@ -279,11 +280,14 @@ class TetrisEngine(GamePlugin):
             if all(grid[y][x] is not None for x in range(width)):
                 cleared_rows.append(y)
 
-        for y in sorted(cleared_rows, reverse=True):
-            del grid[y]
-            grid.insert(0, [None] * width)
-
         lines = len(cleared_rows)
+        if lines:
+            cleared_set = set(cleared_rows)
+            kept_rows = [row for i, row in enumerate(grid) if i not in cleared_set]
+            grid[:] = [[None] * width for _ in range(lines)] + kept_rows
+            while len(grid) < height:
+                grid.append([None] * width)
+            del grid[height:]
         board["lines_cleared"] += lines
         board["level"] = _level_from_lines(board["lines_cleared"])
         board["active"] = None
@@ -404,13 +408,20 @@ class TetrisEngine(GamePlugin):
             if action_delay_ticks is not None:
                 break
 
-        active = board.get("active")
-        if not active or not board.get("alive"):
+        if not board.get("active") or not board.get("alive"):
             return events
 
         drop_interval = _drop_interval_ticks(board["level"], base_drop)
 
-        if not self._can_move_down(board, width, height):
+        if self._can_move_down(board, width, height):
+            board["lock_counter"] = 0
+            board["drop_counter"] += 1
+            if board["drop_counter"] >= drop_interval:
+                board["drop_counter"] = 0
+                self._try_move(board, 0, 1, width, height)
+
+        # Lock delay runs every tick while the piece rests on the stack (not only on gravity steps).
+        if board.get("active") and not self._can_move_down(board, width, height):
             board["lock_counter"] += 1
             if board["lock_counter"] >= LOCK_DELAY_TICKS:
                 lines, still_alive = self._lock_active_piece(board, width, height)
@@ -418,12 +429,6 @@ class TetrisEngine(GamePlugin):
                     events.append({"type": "lines_cleared", "lines": lines})
                 if not still_alive:
                     events.append({"type": "player_eliminated", "reason": "topped_out"})
-        else:
-            board["lock_counter"] = 0
-            board["drop_counter"] += 1
-            if board["drop_counter"] >= drop_interval:
-                board["drop_counter"] = 0
-                self._try_move(board, 0, 1, width, height)
 
         return events
 

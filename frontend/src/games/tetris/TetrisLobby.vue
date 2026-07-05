@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Room } from '@/types'
 
 const props = defineProps<{
@@ -52,11 +53,17 @@ function playerAiDifficulty(player: { id: string; ai_difficulty?: string }): str
   return player.ai_difficulty ?? map[player.id] ?? 'normal'
 }
 
+const maxPlayers = computed(() => Number(props.room.settings?.max_players ?? 4))
+const maxAiOpponents = computed(() => Math.max(0, maxPlayers.value - 1))
+const canAddAi = computed(
+  () => props.isHost && !singlePlayer.value && !soloPractice.value && props.room.players.length < maxPlayers.value,
+)
+
 function updateSoloAiDifficulty(index: number, difficulty: string) {
   const next = [...soloAiDifficulties.value]
-  while (next.length < 2) next.push('normal')
+  while (next.length < maxAiOpponents.value) next.push('normal')
   next[index] = difficulty
-  soloAiDifficulties.value = next.slice(0, 2)
+  soloAiDifficulties.value = next.slice(0, maxAiOpponents.value)
 }
 </script>
 
@@ -77,7 +84,7 @@ function updateSoloAiDifficulty(index: number, difficulty: string) {
           type="checkbox"
           @change="onSoloPracticeChange"
         />
-        Solo practice (play against 2 AI)
+        Solo practice (play against 3 AI)
       </label>
       <div class="speed-setting">
         <span class="setting-label">Starting gravity</span>
@@ -94,9 +101,9 @@ function updateSoloAiDifficulty(index: number, difficulty: string) {
     </div>
 
     <div v-else-if="soloPractice" class="solo-notice card">
-      <p>Solo practice auto-adds 2 AI opponents when you start.</p>
+      <p>Solo practice auto-adds 3 AI opponents when you start (4-player match).</p>
       <div v-if="isHost" class="solo-ai-settings">
-        <label v-for="slot in 2" :key="slot" class="difficulty-label">
+        <label v-for="slot in maxAiOpponents" :key="slot" class="difficulty-label">
           <span>AI {{ slot }} difficulty</span>
           <select
             class="difficulty-select"
@@ -157,13 +164,16 @@ function updateSoloAiDifficulty(index: number, difficulty: string) {
     </div>
 
     <button
-      v-if="isHost && !singlePlayer"
+      v-if="canAddAi"
       type="button"
       class="btn-secondary add-ai-btn"
       @click="emit('addAi')"
     >
       + Add AI player
     </button>
+    <p v-else-if="isHost && !singlePlayer && !soloPractice && room.players.length >= maxPlayers" class="arrange-hint">
+      Room is full (max {{ maxPlayers }} players).
+    </p>
 
     <div
       v-if="!singlePlayer && !soloPractice"

@@ -49,6 +49,14 @@ def test_lobby_validation(engine: TetrisEngine) -> None:
     assert engine.validate_lobby(ai_player, {"single_player": True}) is not None
 
 
+def test_four_player_game_with_three_ai(engine: TetrisEngine) -> None:
+    players = make_players(4, ai_count=3)
+    game = engine.create_initial_state(players, {"countdown_sec": 0})
+    assert len(game["boards"]) == 4
+    assert len(game["players"]) == 4
+    assert sum(1 for p in game["players"] if p["is_ai"]) == 3
+
+
 def test_initial_state_per_player_boards(engine: TetrisEngine) -> None:
     players = make_players(3)
     game = engine.create_initial_state(players, {})
@@ -92,6 +100,30 @@ def test_line_clear(engine: TetrisEngine, state: dict) -> None:
     assert any(e.get("type") == "lines_cleared" for e in events)
 
 
+def _filled_rows(grid: list[list[str | None]], width: int) -> list[int]:
+    return [y for y, row in enumerate(grid) if all(row[x] is not None for x in range(width))]
+
+
+def test_multi_line_clear_removes_all_rows(engine: TetrisEngine) -> None:
+    width, height = 10, 20
+    for line_count in (2, 3, 4):
+        grid = [[None] * width for _ in range(height)]
+        for y in range(height - line_count, height):
+            for x in range(width):
+                grid[y][x] = "#111111"
+        board = {
+            "grid": grid,
+            "active": {"type": "O", "rotation": 0, "x": 0, "y": 0},
+            "lines_cleared": 0,
+            "level": 1,
+        }
+        cleared = engine._lock_piece(board, width, height)
+        assert cleared == line_count
+        assert board["lines_cleared"] == line_count
+        assert _filled_rows(board["grid"], width) == []
+        assert len(board["grid"]) == height
+
+
 def test_elimination_on_top_out(engine: TetrisEngine, state: dict) -> None:
     pid = state["players"][0]["id"]
     other = state["players"][1]["id"]
@@ -133,6 +165,25 @@ def test_gravity_tick_advances(engine: TetrisEngine, state: dict) -> None:
     for _ in range(25):
         engine.tick(state)
     assert state["boards"][pid]["active"]["y"] >= start_y
+
+
+def test_natural_fall_spawns_next_piece(engine: TetrisEngine) -> None:
+    players = make_players(1)
+    players[0]["is_ai"] = False
+    state = engine.create_initial_state(
+        players, {"countdown_sec": 0, "single_player": True}
+    )
+    state["phase"] = "playing"
+    pid = players[0]["id"]
+    first_type = state["boards"][pid]["active"]["type"]
+
+    for _ in range(2000):
+        engine.tick(state)
+        active = state["boards"][pid]["active"]
+        if active["type"] != first_type and active["y"] <= 1:
+            return
+
+    pytest.fail("next piece never spawned after natural gravity fall")
 
 
 def test_resting_piece_locks_without_hard_drop(engine: TetrisEngine, state: dict) -> None:

@@ -9,6 +9,7 @@ let musicStep = 0
 const MASTER_VOLUME = 0.35
 const MUSIC_VOLUME = 0.08
 const SFX_VOLUME = 0.22
+const ENABLE_BACKGROUND_MUSIC = false
 const MUTE_STORAGE_KEY = 'tetris-sound-muted'
 
 let muted = readMutedPreference()
@@ -235,7 +236,7 @@ function playMusicNote(freq: number) {
 }
 
 export function startBackgroundMusic(): void {
-  if (muted) return
+  if (!ENABLE_BACKGROUND_MUSIC || muted) return
   stopBackgroundMusic()
   musicStep = 0
   playMusicNote(MELODY[0]!)

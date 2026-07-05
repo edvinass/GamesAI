@@ -33,7 +33,7 @@ export function validateLobby(room: Room): LobbyValidation {
     }
     return {
       valid: issues.length === 0,
-      message: issues[0] ?? 'Ready for solo practice against 2 AI',
+      message: issues[0] ?? 'Ready for solo practice against 3 AI',
       issues,
     }
   }

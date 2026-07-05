@@ -40,7 +40,7 @@ export const tetrisRules: GameRules = {
     },
     {
       heading: 'AI & solo practice',
-      body: 'The host can add AI players in the lobby, or enable solo practice for a 3-player game (you + 2 AI). Single player and solo practice are separate modes.',
+      body: 'The host can add AI players in the lobby, or enable solo practice for a 4-player game (you + 3 AI). Single player and solo practice are separate modes.',
     },
   ],
   tips: [
