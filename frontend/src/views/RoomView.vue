@@ -10,10 +10,12 @@ import LobbyTeamPanel from '@/components/lobby/LobbyTeamPanel.vue'
 import SpyfallLobby from '@/games/spyfall/SpyfallLobby.vue'
 import SnakeLobby from '@/games/snake/SnakeLobby.vue'
 import DuelLobby from '@/games/duel/DuelLobby.vue'
+import TetrisLobby from '@/games/tetris/TetrisLobby.vue'
 import { validateLobby as validateCodenamesLobby } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
 import { validateLobby as validateDuelLobby } from '@/games/duel/lobbyValidation'
+import { validateLobby as validateTetrisLobby } from '@/games/tetris/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
@@ -70,6 +72,7 @@ const isHost = computed(() => room.value?.host_player_id === playerStore.playerI
 const isSpyfall = computed(() => room.value?.game_type === 'spyfall')
 const isSnake = computed(() => room.value?.game_type === 'snake')
 const isDuel = computed(() => room.value?.game_type === 'duel')
+const isTetris = computed(() => room.value?.game_type === 'tetris')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
@@ -79,17 +82,39 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'spyfall') return validateSpyfallLobby(room.value)
   if (room.value.game_type === 'snake') return validateSnakeLobby(room.value)
   if (room.value.game_type === 'duel') return validateDuelLobby(room.value)
+  if (room.value.game_type === 'tetris') return validateTetrisLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
 const soloPractice = computed({
   get: () => Boolean(room.value?.settings?.solo_practice),
-  set: (val: boolean) => updateSettings({ solo_practice: val }),
+  set: (val: boolean) => updateSettings({ solo_practice: val, ...(val ? { single_player: false } : {}) }),
+})
+
+const singlePlayer = computed({
+  get: () => Boolean(room.value?.settings?.single_player),
+  set: (val: boolean) => updateSettings({ single_player: val, ...(val ? { solo_practice: false } : {}) }),
 })
 
 const tickMs = computed({
   get: () => Number(room.value?.settings?.tick_ms ?? 150),
   set: (val: number) => updateSettings({ tick_ms: val }),
+})
+
+const baseDropTicks = computed({
+  get: () => Number(room.value?.settings?.base_drop_ticks ?? 20),
+  set: (val: number) => updateSettings({ base_drop_ticks: val }),
+})
+
+const soloAiDifficulties = computed({
+  get: () => {
+    const raw = room.value?.settings?.solo_ai_difficulties
+    if (Array.isArray(raw) && raw.length >= 2) {
+      return [String(raw[0]), String(raw[1])]
+    }
+    return ['normal', 'normal']
+  },
+  set: (val: string[]) => updateSettings({ solo_ai_difficulties: val.slice(0, 2) }),
 })
 
 async function handleJoin() {
@@ -108,6 +133,13 @@ async function handleJoin() {
 
 function updateSettings(settings: Record<string, unknown>) {
   send({ type: 'update_settings', settings })
+}
+
+function setAiDifficulty(playerId: string, difficulty: string) {
+  const current = (room.value?.settings?.ai_difficulties ?? {}) as Record<string, string>
+  updateSettings({
+    ai_difficulties: { ...current, [playerId]: difficulty },
+  })
 }
 
 function addAi(team?: string, role?: string) {
@@ -237,6 +269,24 @@ async function copyUrl() {
         :validation-issues="lobbyValidation.issues"
         @add-ai="addAi()"
         @remove="removePlayer"
+      />
+
+      <TetrisLobby
+        v-else-if="isTetris"
+        v-model:solo-practice="soloPractice"
+        v-model:single-player="singlePlayer"
+        v-model:base-drop-ticks="baseDropTicks"
+        v-model:solo-ai-difficulties="soloAiDifficulties"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+        @set-ai-difficulty="setAiDifficulty"
       />
 
       <template v-else-if="isCodenames">

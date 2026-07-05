@@ -3,12 +3,14 @@ from app.games.codenames.engine import CodenamesEngine
 from app.games.duel.engine import DuelEngine
 from app.games.snake.engine import SnakeEngine
 from app.games.spyfall.engine import SpyfallEngine
+from app.games.tetris.engine import TetrisEngine
 
 _REGISTRY: dict[str, GamePlugin] = {
     "codenames": CodenamesEngine(),
     "spyfall": SpyfallEngine(),
     "snake": SnakeEngine(),
     "duel": DuelEngine(),
+    "tetris": TetrisEngine(),
 }
 
 
@@ -24,6 +26,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "spyfall": {"name": "Spyfall", "description": "Social deduction at a secret location"},
     "snake": {"name": "Multiplayer Snake", "description": "Battle on a shared grid — last snake standing"},
     "duel": {"name": "Side Duel", "description": "Two players shoot from opposite sides — dodge and fire"},
+    "tetris": {"name": "Multiplier Tetris", "description": "Each player stacks alone — speed rises, last board standing wins"},
 }
 
 
