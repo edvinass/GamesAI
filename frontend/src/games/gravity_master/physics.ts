@@ -20,8 +20,12 @@ const FIXED_TIMESTEP = 1 / 60
 /** Simulated seconds advanced per animation frame (1 = real-time at 60fps). */
 const PHYSICS_TIME_SCALE = 2
 const GRAVITY = 20
-/** Gravity multiplier for falling bodies (drawn shapes and ball). */
+/** Gravity multiplier for the ball when released. */
 const FALL_GRAVITY_SCALE = 2.2
+/** Stronger gravity for drawn shapes so they settle quickly after each stroke. */
+const SHAPE_GRAVITY_SCALE = 5.2
+/** Minimal drag so shapes keep accelerating as they fall. */
+const SHAPE_LINEAR_DAMPING = 0.005
 
 export interface DrawnShape {
   id: number
@@ -68,9 +72,9 @@ export function addStrokeToWorld(world: PhysicsWorld, stroke: Point[]): DrawnSha
   const body = world.world.createBody({
     type: 'dynamic',
     position: planck.Vec2(center.x, center.y),
-    gravityScale: FALL_GRAVITY_SCALE,
-    linearDamping: 0.02,
-    angularDamping: 0.05,
+    gravityScale: SHAPE_GRAVITY_SCALE,
+    linearDamping: SHAPE_LINEAR_DAMPING,
+    angularDamping: 0.03,
   })
 
   attachTriangulatedStroke(body, mesh)
