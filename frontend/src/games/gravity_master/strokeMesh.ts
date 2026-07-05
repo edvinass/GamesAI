@@ -42,7 +42,7 @@ export function strokeOutline(points: Point[], halfWidth: number): Point[] {
     outline.push({ x: end.x + Math.cos(a) * halfWidth, y: end.y + Math.sin(a) * halfWidth })
   }
   outline.push(...right.reverse())
-  for (let i = capSteps - 1; i > 0; i--) {
+  for (let i = 1; i < capSteps; i++) {
     const a = startAngle - Math.PI / 2 - (Math.PI * i) / capSteps
     outline.push({ x: start.x + Math.cos(a) * halfWidth, y: start.y + Math.sin(a) * halfWidth })
   }
