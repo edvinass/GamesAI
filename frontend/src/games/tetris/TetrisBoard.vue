@@ -12,6 +12,25 @@ import {
   type Particle,
 } from './render'
 import NextPiecePreview from './NextPiecePreview.vue'
+import {
+  disposeSounds,
+  isSoundMuted,
+  playCountdownGo,
+  playCountdownTick,
+  playDeath,
+  playGameOver,
+  playHardDrop,
+  playLevelUp,
+  playLineClear,
+  playLock,
+  playMove,
+  playRotate,
+  playSoftDrop,
+  setSoundMuted,
+  startBackgroundMusic,
+  stopBackgroundMusic,
+  unlockAudio,
+} from './sounds'
 
 const props = defineProps<{
   gameState: TetrisGameState
@@ -86,6 +105,18 @@ const flashingLevels = ref<Record<string, boolean>>({})
 const prevBoardSnapshots = ref<
   Record<string, { lines: number; level: number; alive: boolean; filled: number }>
 >({})
+const prevPhase = ref(props.gameState.phase)
+const soundMuted = ref(isSoundMuted())
+
+function toggleSoundMute() {
+  const next = !soundMuted.value
+  setSoundMuted(next)
+  soundMuted.value = next
+  if (!next && props.gameState.phase === 'playing') {
+    void unlockAudio()
+    startBackgroundMusic()
+  }
+}
 
 function nextPieceType(board: TetrisBoardState | undefined): string | null {
   return board?.next_queue?.[0] ?? null
@@ -121,6 +152,15 @@ function onKeyDown(e: KeyboardEvent) {
   const action = keyMap[e.key]
   if (!action) return
   e.preventDefault()
+  void unlockAudio()
+  if (action.type === 'move') {
+    if (action.direction === 'down') playSoftDrop()
+    else playMove()
+  } else if (action.type === 'rotate') {
+    playRotate()
+  } else if (action.type === 'hard_drop') {
+    playHardDrop()
+  }
   emit('action', action)
 }
 
@@ -151,6 +191,7 @@ function detectBoardChanges(playerId: string, board: TetrisBoardState) {
       const lines = board.lines_cleared - prev.lines
       pushEffect(playerId, { type: 'line_clear', startedAt: now, lines })
       if (playerId === props.playerId) {
+        playLineClear(lines)
         lineClearPop.value = { lines, key: Date.now() }
         if (lineClearPopTimer) clearTimeout(lineClearPopTimer)
         lineClearPopTimer = setTimeout(() => {
@@ -159,10 +200,12 @@ function detectBoardChanges(playerId: string, board: TetrisBoardState) {
       }
     } else if (currentFilled > prev.filled) {
       pushEffect(playerId, { type: 'lock', startedAt: now })
+      if (playerId === props.playerId) playLock()
     }
 
     if (board.level > prev.level) {
       pushEffect(playerId, { type: 'level_up', startedAt: now })
+      if (playerId === props.playerId) playLevelUp()
       flashingLevels.value[playerId] = true
       setTimeout(() => {
         flashingLevels.value[playerId] = false
@@ -171,6 +214,7 @@ function detectBoardChanges(playerId: string, board: TetrisBoardState) {
 
     if (prev.alive && !board.alive) {
       pushEffect(playerId, { type: 'death', startedAt: now })
+      if (playerId === props.playerId) playDeath()
       shakingPanels.value[playerId] = true
       setTimeout(() => {
         shakingPanels.value[playerId] = false
@@ -324,6 +368,30 @@ watch(
   { deep: true },
 )
 
+watch(
+  () => props.gameState.phase,
+  (phase) => {
+    if (phase === 'playing' && prevPhase.value !== 'playing') {
+      void unlockAudio()
+      startBackgroundMusic()
+    } else if (phase === 'finished' && prevPhase.value !== 'finished') {
+      stopBackgroundMusic()
+      playGameOver()
+    } else if (phase !== 'playing') {
+      stopBackgroundMusic()
+    }
+    prevPhase.value = phase
+  },
+)
+
+watch(countdownRemaining, (remaining, prev) => {
+  if (props.gameState.phase !== 'countdown' || remaining == null) return
+  if (prev == null || remaining === prev) return
+  void unlockAudio()
+  if (remaining === 0) playCountdownGo()
+  else playCountdownTick()
+})
+
 function animationLoop(now: number) {
   drawAll(now)
   animationFrame = requestAnimationFrame(animationLoop)
@@ -347,6 +415,10 @@ onMounted(() => {
     }
   }
   animationFrame = requestAnimationFrame(animationLoop)
+  if (props.gameState.phase === 'playing') {
+    void unlockAudio()
+    startBackgroundMusic()
+  }
 })
 
 onUnmounted(() => {
@@ -354,6 +426,8 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   cancelAnimationFrame(animationFrame)
   if (lineClearPopTimer) clearTimeout(lineClearPopTimer)
+  stopBackgroundMusic()
+  disposeSounds()
 })
 </script>
 
@@ -456,6 +530,15 @@ onUnmounted(() => {
       </ul>
 
       <div class="controls-hint">
+        <button
+          type="button"
+          class="btn-secondary mute-btn"
+          :aria-label="soundMuted ? 'Unmute sound' : 'Mute sound'"
+          :title="soundMuted ? 'Unmute' : 'Mute'"
+          @click="toggleSoundMute"
+        >
+          {{ soundMuted ? '🔇' : '🔊' }}
+        </button>
         <p v-if="canControl"><strong>Controls:</strong> Arrows · Z/X rotate · Space drop</p>
         <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">Spectating</p>
         <p v-else class="muted">Waiting to start…</p>
@@ -814,9 +897,19 @@ onUnmounted(() => {
 
 .controls-hint {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
   font-size: 0.85rem;
   color: var(--text-muted);
   text-align: right;
+}
+
+.mute-btn {
+  flex-shrink: 0;
+  padding: 0.35rem 0.55rem;
+  font-size: 1rem;
+  line-height: 1;
 }
 
 .muted {
