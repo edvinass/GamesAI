@@ -6,6 +6,8 @@ const props = defineProps<{
   suit?: string
   faceDown?: boolean
   small?: boolean
+  deal?: boolean
+  flip?: boolean
 }>()
 
 const suitSymbol = computed(() => {
@@ -35,7 +37,17 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
 </script>
 
 <template>
-  <div class="playing-card" :class="{ 'playing-card--down': faceDown, 'playing-card--small': small, red: isRed, black: !isRed && !faceDown }">
+  <div
+    class="playing-card"
+    :class="{
+      'playing-card--down': faceDown,
+      'playing-card--small': small,
+      'playing-card--deal': deal,
+      'playing-card--flip': flip,
+      red: isRed,
+      black: !isRed && !faceDown,
+    }"
+  >
     <template v-if="faceDown">
       <div class="card-back" />
     </template>
@@ -59,12 +71,44 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
   justify-content: center;
   font-weight: 700;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
 }
 
 .playing-card--small {
   width: 48px;
   height: 68px;
   font-size: 0.85rem;
+}
+
+.playing-card--deal {
+  animation: cardDeal 0.55s ease-out;
+}
+
+.playing-card--flip {
+  animation: cardFlip 0.65s ease-out;
+}
+
+@keyframes cardDeal {
+  from {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.78) rotate(-6deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes cardFlip {
+  0% {
+    transform: rotateY(90deg) scale(0.9);
+    opacity: 0.2;
+  }
+  100% {
+    transform: rotateY(0deg) scale(1);
+    opacity: 1;
+  }
 }
 
 .playing-card--down {

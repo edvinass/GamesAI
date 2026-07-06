@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import type { Room, PokerGameState } from '@/types'
 import PlayingCard from './PlayingCard.vue'
+
+const CARD_REVEAL_MS = 700
+const TURN_DELAY_MS = 900
+const ACTION_HOLD_MS = 1500
+const SHOWDOWN_REVEAL_MS = 850
+const PHASE_BANNER_MS = 2000
+const BURN_CARD_MS = 700
+const FOLD_ANIM_MS = 900
 
 const props = defineProps<{
   gameState: PokerGameState
@@ -14,10 +22,104 @@ const emit = defineEmits<{
 }>()
 
 const raiseAmount = ref(0)
+const displayedCommunityCount = ref(0)
+const holeCardsRevealed = ref<Record<string, number>>({})
+const showdownRevealed = ref<Set<string>>(new Set())
+const effectiveCurrentActorId = ref<string | null>(null)
+const lastDealtCommunityIndex = ref(-1)
+const lastDealtHoleKey = ref('')
+const dealInProgress = ref(false)
+const showdownRevealStarted = ref(false)
+const displayedPot = ref(0)
+const phaseBanner = ref<{ text: string; visible: boolean }>({ text: '', visible: false })
+const actionHighlightId = ref<string | null>(null)
+const seatActionLabel = ref<{ playerId: string; text: string; type: string } | null>(null)
+const foldingSeats = ref<Set<string>>(new Set())
+const betPulseSeats = ref<Set<string>>(new Set())
+const actionHoldUntil = ref(0)
+const actionHoldActive = ref(false)
+const streetTransitionPending = ref(false)
+
+const timers = new Set<ReturnType<typeof setTimeout>>()
+
+function schedule(fn: () => void, ms: number) {
+  const id = setTimeout(() => {
+    timers.delete(id)
+    fn()
+  }, ms)
+  timers.add(id)
+  return id
+}
+
+function clearAllTimers() {
+  for (const id of timers) clearTimeout(id)
+  timers.clear()
+}
 
 const isHost = computed(() => props.room.host_player_id === props.playerId)
-const isMyTurn = computed(() => props.gameState.current_actor_id === props.playerId)
 const myPlayer = computed(() => props.gameState.players.find((p) => p.id === props.playerId))
+const isMyTurn = computed(() => effectiveCurrentActorId.value === props.playerId)
+
+const dealerPlayer = computed(() =>
+  props.gameState.players.find((p) => p.id === props.gameState.dealer_player_id),
+)
+
+const eligibleSeatIds = computed(() =>
+  props.gameState.seat_order.filter((id) => {
+    const player = props.gameState.players.find((p) => p.id === id)
+    return player && player.status !== 'eliminated'
+  }),
+)
+
+function nextEligibleAfter(seatId: string): string | null {
+  const order = props.gameState.seat_order
+  const eligible = eligibleSeatIds.value
+  const fromIdx = order.indexOf(seatId)
+  if (fromIdx < 0) return null
+  for (let i = 1; i <= order.length; i++) {
+    const id = order[(fromIdx + i) % order.length]
+    if (eligible.includes(id)) return id
+  }
+  return null
+}
+
+const blindRoles = computed(() => {
+  const dealerId = props.gameState.dealer_player_id
+  if (!dealerId) return { sb: null as string | null, bb: null as string | null }
+  const eligible = eligibleSeatIds.value
+  if (eligible.length < 2) return { sb: null, bb: null }
+  if (eligible.length === 2) {
+    return { sb: dealerId, bb: nextEligibleAfter(dealerId) }
+  }
+  const sb = nextEligibleAfter(dealerId)
+  const bb = sb ? nextEligibleAfter(sb) : null
+  return { sb, bb }
+})
+
+const dealOrder = computed(() => {
+  const order = props.gameState.seat_order
+  const eligible = eligibleSeatIds.value
+  const startId = blindRoles.value.sb ?? props.gameState.dealer_player_id
+  if (!startId) return eligible
+  const startIdx = order.indexOf(startId)
+  const rotated: string[] = []
+  for (let i = 0; i < order.length; i++) {
+    const id = order[(startIdx + i) % order.length]
+    if (eligible.includes(id)) rotated.push(id)
+  }
+  return rotated
+})
+
+const visibleCommunityCards = computed(() =>
+  props.gameState.community_cards.slice(0, displayedCommunityCount.value),
+)
+
+const showHandDescriptions = computed(
+  () =>
+    props.gameState.phase === 'showdown' ||
+    props.gameState.phase === 'hand_complete' ||
+    showdownRevealed.value.size > 0,
+)
 const phaseLabel = computed(() => {
   const map: Record<string, string> = {
     preflop: 'Pre-flop',
@@ -31,9 +133,9 @@ const phaseLabel = computed(() => {
   return map[props.gameState.phase] ?? props.gameState.phase
 })
 
-const lastActionText = computed(() => {
-  const action = props.gameState.last_action
-  if (!action) return ''
+const lastActionText = computed(() => seatActionLabel.value?.text ?? '')
+
+function actionLabelFor(action: Record<string, unknown>): string {
   const player = props.gameState.players.find((p) => p.id === action.player_id)
   const name = player?.nickname ?? 'Player'
   switch (action.type) {
@@ -50,14 +152,199 @@ const lastActionText = computed(() => {
     default:
       return ''
   }
-})
+}
+
+function seatActionBubble(seatId: string): string | null {
+  if (seatActionLabel.value?.playerId !== seatId) return null
+  const action = props.gameState.last_action
+  if (!action) return null
+  switch (action.type) {
+    case 'fold':
+      return 'Fold'
+    case 'check':
+      return 'Check'
+    case 'call':
+      return `Call ${action.amount}`
+    case 'raise':
+      return `Raise ${action.amount}`
+    case 'all_in':
+      return `All-in ${action.amount}`
+    default:
+      return null
+  }
+}
+
+function showPhaseBanner(phase: string) {
+  const labels: Record<string, string> = {
+    preflop: 'Pre-flop',
+    flop: 'The Flop',
+    turn: 'The Turn',
+    river: 'The River',
+    showdown: 'Showdown',
+    hand_complete: 'Hand Complete',
+    game_over: 'Game Over',
+  }
+  phaseBanner.value = { text: labels[phase] ?? phase, visible: true }
+  schedule(() => {
+    phaseBanner.value = { ...phaseBanner.value, visible: false }
+  }, PHASE_BANNER_MS)
+}
+
+function animatePotTo(target: number) {
+  const start = displayedPot.value
+  const diff = target - start
+  if (diff === 0) return
+  const steps = Math.min(Math.max(Math.abs(diff), 1), 24)
+  const stepMs = 45
+  for (let i = 1; i <= steps; i++) {
+    schedule(() => {
+      displayedPot.value = Math.round(start + (diff * i) / steps)
+    }, i * stepMs)
+  }
+}
+
+function holdForAction() {
+  actionHoldActive.value = true
+  actionHoldUntil.value = Date.now() + ACTION_HOLD_MS
+  schedule(() => {
+    actionHoldActive.value = false
+  }, ACTION_HOLD_MS)
+}
+
+function msUntilActionHoldDone(): number {
+  return Math.max(0, actionHoldUntil.value - Date.now())
+}
 
 const canAct = computed(
   () =>
+    !dealInProgress.value &&
+    !streetTransitionPending.value &&
+    !actionHoldActive.value &&
     isMyTurn.value &&
     myPlayer.value?.status === 'active' &&
-    ['preflop', 'flop', 'turn', 'river'].includes(props.gameState.phase),
+    ['preflop', 'flop', 'turn', 'river'].includes(props.gameState.phase) &&
+    effectiveCurrentActorId.value === props.gameState.current_actor_id,
 )
+
+function visibleHoleCount(seatId: string): number {
+  if (seatId === props.playerId) return holeCardsRevealed.value[seatId] ?? 0
+  if (showdownRevealed.value.has(seatId)) return 2
+  return 0
+}
+
+function shouldAnimateHoleCard(seatId: string, cardIndex: number): boolean {
+  const key = `${props.gameState.hand_number}-${seatId}-${cardIndex}`
+  if (lastDealtHoleKey.value === key) return true
+  return false
+}
+
+function resetHandAnimations() {
+  displayedCommunityCount.value = 0
+  holeCardsRevealed.value = {}
+  showdownRevealed.value = new Set()
+  lastDealtCommunityIndex.value = -1
+  lastDealtHoleKey.value = ''
+  showdownRevealStarted.value = false
+  actionHighlightId.value = null
+  seatActionLabel.value = null
+  foldingSeats.value = new Set()
+  betPulseSeats.value = new Set()
+  actionHoldUntil.value = 0
+  actionHoldActive.value = false
+  streetTransitionPending.value = false
+  displayedPot.value = props.gameState.pot_total
+}
+
+function runHoleCardDealAnimation() {
+  const order = dealOrder.value
+  if (!order.length) {
+    dealInProgress.value = false
+    return
+  }
+  dealInProgress.value = true
+  let delay = 0
+  for (let round = 0; round < 2; round++) {
+    for (const seatId of order) {
+      delay += CARD_REVEAL_MS
+      const cardIndex = round + 1
+      schedule(() => {
+        const current = holeCardsRevealed.value[seatId] ?? 0
+        if (current < cardIndex) {
+          holeCardsRevealed.value = { ...holeCardsRevealed.value, [seatId]: cardIndex }
+          lastDealtHoleKey.value = `${props.gameState.hand_number}-${seatId}-${cardIndex}`
+        }
+      }, delay)
+    }
+  }
+  schedule(() => {
+    dealInProgress.value = false
+    effectiveCurrentActorId.value = props.gameState.current_actor_id
+  }, delay + CARD_REVEAL_MS)
+}
+
+function animateCommunityCards(targetCount: number) {
+  const current = displayedCommunityCount.value
+  if (targetCount <= current) {
+    displayedCommunityCount.value = targetCount
+    streetTransitionPending.value = false
+    return
+  }
+
+  const milestones = [3, 4, 5].filter((m) => m > current && m <= targetCount)
+  if (milestones.length === 0) {
+    let delay = 0
+    for (let i = current + 1; i <= targetCount; i++) {
+      delay += CARD_REVEAL_MS
+      const index = i
+      schedule(() => {
+        displayedCommunityCount.value = index
+        lastDealtCommunityIndex.value = index - 1
+        if (index === targetCount) streetTransitionPending.value = false
+      }, delay)
+    }
+    return
+  }
+
+  streetTransitionPending.value = true
+  let delay = 0
+  let revealedUpTo = current
+
+  for (const milestone of milestones) {
+    const street = milestone === 3 ? 'flop' : milestone === 4 ? 'turn' : 'river'
+    showPhaseBanner(street)
+    delay += PHASE_BANNER_MS + BURN_CARD_MS
+
+    for (let index = revealedUpTo + 1; index <= milestone; index++) {
+      delay += CARD_REVEAL_MS
+      schedule(() => {
+        displayedCommunityCount.value = index
+        lastDealtCommunityIndex.value = index - 1
+      }, delay)
+    }
+    revealedUpTo = milestone
+  }
+
+  schedule(() => {
+    streetTransitionPending.value = false
+  }, delay + CARD_REVEAL_MS)
+}
+
+function runShowdownReveal() {
+  if (showdownRevealStarted.value) return
+  showdownRevealStarted.value = true
+  const contenders = dealOrder.value.filter((id) => {
+    const player = props.gameState.players.find((p) => p.id === id)
+    return player && player.status !== 'folded'
+  })
+  let delay = CARD_REVEAL_MS
+  for (const seatId of contenders) {
+    if (seatId === props.playerId) continue
+    schedule(() => {
+      showdownRevealed.value = new Set([...showdownRevealed.value, seatId])
+    }, delay)
+    delay += SHOWDOWN_REVEAL_MS
+  }
+}
 
 const seatPositions = computed(() => {
   const order = props.gameState.seat_order
@@ -102,8 +389,141 @@ function nextHand() {
   emit('action', { type: 'next_hand' })
 }
 
-const showHoleCards = computed(
-  () => props.gameState.phase === 'showdown' || props.gameState.phase === 'hand_complete',
+watch(
+  () => props.gameState.hand_number,
+  (handNum) => {
+    clearAllTimers()
+    resetHandAnimations()
+    if (handNum > 0) {
+      showPhaseBanner('preflop')
+      schedule(() => runHoleCardDealAnimation(), PHASE_BANNER_MS * 0.5)
+    } else {
+      runHoleCardDealAnimation()
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => ({
+    phase: props.gameState.phase,
+    communityCount: props.gameState.community_cards.length,
+  }),
+  ({ phase, communityCount }, prev) => {
+    if (communityCount < displayedCommunityCount.value) {
+      displayedCommunityCount.value = communityCount
+      return
+    }
+    if (communityCount <= displayedCommunityCount.value) return
+
+    const isNewStreet =
+      prev &&
+      ['flop', 'turn', 'river'].includes(phase) &&
+      phase !== prev.phase &&
+      communityCount > prev.communityCount
+
+    if (isNewStreet) {
+      streetTransitionPending.value = true
+      showPhaseBanner(phase)
+    }
+
+    const delay = isNewStreet ? PHASE_BANNER_MS + BURN_CARD_MS : 0
+    animateCommunityCards(communityCount, delay)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.gameState.phase,
+  (phase, oldPhase) => {
+    if (!oldPhase || phase === oldPhase) return
+    if (phase === 'showdown' || phase === 'hand_complete') {
+      showPhaseBanner(phase)
+      runShowdownReveal()
+    } else if (phase === 'game_over') {
+      showPhaseBanner(phase)
+    }
+  },
+)
+
+watch(
+  () => props.gameState.last_action,
+  (action, prev) => {
+    if (!action) return
+    const prevKey = prev ? `${prev.player_id}-${prev.type}-${prev.amount ?? ''}` : ''
+    const nextKey = `${action.player_id}-${action.type}-${action.amount ?? ''}`
+    if (prevKey === nextKey) return
+
+    const playerId = String(action.player_id)
+    const text = actionLabelFor(action)
+    seatActionLabel.value = { playerId, text, type: String(action.type) }
+    actionHighlightId.value = playerId
+    holdForAction()
+
+    if (action.type === 'fold') {
+      foldingSeats.value = new Set([...foldingSeats.value, playerId])
+      schedule(() => {
+        const next = new Set(foldingSeats.value)
+        next.delete(playerId)
+        foldingSeats.value = next
+      }, FOLD_ANIM_MS)
+    }
+
+    if (['call', 'raise', 'all_in'].includes(String(action.type))) {
+      betPulseSeats.value = new Set([...betPulseSeats.value, playerId])
+      schedule(() => {
+        const next = new Set(betPulseSeats.value)
+        next.delete(playerId)
+        betPulseSeats.value = next
+      }, ACTION_HOLD_MS)
+    }
+
+    schedule(() => {
+      if (seatActionLabel.value?.playerId === playerId) {
+        seatActionLabel.value = null
+      }
+      if (actionHighlightId.value === playerId) {
+        actionHighlightId.value = null
+      }
+    }, ACTION_HOLD_MS)
+  },
+)
+
+watch(
+  () => props.gameState.pot_total,
+  (target) => {
+    animatePotTo(target)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.gameState.current_actor_id,
+  (newId, oldId) => {
+    if (dealInProgress.value) return
+    if (!newId) {
+      effectiveCurrentActorId.value = null
+      return
+    }
+    const delay =
+      !oldId || oldId === newId
+        ? msUntilActionHoldDone() || 0
+        : Math.max(TURN_DELAY_MS, msUntilActionHoldDone())
+
+    if (!oldId || oldId === newId) {
+      if (delay === 0) {
+        effectiveCurrentActorId.value = newId
+        return
+      }
+    } else {
+      effectiveCurrentActorId.value = null
+    }
+
+    schedule(() => {
+      effectiveCurrentActorId.value = newId
+    }, delay)
+  },
+  { immediate: true },
 )
 
 watch(
@@ -113,6 +533,10 @@ watch(
   },
   { immediate: true },
 )
+
+onUnmounted(() => {
+  clearAllTimers()
+})
 </script>
 
 <template>
@@ -120,68 +544,104 @@ watch(
     <div class="status-bar card">
       <span>Hand #{{ gameState.hand_number }}</span>
       <span class="phase">{{ phaseLabel }}</span>
-      <span class="pot">Pot: {{ gameState.pot_total }}</span>
+      <span v-if="dealerPlayer" class="dealer-label">
+        Dealer: <strong>{{ dealerPlayer.nickname }}</strong>
+      </span>
+      <span class="pot">Pot: {{ displayedPot }}</span>
     </div>
 
-    <p v-if="lastActionText" class="last-action">{{ lastActionText }}</p>
+    <p v-if="lastActionText" class="last-action" :class="{ 'last-action--pop': actionHoldActive }">
+      {{ lastActionText }}
+    </p>
 
     <div class="table-wrap">
       <div class="table-felt">
+        <Transition name="phase-banner">
+          <div v-if="phaseBanner.visible" class="phase-banner">{{ phaseBanner.text }}</div>
+        </Transition>
+
+        <Transition name="burn-hint">
+          <div v-if="streetTransitionPending && displayedCommunityCount < gameState.community_cards.length" class="burn-hint">
+            Burning a card…
+          </div>
+        </Transition>
+
         <div class="community">
           <PlayingCard
-            v-for="(card, i) in gameState.community_cards"
-            :key="`c-${i}`"
+            v-for="(card, i) in visibleCommunityCards"
+            :key="`c-${gameState.hand_number}-${i}`"
             :rank="card.rank"
             :suit="card.suit"
+            :deal="i === lastDealtCommunityIndex"
             small
           />
-          <PlayingCard v-for="n in Math.max(0, 5 - gameState.community_cards.length)" :key="`empty-${n}`" face-down small />
+          <PlayingCard v-for="n in Math.max(0, 5 - visibleCommunityCards.length)" :key="`empty-${n}`" face-down small />
         </div>
-        <div class="pot-center">Pot {{ gameState.pot_total }}</div>
+        <div class="pot-center" :class="{ 'pot-center--pulse': actionHoldActive }">
+          Pot {{ displayedPot }}
+        </div>
 
         <div
           v-for="seat in seatPositions"
           :key="seat.id"
           class="seat"
           :class="{
-            active: gameState.current_actor_id === seat.id,
+            active: effectiveCurrentActorId === seat.id,
+            acted: actionHighlightId === seat.id,
+            folding: foldingSeats.has(seat.id),
             folded: seat.player?.status === 'folded',
             dealer: gameState.dealer_player_id === seat.id,
             me: seat.id === playerId,
           }"
           :style="{ left: `${seat.x}%`, top: `${seat.y}%` }"
         >
+          <Transition name="action-bubble">
+            <div
+              v-if="seatActionBubble(seat.id)"
+              class="action-bubble"
+              :class="`action-bubble--${gameState.last_action?.type}`"
+            >
+              {{ seatActionBubble(seat.id) }}
+            </div>
+          </Transition>
+          <div v-if="gameState.dealer_player_id === seat.id" class="dealer-chip" title="Dealer">D</div>
           <div class="seat-info">
             <span class="seat-name">{{ seat.player?.nickname }}</span>
-            <span v-if="gameState.dealer_player_id === seat.id" class="dealer-btn">D</span>
+            <span v-if="blindRoles.sb === seat.id" class="blind-badge sb">SB</span>
+            <span v-if="blindRoles.bb === seat.id" class="blind-badge bb">BB</span>
             <span class="seat-chips">{{ seat.player?.chips }} chips</span>
-            <span v-if="seat.player && seat.player.bet_this_round > 0" class="seat-bet">
+            <span v-if="seat.player && seat.player.bet_this_round > 0" class="seat-bet" :class="{ 'seat-bet--pulse': betPulseSeats.has(seat.id) }">
               Bet {{ seat.player.bet_this_round }}
             </span>
           </div>
-          <div class="hole-cards">
-            <template v-if="seat.id === playerId || (showHoleCards && seat.player?.status !== 'folded')">
+          <div class="hole-cards" :class="{ 'hole-cards--folding': foldingSeats.has(seat.id) }">
+            <template v-for="cardIndex in 2" :key="`${seat.id}-hole-${cardIndex}`">
               <PlayingCard
-                v-for="(card, i) in seat.player?.hole_cards ?? []"
-                :key="`${seat.id}-${i}`"
-                :rank="card.rank"
-                :suit="card.suit"
+                v-if="visibleHoleCount(seat.id) >= cardIndex && seat.player?.hole_cards[cardIndex - 1]"
+                :rank="seat.player?.hole_cards[cardIndex - 1]?.rank"
+                :suit="seat.player?.hole_cards[cardIndex - 1]?.suit"
+                :deal="shouldAnimateHoleCard(seat.id, cardIndex)"
+                :flip="showdownRevealed.has(seat.id) && seat.id !== playerId"
                 small
               />
-            </template>
-            <template v-else-if="seat.player?.status !== 'folded'">
-              <PlayingCard face-down small />
-              <PlayingCard face-down small />
+              <PlayingCard v-else-if="seat.player?.status !== 'folded'" face-down small />
             </template>
           </div>
-          <p v-if="seat.player?.hand_description && showHoleCards" class="hand-desc">
+          <p
+            v-if="
+              seat.player?.hand_description &&
+              showHandDescriptions &&
+              (seat.id === playerId || showdownRevealed.has(seat.id))
+            "
+            class="hand-desc"
+          >
             {{ seat.player.hand_description }}
           </p>
         </div>
       </div>
     </div>
 
-    <div v-if="gameState.winners.length && gameState.phase === 'hand_complete'" class="winners card">
+    <div v-if="gameState.winners.length && gameState.phase === 'hand_complete'" class="winners card winners--reveal">
       <h3>Hand winners</h3>
       <ul>
         <li v-for="(w, i) in gameState.winners" :key="i">
@@ -231,7 +691,13 @@ watch(
     </div>
 
     <div v-else-if="!canAct && ['preflop', 'flop', 'turn', 'river'].includes(gameState.phase)" class="waiting card">
-      <p>Waiting for {{ gameState.players.find((p) => p.id === gameState.current_actor_id)?.nickname }}…</p>
+      <p v-if="dealInProgress">Dealing cards…</p>
+      <p v-else-if="streetTransitionPending">Dealing the {{ phaseLabel.toLowerCase() }}…</p>
+      <p v-else-if="actionHoldActive">{{ lastActionText }}</p>
+      <p v-else>
+        Waiting for
+        {{ gameState.players.find((p) => p.id === (effectiveCurrentActorId ?? gameState.current_actor_id))?.nickname }}…
+      </p>
     </div>
 
     <div v-if="gameState.phase === 'hand_complete' && isHost && !gameState.winner" class="next-hand card">
@@ -257,8 +723,12 @@ watch(
   font-weight: 600;
 }
 
-.phase {
-  color: var(--accent);
+.dealer-label {
+  color: #f0e6c8;
+}
+
+.dealer-label strong {
+  color: #fff;
 }
 
 .pot {
@@ -269,6 +739,80 @@ watch(
   text-align: center;
   color: var(--text-muted);
   font-size: 0.95rem;
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+.last-action--pop {
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.05rem;
+  animation: actionPop 0.45s ease-out;
+}
+
+@keyframes actionPop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.phase-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.82);
+  color: #ffd700;
+  font-size: 1.75rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1rem 2rem;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 215, 0, 0.45);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.phase-banner-enter-active,
+.phase-banner-leave-active {
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+
+.phase-banner-enter-from,
+.phase-banner-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.85);
+}
+
+.burn-hint {
+  position: absolute;
+  top: 28%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  color: #f0e6c8;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.burn-hint-enter-active,
+.burn-hint-leave-active {
+  transition: opacity 0.35s ease;
+}
+
+.burn-hint-enter-from,
+.burn-hint-leave-to {
+  opacity: 0;
 }
 
 .table-wrap {
@@ -303,6 +847,28 @@ watch(
   color: #f0e6c8;
   font-weight: 700;
   font-size: 0.9rem;
+  transition: transform 0.3s ease, color 0.3s ease;
+}
+
+.pot-center--pulse {
+  animation: potPulse 0.6s ease-out;
+  color: #ffd700;
+}
+
+@keyframes potPulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  40% {
+    transform: translate(-50%, -50%) scale(1.18);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.phase {
+  color: var(--accent);
 }
 
 .seat {
@@ -310,11 +876,116 @@ watch(
   transform: translate(-50%, -50%);
   text-align: center;
   min-width: 100px;
+  transition: filter 0.35s ease, opacity 0.5s ease, transform 0.5s ease;
+}
+
+.seat.acted .seat-info {
+  animation: actedFlash 0.55s ease-out;
+}
+
+@keyframes actedFlash {
+  0% {
+    background: rgba(255, 215, 0, 0.55);
+    transform: scale(1.06);
+  }
+  100% {
+    background: rgba(0, 0, 0, 0.55);
+    transform: scale(1);
+  }
+}
+
+.seat.folding {
+  opacity: 0.55;
+}
+
+.action-bubble {
+  position: absolute;
+  top: -2.1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  z-index: 4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.action-bubble--fold {
+  background: #7f8c8d;
+  color: #fff;
+}
+
+.action-bubble--check {
+  background: #3498db;
+  color: #fff;
+}
+
+.action-bubble--call {
+  background: #27ae60;
+  color: #fff;
+}
+
+.action-bubble--raise,
+.action-bubble--all_in {
+  background: #e67e22;
+  color: #fff;
+}
+
+.action-bubble-enter-active {
+  animation: bubbleIn 0.4s ease-out;
+}
+
+.action-bubble-leave-active {
+  animation: bubbleOut 0.35s ease-in;
+}
+
+@keyframes bubbleIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px) scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+@keyframes bubbleOut {
+  from {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px) scale(0.85);
+  }
+}
+
+.seat.active {
+  filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.85));
+  z-index: 2;
 }
 
 .seat.active .seat-info {
   outline: 2px solid #ffd700;
   border-radius: 6px;
+  animation: turnPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes turnPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 12px 4px rgba(255, 215, 0, 0.35);
+  }
+}
+
+.seat.dealer .seat-info {
+  border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
 .seat.folded {
@@ -332,6 +1003,43 @@ watch(
   color: #fff;
   font-size: 0.75rem;
   margin-bottom: 0.25rem;
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.seat-bet {
+  display: block;
+  margin-top: 0.15rem;
+  color: #ffd700;
+  font-weight: 700;
+  transition: transform 0.25s ease;
+}
+
+.seat-bet--pulse {
+  animation: betPulse 0.55s ease-out;
+}
+
+@keyframes betPulse {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.35);
+    color: #fff;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.hole-cards--folding {
+  animation: foldCards 0.75s ease-in forwards;
+}
+
+@keyframes foldCards {
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.75);
+  }
 }
 
 .seat-name {
@@ -339,17 +1047,41 @@ watch(
   font-weight: 700;
 }
 
-.dealer-btn {
-  display: inline-block;
-  background: #fff;
-  color: #000;
+.dealer-chip {
+  position: absolute;
+  top: -0.65rem;
+  right: -0.35rem;
+  background: linear-gradient(145deg, #fff 0%, #e8e8e8 100%);
+  color: #1a1a1a;
+  border: 2px solid #c9a227;
   border-radius: 50%;
-  width: 1.1rem;
-  height: 1.1rem;
-  line-height: 1.1rem;
-  font-size: 0.65rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  line-height: 1.35rem;
+  font-size: 0.7rem;
+  font-weight: 900;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  z-index: 3;
+}
+
+.blind-badge {
+  display: inline-block;
+  font-size: 0.55rem;
   font-weight: 800;
-  margin-left: 0.25rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  margin-left: 0.2rem;
+  vertical-align: middle;
+}
+
+.blind-badge.sb {
+  background: #3498db;
+  color: #fff;
+}
+
+.blind-badge.bb {
+  background: #e67e22;
+  color: #fff;
 }
 
 .hole-cards {
@@ -398,9 +1130,37 @@ watch(
   margin: 0;
 }
 
+.winners--reveal {
+  animation: winnersIn 0.65s ease-out;
+}
+
+@keyframes winnersIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .winners ul {
   margin: 0.5rem 0 0;
   padding-left: 1.25rem;
+}
+
+.waiting {
+  animation: fadeIn 0.35s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .game-over {

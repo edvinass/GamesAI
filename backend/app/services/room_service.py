@@ -653,7 +653,8 @@ AI_GUESS_THINK_PAUSE_SEC = 1.5
 AI_REVEAL_PAUSE_SEC = 1.8
 AI_TURN_PAUSE_SEC = 0.8
 AI_SPYFALL_THINK_PAUSE_SEC = 2.0
-AI_POKER_THINK_PAUSE_SEC = 1.5
+AI_POKER_THINK_PAUSE_SEC = 3.0
+AI_POKER_TURN_PAUSE_SEC = 1.5
 
 
 async def _process_codenames_ai_turn(
@@ -854,7 +855,7 @@ async def _process_poker_ai_turn(
             room_id, actor.id, fallback, allow_ai=True
         )
     await broadcast_fn(room, events)
-    await asyncio.sleep(AI_TURN_PAUSE_SEC)
+    await asyncio.sleep(AI_POKER_TURN_PAUSE_SEC)
     return True
 
 
