@@ -60,8 +60,8 @@ export class VisualEffects {
     const isBall = event.kind === 'ball'
     const sparkCount = isBall ? (t > 0.5 ? 3 : 2) : 1
     const palette = isBall
-      ? ['rgba(252, 165, 165, 0.45)', 'rgba(251, 191, 36, 0.4)', 'rgba(254, 243, 199, 0.35)']
-      : ['rgba(251, 191, 36, 0.35)', 'rgba(148, 163, 184, 0.3)']
+      ? ['rgba(230, 230, 230, 0.45)', 'rgba(180, 180, 180, 0.4)', 'rgba(245, 245, 245, 0.35)']
+      : ['rgba(200, 200, 200, 0.35)', 'rgba(148, 163, 184, 0.3)']
 
     for (let i = 0; i < sparkCount && this.particles.length < MAX_PARTICLES; i++) {
       const angle = Math.random() * Math.PI * 2
@@ -86,14 +86,14 @@ export class VisualEffects {
         maxRadius: (3 + t * 4) * scale,
         life: 1,
         maxLife: 0.22,
-        color: 'rgba(252, 165, 165, 0.28)',
+        color: 'rgba(220, 220, 220, 0.28)',
         lineWidth: 0.6 * scale,
       })
     }
   }
 
   spawnWin(x: number, y: number, scale: number): void {
-    const colors = ['#4ade80', '#86efac', '#bbf7d0', '#fef08a', '#ffffff']
+    const colors = ['#f5f5f5', '#e5e5e5', '#d4d4d4', '#a3a3a3', '#ffffff']
     for (let i = 0; i < 48 && this.particles.length < MAX_PARTICLES; i++) {
       const angle = (i / 48) * Math.PI * 2 + Math.random() * 0.4
       const speed = (3 + Math.random() * 6) * scale
@@ -116,7 +116,7 @@ export class VisualEffects {
         maxRadius: (36 + r * 18) * scale,
         life: 1,
         maxLife: 0.7 + r * 0.15,
-        color: 'rgba(74, 222, 128, 0.9)',
+        color: 'rgba(229, 229, 229, 0.9)',
         lineWidth: (2.5 - r * 0.5) * scale,
       })
     }
@@ -215,15 +215,15 @@ export function drawBackground(
   time: number,
 ): void {
   const gradient = ctx.createLinearGradient(0, 0, 0, h)
-  gradient.addColorStop(0, '#0a0f1e')
-  gradient.addColorStop(0.55, '#111827')
-  gradient.addColorStop(1, '#1a2332')
+  gradient.addColorStop(0, '#0a0a0a')
+  gradient.addColorStop(0.55, '#141414')
+  gradient.addColorStop(1, '#1f1f1f')
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, w, h)
 
   const vignette = ctx.createRadialGradient(w / 2, h / 2, h * 0.2, w / 2, h / 2, h * 0.85)
-  vignette.addColorStop(0, 'rgba(59, 130, 246, 0.04)')
-  vignette.addColorStop(1, 'rgba(0, 0, 0, 0.35)')
+  vignette.addColorStop(0, 'rgba(255, 255, 255, 0.03)')
+  vignette.addColorStop(1, 'rgba(0, 0, 0, 0.4)')
   ctx.fillStyle = vignette
   ctx.fillRect(0, 0, w, h)
 
@@ -313,17 +313,17 @@ export function drawTarget(
     const expand = 1 + (i / ringCount) * 0.12 * pulse
     ctx.beginPath()
     ctx.arc(x, y, radius * expand, 0, Math.PI * 2)
-    ctx.strokeStyle = `rgba(34, 197, 94, ${0.12 * pulse / i})`
+    ctx.strokeStyle = `rgba(212, 212, 212, ${0.12 * pulse / i})`
     ctx.lineWidth = 2 * scale
     ctx.stroke()
   }
 
   ctx.save()
-  ctx.shadowColor = '#22c55e'
+  ctx.shadowColor = '#e5e5e5'
   ctx.shadowBlur = 14 * scale * (0.6 + pulse * 0.4)
   const fillGrad = ctx.createRadialGradient(x, y, radius * 0.1, x, y, radius)
-  fillGrad.addColorStop(0, `rgba(74, 222, 128, ${0.45 + pulse * 0.15})`)
-  fillGrad.addColorStop(1, 'rgba(34, 197, 94, 0.15)')
+  fillGrad.addColorStop(0, `rgba(245, 245, 245, ${0.45 + pulse * 0.15})`)
+  fillGrad.addColorStop(1, 'rgba(163, 163, 163, 0.15)')
   ctx.fillStyle = fillGrad
   ctx.beginPath()
   ctx.arc(x, y, radius, 0, Math.PI * 2)
@@ -332,17 +332,17 @@ export function drawTarget(
 
   ctx.beginPath()
   ctx.arc(x, y, radius, 0, Math.PI * 2)
-  ctx.strokeStyle = '#22c55e'
+  ctx.strokeStyle = '#d4d4d4'
   ctx.lineWidth = 3 * scale
   ctx.stroke()
 
   ctx.beginPath()
   ctx.arc(x, y, radius * 0.55, 0, Math.PI * 2)
-  ctx.strokeStyle = 'rgba(134, 239, 172, 0.6)'
+  ctx.strokeStyle = 'rgba(229, 229, 229, 0.6)'
   ctx.lineWidth = 1.5 * scale
   ctx.stroke()
 
-  ctx.fillStyle = '#86efac'
+  ctx.fillStyle = '#e5e5e5'
   ctx.font = `bold ${Math.max(11, 13 * scale)}px system-ui, sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
@@ -362,7 +362,7 @@ export function drawDrawnShape(
   ctx.translate(x, y)
   ctx.rotate(angle)
 
-  ctx.shadowColor = 'rgba(245, 158, 11, 0.35)'
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.35)'
   ctx.shadowBlur = 6 * scale
   ctx.shadowOffsetY = 2 * scale
 
@@ -374,9 +374,9 @@ export function drawDrawnShape(
   ctx.closePath()
 
   const grad = ctx.createLinearGradient(0, -20 * scale, 0, 20 * scale)
-  grad.addColorStop(0, '#fcd34d')
-  grad.addColorStop(0.5, '#f59e0b')
-  grad.addColorStop(1, '#d97706')
+  grad.addColorStop(0, '#e5e5e5')
+  grad.addColorStop(0.5, '#a3a3a3')
+  grad.addColorStop(1, '#737373')
   ctx.fillStyle = grad
   ctx.fill()
 
@@ -404,7 +404,7 @@ export function drawBall(
     const pt = trail[i]
     ctx.beginPath()
     ctx.arc(pt.x, pt.y, radius * t * 0.85, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(239, 68, 68, ${t * 0.22})`
+    ctx.fillStyle = `rgba(212, 212, 212, ${t * 0.22})`
     ctx.fill()
   }
 
@@ -413,26 +413,26 @@ export function drawBall(
   ctx.rotate(angle)
 
   if (released && speed > 1) {
-    ctx.shadowColor = '#ef4444'
+    ctx.shadowColor = '#a3a3a3'
     ctx.shadowBlur = (6 + Math.min(speed, 12) * 0.8) * scale
   }
 
   const grad = ctx.createRadialGradient(-radius * 0.35, -radius * 0.35, radius * 0.05, 0, 0, radius)
   if (released) {
-    grad.addColorStop(0, '#fecaca')
-    grad.addColorStop(0.45, '#ef4444')
-    grad.addColorStop(1, '#991b1b')
+    grad.addColorStop(0, '#f5f5f5')
+    grad.addColorStop(0.45, '#a3a3a3')
+    grad.addColorStop(1, '#525252')
   } else {
-    grad.addColorStop(0, 'rgba(254, 202, 202, 0.7)')
-    grad.addColorStop(0.5, 'rgba(239, 68, 68, 0.55)')
-    grad.addColorStop(1, 'rgba(153, 27, 27, 0.45)')
+    grad.addColorStop(0, 'rgba(245, 245, 245, 0.7)')
+    grad.addColorStop(0.5, 'rgba(163, 163, 163, 0.55)')
+    grad.addColorStop(1, 'rgba(82, 82, 82, 0.45)')
   }
   ctx.fillStyle = grad
   ctx.beginPath()
   ctx.arc(0, 0, radius, 0, Math.PI * 2)
   ctx.fill()
 
-  ctx.strokeStyle = released ? '#fca5a5' : 'rgba(252, 165, 165, 0.7)'
+  ctx.strokeStyle = released ? '#e5e5e5' : 'rgba(212, 212, 212, 0.7)'
   ctx.lineWidth = 2 * scale
   if (!released) {
     ctx.setLineDash([4 * scale, 4 * scale])

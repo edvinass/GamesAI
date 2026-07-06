@@ -17,14 +17,14 @@ defineProps<{
     <div class="lobby-icon">🪐</div>
     <h2>Solo puzzle</h2>
     <p class="desc">
-      Draw shapes that fall and become physical walls. Guide the ball into the green target across
-      five levels.
+      Draw shapes that fall and become physical walls. Guide the ball into the target across
+      fifty levels.
     </p>
 
     <ul class="feature-list">
       <li>Draw ramps and platforms with limited ink</li>
       <li>Press Go! to release physics</li>
-      <li>5 levels — increasing difficulty</li>
+      <li>50 levels — increasing difficulty</li>
     </ul>
 
     <div v-if="validationIssues.length" class="issues">
@@ -68,13 +68,13 @@ defineProps<{
 }
 
 .issues p {
-  color: var(--error);
+  color: #737373;
   font-size: 0.85rem;
   margin: 0.25rem 0;
 }
 
 .ready-msg {
-  color: var(--success);
+  color: #e5e5e5;
   font-size: 0.9rem;
   font-weight: 600;
   margin: 0;

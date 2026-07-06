@@ -371,16 +371,16 @@ function drawFrame() {
         ctx.lineTo(preview.outline[i].x, preview.outline[i].y)
       }
       ctx.closePath()
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.35)'
+      ctx.fillStyle = 'rgba(163, 163, 163, 0.35)'
       ctx.fill()
       ctx.restore()
     }
   }
 
   if (physicsLoading.value) {
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.65)'
+    ctx.fillStyle = 'rgba(10, 10, 10, 0.65)'
     ctx.fillRect(0, 0, w, h)
-    ctx.fillStyle = '#e2e8f0'
+    ctx.fillStyle = '#d4d4d4'
     ctx.font = `600 ${Math.max(14, 16 * scale)}px system-ui, sans-serif`
     ctx.textAlign = 'center'
     ctx.fillText('Loading physics…', w / 2, h / 2)
@@ -597,7 +597,7 @@ onUnmounted(() => {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--accent);
+  color: #a3a3a3;
 }
 
 .sidebar h2 {
@@ -626,24 +626,24 @@ onUnmounted(() => {
 .sim-message {
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--error);
+  color: #737373;
   margin: 0;
 }
 
 .sim-message.success {
-  color: var(--success);
+  color: #e5e5e5;
 }
 
 .victory {
-  background: rgba(34, 197, 94, 0.1);
-  border: 1px solid rgba(34, 197, 94, 0.3);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: var(--radius);
   padding: 0.75rem;
 }
 
 .victory h3 {
   margin: 0 0 0.35rem;
-  color: var(--success);
+  color: #f5f5f5;
 }
 
 .victory p {
