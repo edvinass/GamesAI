@@ -1,6 +1,6 @@
 import planck from 'planck'
 import type { CollisionEvent } from './effects'
-import type { GravityLevel, GravityStaticBody } from './levels'
+import type { GravityGear, GravityLevel, GravityStaticBody } from './levels'
 import { DESIGN_HEIGHT, scaledStrokeWidth } from './levels'
 import {
   strokeCentroid,
@@ -34,6 +34,12 @@ export interface DrawnShape {
   localPolygon: Point[]
 }
 
+export interface GearInstance {
+  spec: GravityGear
+  body: PlanckBody
+  teeth: number
+}
+
 export interface PhysicsWorld {
   world: PlanckWorld
   worldWidth: number
@@ -44,6 +50,7 @@ export interface PhysicsWorld {
   ballBody: PlanckBody
   targetBody: PlanckBody
   drawnShapes: DrawnShape[]
+  gears: GearInstance[]
   ballReleased: boolean
   onWin: () => void
   step: () => void
@@ -114,6 +121,31 @@ export function getBallCanvasTransform(world: PhysicsWorld) {
   return { x: pos.x, y: pos.y, angle: world.ballBody.getAngle() }
 }
 
+export function getGearCanvasTransform(gear: GearInstance) {
+  const pos = gear.body.getPosition()
+  return {
+    x: pos.x,
+    y: pos.y,
+    angle: gear.body.getAngle(),
+    radius: gear.spec.radius,
+    teeth: gear.teeth,
+  }
+}
+
+function addGear(world: PlanckWorld, spec: GravityGear): GearInstance {
+  const teeth = spec.teeth ?? 12
+  const body = world.createBody({
+    type: 'kinematic',
+    position: planck.Vec2(spec.x, spec.y),
+    angularVelocity: spec.angular_velocity,
+  })
+  body.createFixture(planck.Circle(spec.radius), {
+    friction: 0.85,
+    restitution: 0.15,
+  })
+  return { spec, body, teeth }
+}
+
 function addStaticBox(
   world: PlanckWorld,
   x: number,
@@ -174,6 +206,8 @@ export function createPhysicsWorld(
     createLevelStatic(world, spec)
   }
 
+  const gears: GearInstance[] = (level.gears ?? []).map((spec) => addGear(world, spec))
+
   const ballBody = world.createBody({
     type: 'static',
     position: planck.Vec2(level.ball.x, level.ball.y),
@@ -203,6 +237,7 @@ export function createPhysicsWorld(
     ballBody,
     targetBody,
     drawnShapes: [],
+    gears,
     ballReleased: false,
     onWin,
     step: () => {

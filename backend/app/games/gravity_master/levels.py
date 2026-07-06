@@ -374,6 +374,14 @@ LEVELS: list[dict] = [
             "radius": 20,
         },
     ],
+    "gears": [
+        {
+            "x": 400,
+            "y": 300,
+            "radius": 28,
+            "angular_velocity": 1.2,
+        },
+    ],
 },
     {
     "id": 8,
@@ -541,6 +549,14 @@ LEVELS: list[dict] = [
             "radius": 18,
         },
     ],
+    "gears": [
+        {
+            "x": 400,
+            "y": 330,
+            "radius": 32,
+            "angular_velocity": -1.6,
+        },
+    ],
 },
     {
     "id": 11,
@@ -647,6 +663,20 @@ LEVELS: list[dict] = [
             "y": 380,
             "width": 16,
             "height": 100,
+        },
+    ],
+    "gears": [
+        {
+            "x": 280,
+            "y": 380,
+            "radius": 22,
+            "angular_velocity": 2.0,
+        },
+        {
+            "x": 520,
+            "y": 280,
+            "radius": 18,
+            "angular_velocity": -2.4,
         },
     ],
 },
@@ -766,6 +796,14 @@ LEVELS: list[dict] = [
             "width": 120,
             "height": 14,
             "angle": -0.2,
+        },
+    ],
+    "gears": [
+        {
+            "x": 400,
+            "y": 330,
+            "radius": 34,
+            "angular_velocity": 1.8,
         },
     ],
 },
@@ -986,6 +1024,14 @@ LEVELS: list[dict] = [
             "x": 420,
             "y": 480,
             "radius": 20,
+        },
+    ],
+    "gears": [
+        {
+            "x": 380,
+            "y": 280,
+            "radius": 26,
+            "angular_velocity": -2.2,
         },
     ],
 },
@@ -1233,6 +1279,14 @@ LEVELS: list[dict] = [
             "x": 600,
             "y": 460,
             "radius": 18,
+        },
+    ],
+    "gears": [
+        {
+            "x": 400,
+            "y": 290,
+            "radius": 30,
+            "angular_velocity": 1.4,
         },
     ],
 },
@@ -1581,6 +1635,15 @@ LEVELS: list[dict] = [
             "angle": -0.15,
         },
     ],
+    "gears": [
+        {
+            "x": 400,
+            "y": 340,
+            "radius": 38,
+            "angular_velocity": -1.6,
+            "teeth": 16,
+        },
+    ],
 },
     {
     "id": 29,
@@ -1919,6 +1982,20 @@ LEVELS: list[dict] = [
             "radius": 26,
         },
     ],
+    "gears": [
+        {
+            "x": 400,
+            "y": 310,
+            "radius": 28,
+            "angular_velocity": 2.6,
+        },
+        {
+            "x": 280,
+            "y": 380,
+            "radius": 20,
+            "angular_velocity": -2.0,
+        },
+    ],
 },
     {
     "id": 35,
@@ -2085,6 +2162,14 @@ LEVELS: list[dict] = [
             "x": 340,
             "y": 450,
             "radius": 18,
+        },
+    ],
+    "gears": [
+        {
+            "x": 520,
+            "y": 330,
+            "radius": 24,
+            "angular_velocity": 2.2,
         },
     ],
 },
@@ -2371,6 +2456,15 @@ LEVELS: list[dict] = [
             "angle": 0.18,
         },
     ],
+    "gears": [
+        {
+            "x": 430,
+            "y": 350,
+            "radius": 32,
+            "angular_velocity": -2.0,
+            "teeth": 14,
+        },
+    ],
 },
     {
     "id": 43,
@@ -2604,6 +2698,20 @@ LEVELS: list[dict] = [
             "x": 420,
             "y": 320,
             "radius": 18,
+        },
+    ],
+    "gears": [
+        {
+            "x": 360,
+            "y": 320,
+            "radius": 22,
+            "angular_velocity": 1.8,
+        },
+        {
+            "x": 480,
+            "y": 420,
+            "radius": 20,
+            "angular_velocity": -2.2,
         },
     ],
 },
@@ -2859,6 +2967,27 @@ LEVELS: list[dict] = [
             "x": 400,
             "y": 470,
             "radius": 18,
+        },
+    ],
+    "gears": [
+        {
+            "x": 320,
+            "y": 300,
+            "radius": 24,
+            "angular_velocity": 2.4,
+        },
+        {
+            "x": 480,
+            "y": 300,
+            "radius": 24,
+            "angular_velocity": -2.4,
+        },
+        {
+            "x": 400,
+            "y": 400,
+            "radius": 30,
+            "angular_velocity": 1.6,
+            "teeth": 16,
         },
     ],
 },

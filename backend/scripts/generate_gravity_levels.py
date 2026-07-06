@@ -32,6 +32,25 @@ def peg(x: float, y: float, r: float = 20) -> dict:
     return circle(x, y, r)
 
 
+def gear(
+    x: float,
+    y: float,
+    r: float,
+    angular_velocity: float,
+    *,
+    teeth: int = 12,
+) -> dict:
+    body: dict = {
+        "x": x,
+        "y": y,
+        "radius": r,
+        "angular_velocity": angular_velocity,
+    }
+    if teeth != 12:
+        body["teeth"] = teeth
+    return body
+
+
 def level(
     id_: int,
     name: str,
@@ -41,8 +60,9 @@ def level(
     ball: tuple[float, float, float],
     target: tuple[float, float, float],
     bodies: list[dict],
+    gears: list[dict] | None = None,
 ) -> dict:
-    return {
+    data = {
         "id": id_,
         "name": name,
         "hint": hint,
@@ -54,6 +74,9 @@ def level(
         "target": {"x": target[0], "y": target[1], "radius": target[2]},
         "static_bodies": [FLOOR, *bodies],
     }
+    if gears:
+        data["gears"] = gears
+    return data
 
 
 LEVELS: list[dict] = [
@@ -137,7 +160,7 @@ LEVELS: list[dict] = [
         7,
         "Funnel",
         "Guide the ball through the narrow opening.",
-        "Walls form a funnel — shape a chute that feeds the ball through the mouth.",
+        "Walls form a funnel — shape a chute that feeds the ball through the mouth. Mind the spinning gear!",
         390,
         (400, 60, 14),
         (400, 530, 22),
@@ -147,6 +170,7 @@ LEVELS: list[dict] = [
             ramp(400, 250, 180, 0.08),
             peg(400, 420, 20),
         ],
+        gears=[gear(400, 300, 28, 1.2)],
     ),
     level(
         8,
@@ -182,7 +206,7 @@ LEVELS: list[dict] = [
         10,
         "Gate Crash",
         "Slip through the angled gates one at a time.",
-        "Three tilted gates block the lane — draw guides to thread each gap.",
+        "Three tilted gates block the lane — time your drop around the spinning gear.",
         360,
         (400, 65, 14),
         (720, 520, 22),
@@ -192,6 +216,7 @@ LEVELS: list[dict] = [
             ramp(340, 410, 110, 0.45),
             peg(480, 480, 18),
         ],
+        gears=[gear(400, 330, 32, -1.6)],
     ),
     level(
         11,
@@ -213,11 +238,12 @@ LEVELS: list[dict] = [
         12,
         "Tower Drop",
         "Circle the tower and reach the far side.",
-        "A big bumper blocks the middle — wrap around it with falling ramps.",
+        "A big bumper blocks the middle — weave past the twin gears with falling ramps.",
         370,
         (150, 70, 14),
         (680, 510, 22),
         [circle(400, 310, 60), ramp(620, 400, 140, -0.12), wall(250, 380, 100)],
+        gears=[gear(280, 380, 22, 2.0), gear(520, 280, 18, -2.4)],
     ),
     level(
         13,
@@ -238,7 +264,7 @@ LEVELS: list[dict] = [
         14,
         "Bumper Field",
         "Bounce off the pegs toward the target.",
-        "Diamond of bumpers guards the goal — bank off them with angled planks.",
+        "Diamond of bumpers guards the goal — dodge the central spinning gear.",
         390,
         (400, 60, 14),
         (700, 530, 22),
@@ -250,6 +276,7 @@ LEVELS: list[dict] = [
             peg(400, 330, 18),
             ramp(600, 460, 120, -0.2),
         ],
+        gears=[gear(400, 330, 34, 1.8)],
     ),
     level(
         15,
@@ -302,11 +329,12 @@ LEVELS: list[dict] = [
         18,
         "Catapult",
         "Build a launch ramp off the steep slope.",
-        "A steep slab waits mid-screen — fling the ball toward the far target.",
+        "A steep slab waits mid-screen — watch the gear before you launch.",
         360,
         (150, 75, 14),
         (700, 540, 22),
         [ramp(290, 370, 170, -0.7), rect(550, 300, 120, 14), peg(420, 480, 20)],
+        gears=[gear(380, 280, 26, -2.2)],
     ),
     level(
         19,
@@ -357,7 +385,7 @@ LEVELS: list[dict] = [
         22,
         "Labyrinth",
         "Find the path through the walled corridor.",
-        "S-shaped corridor — tight turns and a slim ink budget.",
+        "S-shaped corridor — a spinning gear blocks the tight turns.",
         340,
         (100, 70, 14),
         (700, 520, 20),
@@ -368,6 +396,7 @@ LEVELS: list[dict] = [
             rect(200, 340, 120, 14),
             peg(600, 460, 18),
         ],
+        gears=[gear(400, 290, 30, 1.4)],
     ),
     level(
         23,
@@ -447,7 +476,7 @@ LEVELS: list[dict] = [
         28,
         "The Pillar",
         "Wrap around the central pillar.",
-        "Ring of bumpers surrounds the pillar — pick a side and loop around.",
+        "Ring of bumpers surrounds the pillar — time your route past the big gear.",
         360,
         (400, 65, 14),
         (700, 520, 22),
@@ -458,6 +487,7 @@ LEVELS: list[dict] = [
             peg(400, 240, 18),
             ramp(620, 440, 140, -0.15),
         ],
+        gears=[gear(400, 340, 38, -1.6, teeth=16)],
     ),
     level(
         29,
@@ -533,7 +563,7 @@ LEVELS: list[dict] = [
         34,
         "Gauntlet",
         "Survive the obstacle gauntlet.",
-        "Five obstacles guard the lane — draw early, drop when the path is ready.",
+        "Five obstacles guard the lane — two spinning gears wait in the middle.",
         410,
         (400, 55, 14),
         (720, 530, 20),
@@ -544,6 +574,7 @@ LEVELS: list[dict] = [
             ramp(500, 410, 80, -0.4),
             peg(400, 470, 26),
         ],
+        gears=[gear(400, 310, 28, 2.6), gear(280, 380, 20, -2.0)],
     ),
     level(
         35,
@@ -576,7 +607,7 @@ LEVELS: list[dict] = [
         37,
         "Roller Coaster",
         "Ride the series of steep ramps.",
-        "Chain steep ramps for a roller-coaster line into the target.",
+        "Chain steep ramps for a roller-coaster line — dodge the gear on the curve.",
         390,
         (120, 70, 14),
         (700, 520, 22),
@@ -586,6 +617,7 @@ LEVELS: list[dict] = [
             ramp(620, 390, 140, -0.35),
             peg(340, 450, 18),
         ],
+        gears=[gear(520, 330, 24, 2.2)],
     ),
     level(
         38,
@@ -649,7 +681,7 @@ LEVELS: list[dict] = [
         42,
         "Ricochet",
         "Bank shots off the circular bumpers.",
-        "Three bumpers form a bank shot — redirect the ball toward the goal.",
+        "Three bumpers form a bank shot — the spinning gear changes every angle.",
         380,
         (100, 70, 14),
         (710, 510, 22),
@@ -659,6 +691,7 @@ LEVELS: list[dict] = [
             peg(400, 420, 24),
             ramp(450, 460, 120, 0.18),
         ],
+        gears=[gear(430, 350, 32, -2.0, teeth=14)],
     ),
     level(
         43,
@@ -710,7 +743,7 @@ LEVELS: list[dict] = [
         46,
         "Cascade",
         "Let the ball cascade down the terraces.",
-        "Four terraces step down leftward — catch and pass at each level.",
+        "Four terraces step down leftward — gears spin between the landings.",
         400,
         (680, 70, 14),
         (120, 520, 24),
@@ -721,6 +754,7 @@ LEVELS: list[dict] = [
             rect(240, 470, 130, 14),
             peg(420, 320, 18),
         ],
+        gears=[gear(360, 320, 22, 1.8), gear(480, 420, 20, -2.2)],
     ),
     level(
         47,
@@ -771,7 +805,7 @@ LEVELS: list[dict] = [
         50,
         "Gravity Master",
         "The ultimate test — prove you master gravity.",
-        "Bumpers, gates, and a tiny goal — everything you have learned, one level.",
+        "Bumpers, gates, gears, and a tiny goal — everything you have learned, one level.",
         260,
         (400, 55, 13),
         (400, 520, 18),
@@ -785,6 +819,11 @@ LEVELS: list[dict] = [
             ramp(230, 440, 100, -0.35),
             ramp(570, 440, 100, 0.35),
             peg(400, 470, 18),
+        ],
+        gears=[
+            gear(320, 300, 24, 2.4),
+            gear(480, 300, 24, -2.4),
+            gear(400, 400, 30, 1.6, teeth=16),
         ],
     ),
 ]
@@ -821,19 +860,20 @@ def _py_value(v: object, indent: int = 0) -> str:
 def render_python(levels: list[dict]) -> str:
     backend_levels = []
     for lv in levels:
-        backend_levels.append(
-            {
-                "id": lv["id"],
-                "name": lv["name"],
-                "hint": lv["hint"],
-                "world_width": lv["world_width"],
-                "world_height": lv["world_height"],
-                "max_ink": lv["max_ink"],
-                "ball": lv["ball"],
-                "target": lv["target"],
-                "static_bodies": lv["static_bodies"],
-            }
-        )
+        entry = {
+            "id": lv["id"],
+            "name": lv["name"],
+            "hint": lv["hint"],
+            "world_width": lv["world_width"],
+            "world_height": lv["world_height"],
+            "max_ink": lv["max_ink"],
+            "ball": lv["ball"],
+            "target": lv["target"],
+            "static_bodies": lv["static_bodies"],
+        }
+        if "gears" in lv:
+            entry["gears"] = lv["gears"]
+        backend_levels.append(entry)
     parts = ["LEVELS: list[dict] = ["]
     for lv in backend_levels:
         parts.append(f"    {_py_value(lv)},")
@@ -852,6 +892,14 @@ def render_typescript(levels: list[dict]) -> str:
   angle?: number
 }
 
+export interface GravityGear {
+  x: number
+  y: number
+  radius: number
+  angular_velocity: number
+  teeth?: number
+}
+
 export interface GravityLevel {
   id: number
   name: string
@@ -862,6 +910,7 @@ export interface GravityLevel {
   ball: { x: number; y: number; radius: number }
   target: { x: number; y: number; radius: number }
   static_bodies: GravityStaticBody[]
+  gears?: GravityGear[]
   /** Min axis scale when fitted to a viewport (design levels omit this). */
   layout_scale?: number
 }
@@ -896,6 +945,12 @@ export function scaleLevelToViewport(level: GravityLevel, width: number, height:
       width: body.width !== undefined ? scale(body.width) : undefined,
       height: body.height !== undefined ? scale(body.height) : undefined,
       radius: body.radius !== undefined ? scale(body.radius) : undefined,
+    })),
+    gears: level.gears?.map((g) => ({
+      ...g,
+      x: scale(g.x),
+      y: scale(g.y),
+      radius: scale(g.radius),
     })),
   }
 }
@@ -934,9 +989,22 @@ export function totalInkUsed(strokes: { x: number; y: number }[][]): number {
         parts.append(" }")
         return "".join(parts)
 
+    def ts_gear(g: dict) -> str:
+        parts = [
+            f"      {{ x: {g['x']}, y: {g['y']}, radius: {g['radius']}, angular_velocity: {g['angular_velocity']}",
+        ]
+        if "teeth" in g:
+            parts.append(f", teeth: {g['teeth']}")
+        parts.append(" }")
+        return "".join(parts)
+
     entries = []
     for lv in levels:
         bodies = ",\n".join(ts_body(b) for b in lv["static_bodies"])
+        gear_lines = ""
+        if lv.get("gears"):
+            gear_entries = ",\n".join(ts_gear(g) for g in lv["gears"])
+            gear_lines = f"\n    gears: [\n{gear_entries},\n    ],"
         entries.append(
             f"""  {{
     id: {lv['id']},
@@ -949,7 +1017,7 @@ export function totalInkUsed(strokes: { x: number; y: number }[][]): number {
     target: {{ x: {lv['target']['x']}, y: {lv['target']['y']}, radius: {lv['target']['radius']} }},
     static_bodies: [
 {bodies},
-    ],
+    ],{gear_lines}
   }}"""
         )
     return header + ",\n".join(entries) + footer

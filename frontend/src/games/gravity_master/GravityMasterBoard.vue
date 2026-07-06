@@ -17,6 +17,7 @@ import {
   drawBackground,
   drawBall,
   drawDrawnShape,
+  drawGear,
   drawStaticBody,
   drawTarget,
 } from './effects'
@@ -24,6 +25,7 @@ import {
   addStrokeToWorld,
   createPhysicsWorld,
   getBallCanvasTransform,
+  getGearCanvasTransform,
   getShapeCanvasTransform,
   isBallLost,
   isBallReleased,
@@ -329,6 +331,13 @@ function drawFrame() {
 
   for (const body of levelData.static_bodies) {
     drawStaticBody(ctx, body, scale)
+  }
+
+  if (physics) {
+    for (const gear of physics.gears) {
+      const { x, y, angle, radius, teeth } = getGearCanvasTransform(gear)
+      drawGear(ctx, x, y, radius, angle, teeth, scale)
+    }
   }
 
   const target = levelData.target

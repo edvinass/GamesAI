@@ -191,6 +191,13 @@ export interface GravityMasterLevel {
     radius?: number
     angle?: number
   }>
+  gears?: Array<{
+    x: number
+    y: number
+    radius: number
+    angular_velocity: number
+    teeth?: number
+  }>
   layout_scale?: number
 }
 

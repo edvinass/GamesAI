@@ -8,6 +8,14 @@ export interface GravityStaticBody {
   angle?: number
 }
 
+export interface GravityGear {
+  x: number
+  y: number
+  radius: number
+  angular_velocity: number
+  teeth?: number
+}
+
 export interface GravityLevel {
   id: number
   name: string
@@ -18,6 +26,7 @@ export interface GravityLevel {
   ball: { x: number; y: number; radius: number }
   target: { x: number; y: number; radius: number }
   static_bodies: GravityStaticBody[]
+  gears?: GravityGear[]
   /** Min axis scale when fitted to a viewport (design levels omit this). */
   layout_scale?: number
 }
@@ -52,6 +61,12 @@ export function scaleLevelToViewport(level: GravityLevel, width: number, height:
       width: body.width !== undefined ? scale(body.width) : undefined,
       height: body.height !== undefined ? scale(body.height) : undefined,
       radius: body.radius !== undefined ? scale(body.radius) : undefined,
+    })),
+    gears: level.gears?.map((g) => ({
+      ...g,
+      x: scale(g.x),
+      y: scale(g.y),
+      radius: scale(g.radius),
     })),
   }
 }
@@ -165,7 +180,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 7,
     name: "Funnel",
-    hint: "Walls form a funnel \u2014 shape a chute that feeds the ball through the mouth.",
+    hint: "Walls form a funnel \u2014 shape a chute that feeds the ball through the mouth. Mind the spinning gear!",
     world_width: 800,
     world_height: 600,
     max_ink: 390,
@@ -177,6 +192,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 540, y: 340, width: 16, height: 200 },
       { type: 'rect', x: 400, y: 250, width: 180, height: 14, angle: 0.08 },
       { type: 'circle', x: 400, y: 420, radius: 20 },
+    ],
+    gears: [
+      { x: 400, y: 300, radius: 28, angular_velocity: 1.2 },
     ],
   },
   {
@@ -216,7 +234,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 10,
     name: "Gate Crash",
-    hint: "Three tilted gates block the lane \u2014 draw guides to thread each gap.",
+    hint: "Three tilted gates block the lane \u2014 time your drop around the spinning gear.",
     world_width: 800,
     world_height: 600,
     max_ink: 360,
@@ -228,6 +246,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 560, y: 310, width: 110, height: 14, angle: -0.6 },
       { type: 'rect', x: 340, y: 410, width: 110, height: 14, angle: 0.45 },
       { type: 'circle', x: 480, y: 480, radius: 18 },
+    ],
+    gears: [
+      { x: 400, y: 330, radius: 32, angular_velocity: -1.6 },
     ],
   },
   {
@@ -251,7 +272,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 12,
     name: "Tower Drop",
-    hint: "A big bumper blocks the middle \u2014 wrap around it with falling ramps.",
+    hint: "A big bumper blocks the middle \u2014 weave past the twin gears with falling ramps.",
     world_width: 800,
     world_height: 600,
     max_ink: 370,
@@ -262,6 +283,10 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'circle', x: 400, y: 310, radius: 60 },
       { type: 'rect', x: 620, y: 400, width: 140, height: 14, angle: -0.12 },
       { type: 'rect', x: 250, y: 380, width: 16, height: 100 },
+    ],
+    gears: [
+      { x: 280, y: 380, radius: 22, angular_velocity: 2.0 },
+      { x: 520, y: 280, radius: 18, angular_velocity: -2.4 },
     ],
   },
   {
@@ -284,7 +309,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 14,
     name: "Bumper Field",
-    hint: "Diamond of bumpers guards the goal \u2014 bank off them with angled planks.",
+    hint: "Diamond of bumpers guards the goal \u2014 dodge the central spinning gear.",
     world_width: 800,
     world_height: 600,
     max_ink: 390,
@@ -298,6 +323,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'circle', x: 480, y: 400, radius: 22 },
       { type: 'circle', x: 400, y: 330, radius: 18 },
       { type: 'rect', x: 600, y: 460, width: 120, height: 14, angle: -0.2 },
+    ],
+    gears: [
+      { x: 400, y: 330, radius: 34, angular_velocity: 1.8 },
     ],
   },
   {
@@ -355,7 +383,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 18,
     name: "Catapult",
-    hint: "A steep slab waits mid-screen \u2014 fling the ball toward the far target.",
+    hint: "A steep slab waits mid-screen \u2014 watch the gear before you launch.",
     world_width: 800,
     world_height: 600,
     max_ink: 360,
@@ -366,6 +394,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 290, y: 370, width: 170, height: 14, angle: -0.7 },
       { type: 'rect', x: 550, y: 300, width: 120, height: 14 },
       { type: 'circle', x: 420, y: 480, radius: 20 },
+    ],
+    gears: [
+      { x: 380, y: 280, radius: 26, angular_velocity: -2.2 },
     ],
   },
   {
@@ -426,7 +457,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 22,
     name: "Labyrinth",
-    hint: "S-shaped corridor \u2014 tight turns and a slim ink budget.",
+    hint: "S-shaped corridor \u2014 a spinning gear blocks the tight turns.",
     world_width: 800,
     world_height: 600,
     max_ink: 340,
@@ -439,6 +470,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 400, y: 440, width: 200, height: 14, angle: 0.05 },
       { type: 'rect', x: 200, y: 340, width: 120, height: 14 },
       { type: 'circle', x: 600, y: 460, radius: 18 },
+    ],
+    gears: [
+      { x: 400, y: 290, radius: 30, angular_velocity: 1.4 },
     ],
   },
   {
@@ -531,7 +565,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 28,
     name: "The Pillar",
-    hint: "Ring of bumpers surrounds the pillar \u2014 pick a side and loop around.",
+    hint: "Ring of bumpers surrounds the pillar \u2014 time your route past the big gear.",
     world_width: 800,
     world_height: 600,
     max_ink: 360,
@@ -544,6 +578,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'circle', x: 520, y: 340, radius: 18 },
       { type: 'circle', x: 400, y: 240, radius: 18 },
       { type: 'rect', x: 620, y: 440, width: 140, height: 14, angle: -0.15 },
+    ],
+    gears: [
+      { x: 400, y: 340, radius: 38, angular_velocity: -1.6, teeth: 16 },
     ],
   },
   {
@@ -633,7 +670,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 34,
     name: "Gauntlet",
-    hint: "Five obstacles guard the lane \u2014 draw early, drop when the path is ready.",
+    hint: "Five obstacles guard the lane \u2014 two spinning gears wait in the middle.",
     world_width: 800,
     world_height: 600,
     max_ink: 410,
@@ -646,6 +683,10 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 340, y: 350, width: 80, height: 14, angle: 0.4 },
       { type: 'rect', x: 500, y: 410, width: 80, height: 14, angle: -0.4 },
       { type: 'circle', x: 400, y: 470, radius: 26 },
+    ],
+    gears: [
+      { x: 400, y: 310, radius: 28, angular_velocity: 2.6 },
+      { x: 280, y: 380, radius: 20, angular_velocity: -2.0 },
     ],
   },
   {
@@ -685,7 +726,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 37,
     name: "Roller Coaster",
-    hint: "Chain steep ramps for a roller-coaster line into the target.",
+    hint: "Chain steep ramps for a roller-coaster line \u2014 dodge the gear on the curve.",
     world_width: 800,
     world_height: 600,
     max_ink: 390,
@@ -697,6 +738,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 440, y: 270, width: 140, height: 14, angle: 0.4 },
       { type: 'rect', x: 620, y: 390, width: 140, height: 14, angle: -0.35 },
       { type: 'circle', x: 340, y: 450, radius: 18 },
+    ],
+    gears: [
+      { x: 520, y: 330, radius: 24, angular_velocity: 2.2 },
     ],
   },
   {
@@ -772,7 +816,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 42,
     name: "Ricochet",
-    hint: "Three bumpers form a bank shot \u2014 redirect the ball toward the goal.",
+    hint: "Three bumpers form a bank shot \u2014 the spinning gear changes every angle.",
     world_width: 800,
     world_height: 600,
     max_ink: 380,
@@ -784,6 +828,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'circle', x: 520, y: 330, radius: 30 },
       { type: 'circle', x: 400, y: 420, radius: 24 },
       { type: 'rect', x: 450, y: 460, width: 120, height: 14, angle: 0.18 },
+    ],
+    gears: [
+      { x: 430, y: 350, radius: 32, angular_velocity: -2.0, teeth: 14 },
     ],
   },
   {
@@ -841,7 +888,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 46,
     name: "Cascade",
-    hint: "Four terraces step down leftward \u2014 catch and pass at each level.",
+    hint: "Four terraces step down leftward \u2014 gears spin between the landings.",
     world_width: 800,
     world_height: 600,
     max_ink: 400,
@@ -854,6 +901,10 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 360, y: 370, width: 130, height: 14 },
       { type: 'rect', x: 240, y: 470, width: 130, height: 14 },
       { type: 'circle', x: 420, y: 320, radius: 18 },
+    ],
+    gears: [
+      { x: 360, y: 320, radius: 22, angular_velocity: 1.8 },
+      { x: 480, y: 420, radius: 20, angular_velocity: -2.2 },
     ],
   },
   {
@@ -910,7 +961,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 50,
     name: "Gravity Master",
-    hint: "Bumpers, gates, and a tiny goal \u2014 everything you have learned, one level.",
+    hint: "Bumpers, gates, gears, and a tiny goal \u2014 everything you have learned, one level.",
     world_width: 800,
     world_height: 600,
     max_ink: 260,
@@ -927,6 +978,11 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 230, y: 440, width: 100, height: 14, angle: -0.35 },
       { type: 'rect', x: 570, y: 440, width: 100, height: 14, angle: 0.35 },
       { type: 'circle', x: 400, y: 470, radius: 18 },
+    ],
+    gears: [
+      { x: 320, y: 300, radius: 24, angular_velocity: 2.4 },
+      { x: 480, y: 300, radius: 24, angular_velocity: -2.4 },
+      { x: 400, y: 400, radius: 30, angular_velocity: 1.6, teeth: 16 },
     ],
   }]
 

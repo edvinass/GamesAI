@@ -299,6 +299,74 @@ export function drawStaticBody(
   ctx.restore()
 }
 
+export function drawGear(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  angle: number,
+  teeth: number,
+  scale: number,
+): void {
+  const outerR = radius
+  const innerR = radius * 0.78
+  const hubR = radius * 0.28
+  const count = teeth * 2
+
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.rotate(angle)
+
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
+  ctx.shadowBlur = 10 * scale
+  ctx.shadowOffsetY = 3 * scale
+
+  ctx.beginPath()
+  for (let i = 0; i <= count; i++) {
+    const t = i % count
+    const a = (t / count) * Math.PI * 2 - Math.PI / 2
+    const r = t % 2 === 0 ? outerR : innerR
+    const px = r * Math.cos(a)
+    const py = r * Math.sin(a)
+    if (i === 0) ctx.moveTo(px, py)
+    else ctx.lineTo(px, py)
+  }
+  ctx.closePath()
+
+  const grad = ctx.createRadialGradient(-outerR * 0.2, -outerR * 0.2, hubR, 0, 0, outerR)
+  grad.addColorStop(0, '#b8c5d6')
+  grad.addColorStop(0.45, '#7c8fa6')
+  grad.addColorStop(1, '#4a5568')
+  ctx.fillStyle = grad
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(203, 213, 225, 0.45)'
+  ctx.lineWidth = 1.5 * scale
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(0, 0, hubR, 0, Math.PI * 2)
+  const hubGrad = ctx.createRadialGradient(-hubR * 0.3, -hubR * 0.3, 1, 0, 0, hubR)
+  hubGrad.addColorStop(0, '#64748b')
+  hubGrad.addColorStop(1, '#334155')
+  ctx.fillStyle = hubGrad
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)'
+  ctx.lineWidth = 1 * scale
+  ctx.stroke()
+
+  for (let i = 0; i < teeth; i++) {
+    const a = (i / teeth) * Math.PI * 2
+    ctx.beginPath()
+    ctx.moveTo(hubR * 0.6 * Math.cos(a), hubR * 0.6 * Math.sin(a))
+    ctx.lineTo(innerR * 0.95 * Math.cos(a), innerR * 0.95 * Math.sin(a))
+    ctx.strokeStyle = 'rgba(30, 41, 59, 0.35)'
+    ctx.lineWidth = 1.2 * scale
+    ctx.stroke()
+  }
+
+  ctx.restore()
+}
+
 export function drawTarget(
   ctx: CanvasRenderingContext2D,
   x: number,
