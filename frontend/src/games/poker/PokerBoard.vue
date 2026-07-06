@@ -114,6 +114,16 @@ const visibleCommunityCards = computed(() =>
   props.gameState.community_cards.slice(0, displayedCommunityCount.value),
 )
 
+const communityStreetLabel = computed(() => {
+  const count = displayedCommunityCount.value
+  const target = props.gameState.community_cards.length
+  if (!streetTransitionPending.value) return ''
+  if (count < 3 && target >= 3) return 'Dealing the flop — 3 cards'
+  if (count < 4 && target >= 4) return 'Dealing the turn'
+  if (count < 5 && target >= 5) return 'Dealing the river'
+  return 'Burning a card…'
+})
+
 const showHandDescriptions = computed(
   () =>
     props.gameState.phase === 'showdown' ||
@@ -405,30 +415,14 @@ watch(
 )
 
 watch(
-  () => ({
-    phase: props.gameState.phase,
-    communityCount: props.gameState.community_cards.length,
-  }),
-  ({ phase, communityCount }, prev) => {
+  () => props.gameState.community_cards.length,
+  (communityCount) => {
     if (communityCount < displayedCommunityCount.value) {
       displayedCommunityCount.value = communityCount
       return
     }
     if (communityCount <= displayedCommunityCount.value) return
-
-    const isNewStreet =
-      prev &&
-      ['flop', 'turn', 'river'].includes(phase) &&
-      phase !== prev.phase &&
-      communityCount > prev.communityCount
-
-    if (isNewStreet) {
-      streetTransitionPending.value = true
-      showPhaseBanner(phase)
-    }
-
-    const delay = isNewStreet ? PHASE_BANNER_MS + BURN_CARD_MS : 0
-    animateCommunityCards(communityCount, delay)
+    animateCommunityCards(communityCount)
   },
   { immediate: true },
 )
@@ -561,8 +555,8 @@ onUnmounted(() => {
         </Transition>
 
         <Transition name="burn-hint">
-          <div v-if="streetTransitionPending && displayedCommunityCount < gameState.community_cards.length" class="burn-hint">
-            Burning a card…
+          <div v-if="streetTransitionPending && communityStreetLabel" class="burn-hint">
+            {{ communityStreetLabel }}
           </div>
         </Transition>
 
