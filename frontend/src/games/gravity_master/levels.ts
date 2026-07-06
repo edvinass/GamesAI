@@ -16,6 +16,41 @@ export interface GravityGear {
   teeth?: number
 }
 
+export interface GravityMovingPlatform {
+  x: number
+  y: number
+  width: number
+  height: number
+  travel: number
+  axis: 'x' | 'y'
+  speed: number
+  phase?: number
+}
+
+export interface GravityBouncer {
+  x: number
+  y: number
+  width: number
+  height: number
+  angle?: number
+  restitution?: number
+}
+
+export interface GravitySeesaw {
+  x: number
+  y: number
+  width: number
+  height?: number
+  angle?: number
+}
+
+export interface GravityMagnet {
+  x: number
+  y: number
+  radius: number
+  strength: number
+}
+
 export interface GravityLevel {
   id: number
   name: string
@@ -27,6 +62,10 @@ export interface GravityLevel {
   target: { x: number; y: number; radius: number }
   static_bodies: GravityStaticBody[]
   gears?: GravityGear[]
+  moving_platforms?: GravityMovingPlatform[]
+  bouncers?: GravityBouncer[]
+  seesaws?: GravitySeesaw[]
+  magnets?: GravityMagnet[]
   /** Min axis scale when fitted to a viewport (design levels omit this). */
   layout_scale?: number
 }
@@ -68,6 +107,34 @@ export function scaleLevelToViewport(level: GravityLevel, width: number, height:
       y: scale(g.y),
       radius: scale(g.radius),
     })),
+    moving_platforms: level.moving_platforms?.map((p) => ({
+      ...p,
+      x: scale(p.x),
+      y: scale(p.y),
+      width: scale(p.width),
+      height: scale(p.height),
+      travel: scale(p.travel),
+    })),
+    bouncers: level.bouncers?.map((b) => ({
+      ...b,
+      x: scale(b.x),
+      y: scale(b.y),
+      width: scale(b.width),
+      height: scale(b.height),
+    })),
+    seesaws: level.seesaws?.map((s) => ({
+      ...s,
+      x: scale(s.x),
+      y: scale(s.y),
+      width: scale(s.width),
+      height: s.height !== undefined ? scale(s.height) : undefined,
+    })),
+    magnets: level.magnets?.map((m) => ({
+      ...m,
+      x: scale(m.x),
+      y: scale(m.y),
+      radius: scale(m.radius),
+    })),
   }
 }
 
@@ -94,7 +161,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 2,
     name: "The Gap",
-    hint: "Two ledges, one chasm \u2014 drop bridge pieces until they meet in the middle.",
+    hint: "Two ledges, one chasm \u2014 a moving platform shuttles across the gap.",
     world_width: 800,
     world_height: 600,
     max_ink: 400,
@@ -106,11 +173,14 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 650, y: 360, width: 200, height: 16 },
       { type: 'circle', x: 400, y: 400, radius: 18 },
     ],
+    moving_platforms: [
+      { x: 400, y: 360, width: 130, height: 16, travel: 150, axis: 'x', speed: 1.6 },
+    ],
   },
   {
     id: 3,
     name: "Bounce Pad",
-    hint: "A steep slab is already waiting \u2014 add falling ramps to bank the ball right.",
+    hint: "A steep slab is already waiting \u2014 bounce off the green pad to bank the ball right.",
     world_width: 800,
     world_height: 600,
     max_ink: 380,
@@ -121,6 +191,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 380, y: 440, width: 420, height: 14, angle: -0.28 },
       { type: 'rect', x: 620, y: 300, width: 16, height: 120 },
       { type: 'circle', x: 520, y: 280, radius: 22 },
+    ],
+    bouncers: [
+      { x: 480, y: 470, width: 110, height: 16 },
     ],
   },
   {
@@ -200,7 +273,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 8,
     name: "The Well",
-    hint: "A rim surrounds the target \u2014 ramp over the lip or drop straight in.",
+    hint: "A rim surrounds the target \u2014 the magnet below pulls the ball into the pit.",
     world_width: 800,
     world_height: 600,
     max_ink: 370,
@@ -213,11 +286,14 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 490, y: 290, width: 16, height: 120 },
       { type: 'circle', x: 400, y: 430, radius: 24 },
     ],
+    magnets: [
+      { x: 400, y: 500, radius: 90, strength: 95 },
+    ],
   },
   {
     id: 9,
     name: "Split Path",
-    hint: "Go left or right around the pillar \u2014 both paths reach the target.",
+    hint: "Go left or right around the pillar \u2014 a real seesaw tilts in the middle.",
     world_width: 800,
     world_height: 600,
     max_ink: 380,
@@ -229,6 +305,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 200, y: 420, width: 160, height: 14, angle: -0.1 },
       { type: 'rect', x: 600, y: 420, width: 160, height: 14, angle: 0.1 },
       { type: 'circle', x: 400, y: 480, radius: 18 },
+    ],
+    seesaws: [
+      { x: 400, y: 400, width: 160, height: 12, angle: 0.12 },
     ],
   },
   {
@@ -268,6 +347,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'circle', x: 280, y: 330, radius: 16 },
       { type: 'circle', x: 520, y: 240, radius: 16 },
     ],
+    moving_platforms: [
+      { x: 400, y: 340, width: 120, height: 14, travel: 120, axis: 'y', speed: 2.0 },
+    ],
   },
   {
     id: 12,
@@ -304,6 +386,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 180, y: 350, width: 130, height: 14 },
       { type: 'rect', x: 620, y: 350, width: 130, height: 14 },
       { type: 'circle', x: 400, y: 320, radius: 20 },
+    ],
+    moving_platforms: [
+      { x: 400, y: 350, width: 110, height: 14, travel: 130, axis: 'x', speed: 1.4 },
     ],
   },
   {
@@ -379,6 +464,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 300, y: 460, width: 160, height: 14, angle: -0.15 },
       { type: 'circle', x: 550, y: 400, radius: 16 },
     ],
+    magnets: [
+      { x: 720, y: 450, radius: 70, strength: 85 },
+    ],
   },
   {
     id: 18,
@@ -397,6 +485,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
     ],
     gears: [
       { x: 380, y: 280, radius: 26, angular_velocity: -2.2 },
+    ],
+    bouncers: [
+      { x: 300, y: 420, width: 100, height: 14, angle: -0.65 },
     ],
   },
   {
@@ -452,6 +543,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 620, y: 400, width: 160, height: 14 },
       { type: 'rect', x: 300, y: 470, width: 220, height: 14, angle: -0.25 },
       { type: 'rect', x: 500, y: 320, width: 16, height: 100 },
+    ],
+    bouncers: [
+      { x: 380, y: 490, width: 140, height: 16, angle: -0.35 },
     ],
   },
   {
@@ -510,6 +604,10 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 680, y: 400, width: 70, height: 14 },
       { type: 'circle', x: 460, y: 480, radius: 16 },
     ],
+    moving_platforms: [
+      { x: 300, y: 380, width: 80, height: 14, travel: 100, axis: 'x', speed: 1.8 },
+      { x: 610, y: 320, width: 80, height: 14, travel: 90, axis: 'y', speed: 2.2 },
+    ],
   },
   {
     id: 25,
@@ -543,6 +641,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 360, y: 390, width: 120, height: 14 },
       { type: 'rect', x: 240, y: 480, width: 120, height: 14 },
       { type: 'circle', x: 520, y: 380, radius: 18 },
+    ],
+    magnets: [
+      { x: 120, y: 520, radius: 75, strength: 110 },
     ],
   },
   {
@@ -654,7 +755,7 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
   {
     id: 33,
     name: "Seesaw",
-    hint: "Land squarely on the tilted plank so the ball rolls to the far end.",
+    hint: "Land on the tilted plank \u2014 this seesaw actually tips under weight.",
     world_width: 800,
     world_height: 600,
     max_ink: 360,
@@ -662,9 +763,11 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
     target: { x: 680, y: 500, radius: 22 },
     static_bodies: [
       { type: 'rect', x: 400, y: 580, width: 760, height: 24 },
-      { type: 'rect', x: 420, y: 370, width: 230, height: 14, angle: 0.25 },
       { type: 'rect', x: 620, y: 460, width: 120, height: 14 },
       { type: 'circle', x: 420, y: 480, radius: 16 },
+    ],
+    seesaws: [
+      { x: 420, y: 370, width: 230, height: 12, angle: 0.25 },
     ],
   },
   {
@@ -742,6 +845,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
     gears: [
       { x: 520, y: 330, radius: 24, angular_velocity: 2.2 },
     ],
+    bouncers: [
+      { x: 440, y: 450, width: 90, height: 14, angle: 0.5 },
+    ],
   },
   {
     id: 38,
@@ -778,6 +884,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 650, y: 370, width: 65, height: 14 },
       { type: 'circle', x: 410, y: 480, radius: 16 },
     ],
+    moving_platforms: [
+      { x: 490, y: 310, width: 70, height: 14, travel: 80, axis: 'y', speed: 1.7 },
+    ],
   },
   {
     id: 40,
@@ -811,6 +920,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 420, y: 400, width: 220, height: 10 },
       { type: 'rect', x: 620, y: 460, width: 100, height: 14 },
       { type: 'circle', x: 420, y: 350, radius: 16 },
+    ],
+    seesaws: [
+      { x: 320, y: 430, width: 140, height: 10, angle: -0.15 },
     ],
   },
   {
@@ -849,6 +961,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 550, y: 290, width: 120, height: 14, angle: 0.1 },
       { type: 'rect', x: 680, y: 440, width: 100, height: 14 },
       { type: 'circle', x: 550, y: 450, radius: 18 },
+    ],
+    magnets: [
+      { x: 680, y: 500, radius: 65, strength: -75 },
     ],
   },
   {
@@ -923,6 +1038,9 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 490, y: 250, width: 16, height: 100 },
       { type: 'circle', x: 400, y: 420, radius: 18 },
     ],
+    bouncers: [
+      { x: 400, y: 380, width: 100, height: 14 },
+    ],
   },
   {
     id: 48,
@@ -957,11 +1075,14 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { type: 'rect', x: 650, y: 440, width: 100, height: 14 },
       { type: 'circle', x: 400, y: 450, radius: 16 },
     ],
+    moving_platforms: [
+      { x: 400, y: 390, width: 120, height: 14, travel: 140, axis: 'x', speed: 1.3 },
+    ],
   },
   {
     id: 50,
     name: "Gravity Master",
-    hint: "Bumpers, gates, gears, and a tiny goal \u2014 everything you have learned, one level.",
+    hint: "Bumpers, gates, gears, bouncers, magnets \u2014 everything you have learned, one level.",
     world_width: 800,
     world_height: 600,
     max_ink: 260,
@@ -983,6 +1104,12 @@ export const GRAVITY_LEVELS: GravityLevel[] = [
       { x: 320, y: 300, radius: 24, angular_velocity: 2.4 },
       { x: 480, y: 300, radius: 24, angular_velocity: -2.4 },
       { x: 400, y: 400, radius: 30, angular_velocity: 1.6, teeth: 16 },
+    ],
+    bouncers: [
+      { x: 400, y: 290, width: 80, height: 12, angle: 0.15 },
+    ],
+    magnets: [
+      { x: 400, y: 520, radius: 60, strength: 70 },
     ],
   }]
 

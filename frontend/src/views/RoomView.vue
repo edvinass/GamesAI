@@ -12,12 +12,14 @@ import SnakeLobby from '@/games/snake/SnakeLobby.vue'
 import DuelLobby from '@/games/duel/DuelLobby.vue'
 import TetrisLobby from '@/games/tetris/TetrisLobby.vue'
 import GravityMasterLobby from '@/games/gravity_master/GravityMasterLobby.vue'
+import PokerLobby from '@/games/poker/PokerLobby.vue'
 import { validateLobby as validateCodenamesLobby } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
 import { validateLobby as validateDuelLobby } from '@/games/duel/lobbyValidation'
 import { validateLobby as validateTetrisLobby } from '@/games/tetris/lobbyValidation'
 import { validateLobby as validateGravityMasterLobby } from '@/games/gravity_master/lobbyValidation'
+import { validateLobby as validatePokerLobby } from '@/games/poker/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
@@ -76,6 +78,7 @@ const isSnake = computed(() => room.value?.game_type === 'snake')
 const isDuel = computed(() => room.value?.game_type === 'duel')
 const isTetris = computed(() => room.value?.game_type === 'tetris')
 const isGravityMaster = computed(() => room.value?.game_type === 'gravity_master')
+const isPoker = computed(() => room.value?.game_type === 'poker')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
@@ -87,6 +90,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'duel') return validateDuelLobby(room.value)
   if (room.value.game_type === 'tetris') return validateTetrisLobby(room.value)
   if (room.value.game_type === 'gravity_master') return validateGravityMasterLobby(room.value)
+  if (room.value.game_type === 'poker') return validatePokerLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
@@ -108,6 +112,21 @@ const tickMs = computed({
 const baseDropTicks = computed({
   get: () => Number(room.value?.settings?.base_drop_ticks ?? 20),
   set: (val: number) => updateSettings({ base_drop_ticks: val }),
+})
+
+const startingChips = computed({
+  get: () => Number(room.value?.settings?.starting_chips ?? 1000),
+  set: (val: number) => updateSettings({ starting_chips: val }),
+})
+
+const smallBlind = computed({
+  get: () => Number(room.value?.settings?.small_blind ?? 5),
+  set: (val: number) => updateSettings({ small_blind: val }),
+})
+
+const bigBlind = computed({
+  get: () => Number(room.value?.settings?.big_blind ?? 10),
+  set: (val: number) => updateSettings({ big_blind: val }),
 })
 
 const soloAiDifficulties = computed({
@@ -295,6 +314,23 @@ async function copyUrl() {
         @add-ai="addAi()"
         @remove="removePlayer"
         @set-ai-difficulty="setAiDifficulty"
+      />
+
+      <PokerLobby
+        v-else-if="isPoker"
+        v-model:solo-practice="soloPractice"
+        v-model:starting-chips="startingChips"
+        v-model:small-blind="smallBlind"
+        v-model:big-blind="bigBlind"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
       />
 
       <GravityMasterLobby

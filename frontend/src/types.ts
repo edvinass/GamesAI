@@ -198,6 +198,37 @@ export interface GravityMasterLevel {
     angular_velocity: number
     teeth?: number
   }>
+  moving_platforms?: Array<{
+    x: number
+    y: number
+    width: number
+    height: number
+    travel: number
+    axis: 'x' | 'y'
+    speed: number
+    phase?: number
+  }>
+  bouncers?: Array<{
+    x: number
+    y: number
+    width: number
+    height: number
+    angle?: number
+    restitution?: number
+  }>
+  seesaws?: Array<{
+    x: number
+    y: number
+    width: number
+    height?: number
+    angle?: number
+  }>
+  magnets?: Array<{
+    x: number
+    y: number
+    radius: number
+    strength: number
+  }>
   layout_scale?: number
 }
 
@@ -215,7 +246,61 @@ export interface GravityMasterGameState {
   viewer_id: string | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState
+export interface PlayingCard {
+  rank: string
+  suit: string
+}
+
+export interface PokerPlayerState {
+  id: string
+  nickname: string
+  is_ai: boolean
+  chips: number
+  bet_this_round: number
+  total_bet_hand: number
+  status: 'active' | 'folded' | 'all_in' | 'eliminated'
+  hole_cards: PlayingCard[]
+  hand_description?: string
+}
+
+export interface PokerPot {
+  amount: number
+  eligible_player_ids: string[]
+}
+
+export interface PokerWinner {
+  player_id: string
+  amount: number
+  hand: string | null
+}
+
+export interface PokerGameState {
+  phase: 'preflop' | 'flop' | 'turn' | 'river' | 'showdown' | 'hand_complete' | 'game_over'
+  hand_number: number
+  dealer_index: number
+  dealer_player_id: string | null
+  seat_order: string[]
+  community_cards: PlayingCard[]
+  players: PokerPlayerState[]
+  pot_total: number
+  pots: PokerPot[]
+  current_actor_id: string | null
+  current_bet: number
+  min_raise: number
+  last_action: Record<string, unknown> | null
+  winners: PokerWinner[]
+  winner: string | null
+  win_reason: string | null
+  settings: Record<string, unknown>
+  host_id: string | null
+  viewer_id: string | null
+  bet_to_call: number
+  can_check: boolean
+  min_raise_to: number
+  max_raise_to: number
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -239,6 +324,10 @@ export function isTetrisState(state: GameState): state is TetrisGameState {
 
 export function isGravityMasterState(state: GameState): state is GravityMasterGameState {
   return 'level_index' in state && 'levels_total' in state && 'level' in state
+}
+
+export function isPokerState(state: GameState): state is PokerGameState {
+  return 'seat_order' in state && 'community_cards' in state && 'pot_total' in state
 }
 
 export interface WsMessage {

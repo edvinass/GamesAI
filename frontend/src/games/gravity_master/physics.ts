@@ -1,6 +1,14 @@
 import planck from 'planck'
 import type { CollisionEvent } from './effects'
-import type { GravityGear, GravityLevel, GravityStaticBody } from './levels'
+import type {
+  GravityBouncer,
+  GravityGear,
+  GravityLevel,
+  GravityMagnet,
+  GravityMovingPlatform,
+  GravitySeesaw,
+  GravityStaticBody,
+} from './levels'
 import { DESIGN_HEIGHT, scaledStrokeWidth } from './levels'
 import {
   strokeCentroid,
@@ -40,6 +48,22 @@ export interface GearInstance {
   teeth: number
 }
 
+export interface MovingPlatformInstance {
+  spec: GravityMovingPlatform
+  body: PlanckBody
+}
+
+export interface BouncerInstance {
+  spec: GravityBouncer
+}
+
+export interface SeesawInstance {
+  spec: GravitySeesaw
+  plankBody: PlanckBody
+  pivotX: number
+  pivotY: number
+}
+
 export interface PhysicsWorld {
   world: PlanckWorld
   worldWidth: number
@@ -51,6 +75,11 @@ export interface PhysicsWorld {
   targetBody: PlanckBody
   drawnShapes: DrawnShape[]
   gears: GearInstance[]
+  movingPlatforms: MovingPlatformInstance[]
+  bouncers: BouncerInstance[]
+  seesaws: SeesawInstance[]
+  magnets: GravityMagnet[]
+  simTime: number
   ballReleased: boolean
   onWin: () => void
   step: () => void
@@ -132,6 +161,31 @@ export function getGearCanvasTransform(gear: GearInstance) {
   }
 }
 
+export function getMovingPlatformTransform(platform: MovingPlatformInstance) {
+  const pos = platform.body.getPosition()
+  return {
+    x: pos.x,
+    y: pos.y,
+    width: platform.spec.width,
+    height: platform.spec.height,
+    axis: platform.spec.axis,
+    travel: platform.spec.travel,
+  }
+}
+
+export function getSeesawTransform(seesaw: SeesawInstance) {
+  const pos = seesaw.plankBody.getPosition()
+  return {
+    x: pos.x,
+    y: pos.y,
+    angle: seesaw.plankBody.getAngle(),
+    width: seesaw.spec.width,
+    height: seesaw.spec.height ?? 12,
+    pivotX: seesaw.pivotX,
+    pivotY: seesaw.pivotY,
+  }
+}
+
 function addGear(world: PlanckWorld, spec: GravityGear): GearInstance {
   const teeth = spec.teeth ?? 12
   const body = world.createBody({
@@ -144,6 +198,99 @@ function addGear(world: PlanckWorld, spec: GravityGear): GearInstance {
     restitution: 0.15,
   })
   return { spec, body, teeth }
+}
+
+function addMovingPlatform(world: PlanckWorld, spec: GravityMovingPlatform): MovingPlatformInstance {
+  const body = world.createBody({
+    type: 'kinematic',
+    position: planck.Vec2(spec.x, spec.y),
+  })
+  body.createFixture(planck.Box(spec.width / 2, spec.height / 2), {
+    friction: 0.9,
+    restitution: 0.08,
+  })
+  return { spec, body }
+}
+
+function addBouncer(world: PlanckWorld, spec: GravityBouncer): BouncerInstance {
+  const body = world.createBody({
+    type: 'static',
+    position: planck.Vec2(spec.x, spec.y),
+    angle: spec.angle ?? 0,
+  })
+  body.createFixture(planck.Box(spec.width / 2, spec.height / 2), {
+    friction: 0.15,
+    restitution: spec.restitution ?? 0.92,
+  })
+  return { spec }
+}
+
+function addSeesaw(world: PlanckWorld, spec: GravitySeesaw): SeesawInstance {
+  const height = spec.height ?? 12
+  const pivot = world.createBody({
+    type: 'static',
+    position: planck.Vec2(spec.x, spec.y),
+  })
+  const plank = world.createBody({
+    type: 'dynamic',
+    position: planck.Vec2(spec.x, spec.y),
+    angle: spec.angle ?? 0,
+    angularDamping: 0.04,
+    linearDamping: 0.02,
+  })
+  plank.createFixture(planck.Box(spec.width / 2, height / 2), {
+    density: 1.8,
+    friction: 0.75,
+    restitution: 0.06,
+  })
+  world.createJoint(
+    planck.RevoluteJoint(
+      {
+        enableLimit: true,
+        lowerAngle: -0.8,
+        upperAngle: 0.8,
+      },
+      pivot,
+      plank,
+      planck.Vec2(spec.x, spec.y),
+    ),
+  )
+  return { spec, plankBody: plank, pivotX: spec.x, pivotY: spec.y }
+}
+
+function updateMovingPlatforms(platforms: MovingPlatformInstance[], time: number): void {
+  for (const platform of platforms) {
+    const { spec, body } = platform
+    const phase = spec.phase ?? 0
+    const offset = (spec.travel / 2) * Math.sin(spec.speed * time + phase)
+    const velocity = (spec.travel / 2) * spec.speed * Math.cos(spec.speed * time + phase)
+    if (spec.axis === 'x') {
+      body.setTransform(planck.Vec2(spec.x + offset, spec.y), 0)
+      body.setLinearVelocity(planck.Vec2(velocity, 0))
+    } else {
+      body.setTransform(planck.Vec2(spec.x, spec.y + offset), 0)
+      body.setLinearVelocity(planck.Vec2(0, velocity))
+    }
+  }
+}
+
+function applyMagnetForces(
+  magnets: GravityMagnet[],
+  bodies: PlanckBody[],
+  layoutScale: number,
+): void {
+  for (const magnet of magnets) {
+    for (const body of bodies) {
+      const pos = body.getPosition()
+      const dx = magnet.x - pos.x
+      const dy = magnet.y - pos.y
+      const dist = Math.hypot(dx, dy)
+      if (dist < 2 || dist > magnet.radius) continue
+      const falloff = 1 - dist / magnet.radius
+      const force = magnet.strength * falloff * falloff * layoutScale
+      body.applyForceToCenter(planck.Vec2((force * dx) / dist, (force * dy) / dist), true)
+    }
+  }
 }
 
 function addStaticBox(
@@ -207,6 +354,12 @@ export function createPhysicsWorld(
   }
 
   const gears: GearInstance[] = (level.gears ?? []).map((spec) => addGear(world, spec))
+  const movingPlatforms: MovingPlatformInstance[] = (level.moving_platforms ?? []).map((spec) =>
+    addMovingPlatform(world, spec),
+  )
+  const bouncers: BouncerInstance[] = (level.bouncers ?? []).map((spec) => addBouncer(world, spec))
+  const seesaws: SeesawInstance[] = (level.seesaws ?? []).map((spec) => addSeesaw(world, spec))
+  const magnets: GravityMagnet[] = level.magnets ?? []
 
   const ballBody = world.createBody({
     type: 'static',
@@ -238,10 +391,30 @@ export function createPhysicsWorld(
     targetBody,
     drawnShapes: [],
     gears,
+    movingPlatforms,
+    bouncers,
+    seesaws,
+    magnets,
+    simTime: 0,
     ballReleased: false,
     onWin,
     step: () => {
       for (let i = 0; i < PHYSICS_TIME_SCALE; i++) {
+        state.simTime += FIXED_TIMESTEP
+        updateMovingPlatforms(movingPlatforms, state.simTime)
+        const magnetTargets: PlanckBody[] = [
+          state.ballBody,
+          ...state.drawnShapes.map((shape) => shape.body),
+        ]
+        if (state.ballReleased) {
+          applyMagnetForces(magnets, magnetTargets, state.layoutScale)
+        } else {
+          applyMagnetForces(
+            magnets,
+            state.drawnShapes.map((shape) => shape.body),
+            state.layoutScale,
+          )
+        }
         world.step(FIXED_TIMESTEP)
       }
     },

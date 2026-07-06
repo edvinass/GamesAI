@@ -86,6 +86,18 @@ LEVELS: list[dict] = [
             "radius": 18,
         },
     ],
+    "moving_platforms": [
+        {
+            "x": 400,
+            "y": 360,
+            "width": 130,
+            "height": 16,
+            "travel": 150,
+            "axis": "x",
+            "speed": 1.6,
+            "phase": 0,
+        },
+    ],
 },
     {
     "id": 3,
@@ -132,6 +144,14 @@ LEVELS: list[dict] = [
             "x": 520,
             "y": 280,
             "radius": 22,
+        },
+    ],
+    "bouncers": [
+        {
+            "x": 480,
+            "y": 470,
+            "width": 110,
+            "height": 16,
         },
     ],
 },
@@ -436,6 +456,14 @@ LEVELS: list[dict] = [
             "radius": 24,
         },
     ],
+    "magnets": [
+        {
+            "x": 400,
+            "y": 500,
+            "radius": 90,
+            "strength": 95,
+        },
+    ],
 },
     {
     "id": 9,
@@ -490,6 +518,15 @@ LEVELS: list[dict] = [
             "x": 400,
             "y": 480,
             "radius": 18,
+        },
+    ],
+    "seesaws": [
+        {
+            "x": 400,
+            "y": 400,
+            "width": 160,
+            "height": 12,
+            "angle": 0.12,
         },
     ],
 },
@@ -617,6 +654,18 @@ LEVELS: list[dict] = [
             "radius": 16,
         },
     ],
+    "moving_platforms": [
+        {
+            "x": 400,
+            "y": 340,
+            "width": 120,
+            "height": 14,
+            "travel": 120,
+            "axis": "y",
+            "speed": 2.0,
+            "phase": 0,
+        },
+    ],
 },
     {
     "id": 12,
@@ -731,6 +780,18 @@ LEVELS: list[dict] = [
             "x": 400,
             "y": 320,
             "radius": 20,
+        },
+    ],
+    "moving_platforms": [
+        {
+            "x": 400,
+            "y": 350,
+            "width": 110,
+            "height": 14,
+            "travel": 130,
+            "axis": "x",
+            "speed": 1.4,
+            "phase": 0,
         },
     ],
 },
@@ -978,6 +1039,14 @@ LEVELS: list[dict] = [
             "radius": 16,
         },
     ],
+    "magnets": [
+        {
+            "x": 720,
+            "y": 450,
+            "radius": 70,
+            "strength": 85,
+        },
+    ],
 },
     {
     "id": 18,
@@ -1032,6 +1101,15 @@ LEVELS: list[dict] = [
             "y": 280,
             "radius": 26,
             "angular_velocity": -2.2,
+        },
+    ],
+    "bouncers": [
+        {
+            "x": 300,
+            "y": 420,
+            "width": 100,
+            "height": 14,
+            "angle": -0.65,
         },
     ],
 },
@@ -1217,6 +1295,15 @@ LEVELS: list[dict] = [
             "y": 320,
             "width": 16,
             "height": 100,
+        },
+    ],
+    "bouncers": [
+        {
+            "x": 380,
+            "y": 490,
+            "width": 140,
+            "height": 16,
+            "angle": -0.35,
         },
     ],
 },
@@ -1412,6 +1499,28 @@ LEVELS: list[dict] = [
             "radius": 16,
         },
     ],
+    "moving_platforms": [
+        {
+            "x": 300,
+            "y": 380,
+            "width": 80,
+            "height": 14,
+            "travel": 100,
+            "axis": "x",
+            "speed": 1.8,
+            "phase": 0,
+        },
+        {
+            "x": 610,
+            "y": 320,
+            "width": 80,
+            "height": 14,
+            "travel": 90,
+            "axis": "y",
+            "speed": 2.2,
+            "phase": 0,
+        },
+    ],
 },
     {
     "id": 25,
@@ -1519,6 +1628,14 @@ LEVELS: list[dict] = [
             "x": 520,
             "y": 380,
             "radius": 18,
+        },
+    ],
+    "magnets": [
+        {
+            "x": 120,
+            "y": 520,
+            "radius": 75,
+            "strength": 110,
         },
     ],
 },
@@ -1897,14 +2014,6 @@ LEVELS: list[dict] = [
         },
         {
             "type": "rect",
-            "x": 420,
-            "y": 370,
-            "width": 230,
-            "height": 14,
-            "angle": 0.25,
-        },
-        {
-            "type": "rect",
             "x": 620,
             "y": 460,
             "width": 120,
@@ -1915,6 +2024,15 @@ LEVELS: list[dict] = [
             "x": 420,
             "y": 480,
             "radius": 16,
+        },
+    ],
+    "seesaws": [
+        {
+            "x": 420,
+            "y": 370,
+            "width": 230,
+            "height": 12,
+            "angle": 0.25,
         },
     ],
 },
@@ -2172,6 +2290,15 @@ LEVELS: list[dict] = [
             "angular_velocity": 2.2,
         },
     ],
+    "bouncers": [
+        {
+            "x": 440,
+            "y": 450,
+            "width": 90,
+            "height": 14,
+            "angle": 0.5,
+        },
+    ],
 },
     {
     "id": 38,
@@ -2295,6 +2422,18 @@ LEVELS: list[dict] = [
             "radius": 16,
         },
     ],
+    "moving_platforms": [
+        {
+            "x": 490,
+            "y": 310,
+            "width": 70,
+            "height": 14,
+            "travel": 80,
+            "axis": "y",
+            "speed": 1.7,
+            "phase": 0,
+        },
+    ],
 },
     {
     "id": 40,
@@ -2401,6 +2540,15 @@ LEVELS: list[dict] = [
             "x": 420,
             "y": 350,
             "radius": 16,
+        },
+    ],
+    "seesaws": [
+        {
+            "x": 320,
+            "y": 430,
+            "width": 140,
+            "height": 10,
+            "angle": -0.15,
         },
     ],
 },
@@ -2525,6 +2673,14 @@ LEVELS: list[dict] = [
             "x": 550,
             "y": 450,
             "radius": 18,
+        },
+    ],
+    "magnets": [
+        {
+            "x": 680,
+            "y": 500,
+            "radius": 65,
+            "strength": -75,
         },
     ],
 },
@@ -2769,6 +2925,14 @@ LEVELS: list[dict] = [
             "radius": 18,
         },
     ],
+    "bouncers": [
+        {
+            "x": 400,
+            "y": 380,
+            "width": 100,
+            "height": 14,
+        },
+    ],
 },
     {
     "id": 48,
@@ -2880,6 +3044,18 @@ LEVELS: list[dict] = [
             "radius": 16,
         },
     ],
+    "moving_platforms": [
+        {
+            "x": 400,
+            "y": 390,
+            "width": 120,
+            "height": 14,
+            "travel": 140,
+            "axis": "x",
+            "speed": 1.3,
+            "phase": 0,
+        },
+    ],
 },
     {
     "id": 50,
@@ -2988,6 +3164,23 @@ LEVELS: list[dict] = [
             "radius": 30,
             "angular_velocity": 1.6,
             "teeth": 16,
+        },
+    ],
+    "bouncers": [
+        {
+            "x": 400,
+            "y": 290,
+            "width": 80,
+            "height": 12,
+            "angle": 0.15,
+        },
+    ],
+    "magnets": [
+        {
+            "x": 400,
+            "y": 520,
+            "radius": 60,
+            "strength": 70,
         },
     ],
 },

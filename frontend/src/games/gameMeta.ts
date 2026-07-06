@@ -42,6 +42,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '🪐',
     lobbyHint: 'Solo puzzle — just you. Start when ready.',
   },
+  poker: {
+    name: 'Poker',
+    description: "Texas Hold'em — bluff, bet, and beat your friends (or AI).",
+    emoji: '🃏',
+    lobbyHint: 'Need 2–6 players. Share the link or add AI to fill seats.',
+  },
 }
 
 export interface GameListItem {

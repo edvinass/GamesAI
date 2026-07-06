@@ -10,9 +10,10 @@ import SnakeBoard from '@/games/snake/SnakeBoard.vue'
 import DuelBoard from '@/games/duel/DuelBoard.vue'
 import TetrisBoard from '@/games/tetris/TetrisBoard.vue'
 import GravityMasterBoard from '@/games/gravity_master/GravityMasterBoard.vue'
+import PokerBoard from '@/games/poker/PokerBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState, isPokerState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,6 +37,7 @@ const gameTitle = computed(() => {
   if (type === 'duel') return 'Side Duel'
   if (type === 'tetris') return 'Multiplier Tetris'
   if (type === 'gravity_master') return 'Gravity Master'
+  if (type === 'poker') return 'Poker'
   return type ?? 'Game'
 })
 
@@ -61,6 +63,10 @@ const tetrisState = computed(() =>
 
 const gravityMasterState = computed(() =>
   gameState.value && isGravityMasterState(gameState.value) ? gameState.value as GravityMasterGameState : null,
+)
+
+const pokerState = computed(() =>
+  gameState.value && isPokerState(gameState.value) ? gameState.value as PokerGameState : null,
 )
 
 const isFullscreenGame = computed(() => Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value))
@@ -172,6 +178,14 @@ function backToLobby() {
     <GravityMasterBoard
       v-else-if="gravityMasterState && room"
       :game-state="gravityMasterState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <PokerBoard
+      v-else-if="pokerState && room"
+      :game-state="pokerState"
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"

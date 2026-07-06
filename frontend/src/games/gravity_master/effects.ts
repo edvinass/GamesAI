@@ -299,6 +299,195 @@ export function drawStaticBody(
   ctx.restore()
 }
 
+export function drawMagnetField(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  strength: number,
+  scale: number,
+  time: number,
+): void {
+  const attract = strength >= 0
+  const pulse = 0.65 + 0.35 * Math.sin(time * 0.005)
+  const color = attract ? '59, 130, 246' : '239, 68, 68'
+
+  ctx.save()
+  for (let ring = 3; ring >= 1; ring--) {
+    const r = radius * (ring / 3) * (0.92 + pulse * 0.06)
+    ctx.beginPath()
+    ctx.arc(x, y, r, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(${color}, ${0.08 * pulse / ring})`
+    ctx.lineWidth = 2 * scale
+    ctx.stroke()
+  }
+
+  const grad = ctx.createRadialGradient(x, y, radius * 0.1, x, y, radius)
+  grad.addColorStop(0, `rgba(${color}, ${0.14 * pulse})`)
+  grad.addColorStop(1, `rgba(${color}, 0)`)
+  ctx.fillStyle = grad
+  ctx.beginPath()
+  ctx.arc(x, y, radius, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.fillStyle = attract ? '#93c5fd' : '#fca5a5'
+  ctx.font = `bold ${Math.max(12, 14 * scale)}px system-ui, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(attract ? '+' : '−', x, y)
+  ctx.restore()
+}
+
+export function drawMovingPlatform(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  axis: 'x' | 'y',
+  travel: number,
+  scale: number,
+  time: number,
+): void {
+  ctx.save()
+  ctx.translate(x, y)
+
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)'
+  ctx.lineWidth = 2 * scale
+  ctx.setLineDash([5 * scale, 5 * scale])
+  if (axis === 'x') {
+    ctx.beginPath()
+    ctx.moveTo(-travel / 2, 0)
+    ctx.lineTo(travel / 2, 0)
+    ctx.stroke()
+  } else {
+    ctx.beginPath()
+    ctx.moveTo(0, -travel / 2)
+    ctx.lineTo(0, travel / 2)
+    ctx.stroke()
+  }
+  ctx.setLineDash([])
+
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
+  ctx.shadowBlur = 8 * scale
+  ctx.shadowOffsetY = 3 * scale
+
+  const grad = ctx.createLinearGradient(0, -height / 2, 0, height / 2)
+  grad.addColorStop(0, '#a5b4c8')
+  grad.addColorStop(0.5, '#6b7c93')
+  grad.addColorStop(1, '#4a5568')
+  ctx.fillStyle = grad
+  ctx.fillRect(-width / 2, -height / 2, width, height)
+  ctx.strokeStyle = 'rgba(226, 232, 240, 0.35)'
+  ctx.lineWidth = 1.5 * scale
+  ctx.strokeRect(-width / 2, -height / 2, width, height)
+
+  const arrowPulse = Math.sin(time * 0.006)
+  ctx.fillStyle = `rgba(226, 232, 240, ${0.35 + arrowPulse * 0.15})`
+  const arrowSize = 4 * scale
+  if (axis === 'x') {
+    ctx.beginPath()
+    ctx.moveTo(width / 2 - 10 * scale, 0)
+    ctx.lineTo(width / 2 - 10 * scale - arrowSize, -arrowSize)
+    ctx.lineTo(width / 2 - 10 * scale - arrowSize, arrowSize)
+    ctx.closePath()
+    ctx.fill()
+  } else {
+    ctx.beginPath()
+    ctx.moveTo(0, -height / 2 + 10 * scale)
+    ctx.lineTo(-arrowSize, -height / 2 + 10 * scale + arrowSize)
+    ctx.lineTo(arrowSize, -height / 2 + 10 * scale + arrowSize)
+    ctx.closePath()
+    ctx.fill()
+  }
+
+  ctx.restore()
+}
+
+export function drawBouncer(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  angle: number,
+  scale: number,
+  time: number,
+): void {
+  const pulse = 0.5 + 0.5 * Math.sin(time * 0.008)
+
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.rotate(angle)
+
+  ctx.shadowColor = `rgba(52, 211, 153, ${0.35 + pulse * 0.25})`
+  ctx.shadowBlur = (10 + pulse * 6) * scale
+
+  const grad = ctx.createLinearGradient(0, -height / 2, 0, height / 2)
+  grad.addColorStop(0, '#6ee7b7')
+  grad.addColorStop(0.45, '#34d399')
+  grad.addColorStop(1, '#059669')
+  ctx.fillStyle = grad
+  ctx.fillRect(-width / 2, -height / 2, width, height)
+
+  ctx.strokeStyle = `rgba(167, 243, 208, ${0.5 + pulse * 0.3})`
+  ctx.lineWidth = 2 * scale
+  ctx.strokeRect(-width / 2, -height / 2, width, height)
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)'
+  ctx.lineWidth = 1 * scale
+  for (let i = -2; i <= 2; i++) {
+    const sx = (i / 2) * (width * 0.35)
+    ctx.beginPath()
+    ctx.moveTo(sx, height / 2)
+    ctx.lineTo(sx, height / 2 + (4 + pulse * 2) * scale)
+    ctx.stroke()
+  }
+
+  ctx.restore()
+}
+
+export function drawSeesaw(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  angle: number,
+  pivotX: number,
+  pivotY: number,
+  scale: number,
+): void {
+  ctx.save()
+
+  ctx.fillStyle = '#475569'
+  ctx.beginPath()
+  ctx.arc(pivotX, pivotY, 5 * scale, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(203, 213, 225, 0.5)'
+  ctx.lineWidth = 1.5 * scale
+  ctx.stroke()
+
+  ctx.translate(x, y)
+  ctx.rotate(angle)
+
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.4)'
+  ctx.shadowBlur = 7 * scale
+  ctx.shadowOffsetY = 2 * scale
+
+  const grad = ctx.createLinearGradient(0, -height / 2, 0, height / 2)
+  grad.addColorStop(0, '#a8b4c4')
+  grad.addColorStop(0.5, '#718096')
+  grad.addColorStop(1, '#4a5568')
+  ctx.fillStyle = grad
+  ctx.fillRect(-width / 2, -height / 2, width, height)
+  ctx.strokeStyle = 'rgba(226, 232, 240, 0.35)'
+  ctx.lineWidth = 1.5 * scale
+  ctx.strokeRect(-width / 2, -height / 2, width, height)
+
+  ctx.restore()
+}
+
 export function drawGear(
   ctx: CanvasRenderingContext2D,
   x: number,

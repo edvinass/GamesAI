@@ -3,6 +3,7 @@ from app.games.codenames.engine import CodenamesEngine
 from app.games.duel.engine import DuelEngine
 from app.games.gravity_master.engine import GravityMasterEngine
 from app.games.snake.engine import SnakeEngine
+from app.games.poker.engine import PokerEngine
 from app.games.spyfall.engine import SpyfallEngine
 from app.games.tetris.engine import TetrisEngine
 
@@ -13,6 +14,7 @@ _REGISTRY: dict[str, GamePlugin] = {
     "duel": DuelEngine(),
     "tetris": TetrisEngine(),
     "gravity_master": GravityMasterEngine(),
+    "poker": PokerEngine(),
 }
 
 
@@ -30,6 +32,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "duel": {"name": "Side Duel", "description": "Two players shoot from opposite sides — dodge and fire"},
     "tetris": {"name": "Multiplier Tetris", "description": "Each player stacks alone — speed rises, last board standing wins"},
     "gravity_master": {"name": "Gravity Master", "description": "Draw shapes that fall and become walls — guide the ball to the target"},
+    "poker": {"name": "Poker", "description": "Texas Hold'em — bluff, bet, and beat your friends (or AI)"},
 }
 
 

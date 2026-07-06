@@ -16,8 +16,12 @@ import {
   VisualEffects,
   drawBackground,
   drawBall,
+  drawBouncer,
   drawDrawnShape,
   drawGear,
+  drawMagnetField,
+  drawMovingPlatform,
+  drawSeesaw,
   drawStaticBody,
   drawTarget,
 } from './effects'
@@ -26,6 +30,8 @@ import {
   createPhysicsWorld,
   getBallCanvasTransform,
   getGearCanvasTransform,
+  getMovingPlatformTransform,
+  getSeesawTransform,
   getShapeCanvasTransform,
   isBallLost,
   isBallReleased,
@@ -329,11 +335,29 @@ function drawFrame() {
 
   drawBackground(ctx, w, h, time)
 
+  if (physics) {
+    for (const magnet of physics.magnets) {
+      drawMagnetField(ctx, magnet.x, magnet.y, magnet.radius, magnet.strength, scale, time)
+    }
+  }
+
   for (const body of levelData.static_bodies) {
     drawStaticBody(ctx, body, scale)
   }
 
   if (physics) {
+    for (const bouncer of physics.bouncers) {
+      const spec = bouncer.spec
+      drawBouncer(ctx, spec.x, spec.y, spec.width, spec.height, spec.angle ?? 0, scale, time)
+    }
+    for (const platform of physics.movingPlatforms) {
+      const t = getMovingPlatformTransform(platform)
+      drawMovingPlatform(ctx, t.x, t.y, t.width, t.height, t.axis, t.travel, scale, time)
+    }
+    for (const seesaw of physics.seesaws) {
+      const t = getSeesawTransform(seesaw)
+      drawSeesaw(ctx, t.x, t.y, t.width, t.height, t.angle, t.pivotX, t.pivotY, scale)
+    }
     for (const gear of physics.gears) {
       const { x, y, angle, radius, teeth } = getGearCanvasTransform(gear)
       drawGear(ctx, x, y, radius, angle, teeth, scale)

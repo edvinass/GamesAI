@@ -51,6 +51,61 @@ def gear(
     return body
 
 
+def moving_platform(
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    travel: float,
+    axis: str = "x",
+    speed: float = 1.5,
+    phase: float = 0,
+) -> dict:
+    return {
+        "x": x,
+        "y": y,
+        "width": w,
+        "height": h,
+        "travel": travel,
+        "axis": axis,
+        "speed": speed,
+        "phase": phase,
+    }
+
+
+def bouncer(
+    x: float,
+    y: float,
+    w: float,
+    h: float = 14,
+    angle: float = 0,
+    restitution: float = 0.92,
+) -> dict:
+    body: dict = {"x": x, "y": y, "width": w, "height": h}
+    if angle:
+        body["angle"] = angle
+    if restitution != 0.92:
+        body["restitution"] = restitution
+    return body
+
+
+def seesaw(
+    x: float,
+    y: float,
+    w: float,
+    h: float = 12,
+    angle: float = 0,
+) -> dict:
+    body: dict = {"x": x, "y": y, "width": w, "height": h}
+    if angle:
+        body["angle"] = angle
+    return body
+
+
+def magnet(x: float, y: float, r: float, strength: float) -> dict:
+    return {"x": x, "y": y, "radius": r, "strength": strength}
+
+
 def level(
     id_: int,
     name: str,
@@ -60,7 +115,12 @@ def level(
     ball: tuple[float, float, float],
     target: tuple[float, float, float],
     bodies: list[dict],
+    *,
     gears: list[dict] | None = None,
+    moving_platforms: list[dict] | None = None,
+    bouncers: list[dict] | None = None,
+    seesaws: list[dict] | None = None,
+    magnets: list[dict] | None = None,
 ) -> dict:
     data = {
         "id": id_,
@@ -76,6 +136,14 @@ def level(
     }
     if gears:
         data["gears"] = gears
+    if moving_platforms:
+        data["moving_platforms"] = moving_platforms
+    if bouncers:
+        data["bouncers"] = bouncers
+    if seesaws:
+        data["seesaws"] = seesaws
+    if magnets:
+        data["magnets"] = magnets
     return data
 
 
@@ -95,21 +163,23 @@ LEVELS: list[dict] = [
         2,
         "The Gap",
         "Bridge the gap between the two platforms.",
-        "Two ledges, one chasm — drop bridge pieces until they meet in the middle.",
+        "Two ledges, one chasm — a moving platform shuttles across the gap.",
         400,
         (110, 80, 14),
         (690, 500, 26),
         [rect(150, 360, 200, 16), rect(650, 360, 200, 16), peg(400, 400, 18)],
+        moving_platforms=[moving_platform(400, 360, 130, 16, 150, "x", 1.6)],
     ),
     level(
         3,
         "Bounce Pad",
         "Use a steep slope to launch the ball toward the target.",
-        "A steep slab is already waiting — add falling ramps to bank the ball right.",
+        "A steep slab is already waiting — bounce off the green pad to bank the ball right.",
         380,
         (120, 70, 14),
         (700, 540, 24),
         [ramp(380, 440, 420, -0.28), wall(620, 300, 120), peg(520, 280, 22)],
+        bouncers=[bouncer(480, 470, 110, 16)],
     ),
     level(
         4,
@@ -176,7 +246,7 @@ LEVELS: list[dict] = [
         8,
         "The Well",
         "Drop the ball into the pit from above.",
-        "A rim surrounds the target — ramp over the lip or drop straight in.",
+        "A rim surrounds the target — the magnet below pulls the ball into the pit.",
         370,
         (400, 70, 14),
         (400, 500, 26),
@@ -186,12 +256,13 @@ LEVELS: list[dict] = [
             wall(490, 290, 120),
             peg(400, 430, 24),
         ],
+        magnets=[magnet(400, 500, 90, 95)],
     ),
     level(
         9,
         "Split Path",
         "Choose the safer route around the center block.",
-        "Go left or right around the pillar — both paths reach the target.",
+        "Go left or right around the pillar — a real seesaw tilts in the middle.",
         380,
         (120, 80, 14),
         (700, 500, 24),
@@ -201,6 +272,7 @@ LEVELS: list[dict] = [
             ramp(600, 420, 160, 0.1),
             peg(400, 480, 18),
         ],
+        seesaws=[seesaw(400, 400, 160, 12, 0.12)],
     ),
     level(
         10,
@@ -233,6 +305,7 @@ LEVELS: list[dict] = [
             peg(280, 330, 16),
             peg(520, 240, 16),
         ],
+        moving_platforms=[moving_platform(400, 340, 120, 14, 120, "y", 2.0)],
     ),
     level(
         12,
@@ -259,6 +332,7 @@ LEVELS: list[dict] = [
             rect(620, 350, 130, 14),
             peg(400, 320, 20),
         ],
+        moving_platforms=[moving_platform(400, 350, 110, 14, 130, "x", 1.4)],
     ),
     level(
         14,
@@ -324,6 +398,7 @@ LEVELS: list[dict] = [
             ramp(300, 460, 160, -0.15),
             peg(550, 400, 16),
         ],
+        magnets=[magnet(720, 450, 70, 85)],
     ),
     level(
         18,
@@ -335,6 +410,7 @@ LEVELS: list[dict] = [
         (700, 540, 22),
         [ramp(290, 370, 170, -0.7), rect(550, 300, 120, 14), peg(420, 480, 20)],
         gears=[gear(380, 280, 26, -2.2)],
+        bouncers=[bouncer(300, 420, 100, 14, -0.65)],
     ),
     level(
         19,
@@ -380,6 +456,7 @@ LEVELS: list[dict] = [
         (120, 80, 14),
         (650, 380, 22),
         [rect(620, 400, 160, 14), ramp(300, 470, 220, -0.25), wall(500, 320, 100)],
+        bouncers=[bouncer(380, 490, 140, 16, -0.35)],
     ),
     level(
         22,
@@ -429,6 +506,10 @@ LEVELS: list[dict] = [
             rect(680, 400, 70, 14),
             peg(460, 480, 16),
         ],
+        moving_platforms=[
+            moving_platform(300, 380, 80, 14, 100, "x", 1.8),
+            moving_platform(610, 320, 80, 14, 90, "y", 2.2),
+        ],
     ),
     level(
         25,
@@ -456,6 +537,7 @@ LEVELS: list[dict] = [
             rect(240, 480, 120, 14),
             peg(520, 380, 18),
         ],
+        magnets=[magnet(120, 520, 75, 110)],
     ),
     level(
         27,
@@ -553,11 +635,12 @@ LEVELS: list[dict] = [
         33,
         "Seesaw",
         "Cross the tilted plank without sliding off.",
-        "Land squarely on the tilted plank so the ball rolls to the far end.",
+        "Land on the tilted plank — this seesaw actually tips under weight.",
         360,
         (200, 70, 14),
         (680, 500, 22),
-        [ramp(420, 370, 230, 0.25), rect(620, 460, 120, 14), peg(420, 480, 16)],
+        [rect(620, 460, 120, 14), peg(420, 480, 16)],
+        seesaws=[seesaw(420, 370, 230, 12, 0.25)],
     ),
     level(
         34,
@@ -618,6 +701,7 @@ LEVELS: list[dict] = [
             peg(340, 450, 18),
         ],
         gears=[gear(520, 330, 24, 2.2)],
+        bouncers=[bouncer(440, 450, 90, 14, 0.5)],
     ),
     level(
         38,
@@ -650,6 +734,7 @@ LEVELS: list[dict] = [
             rect(650, 370, 65, 14),
             peg(410, 480, 16),
         ],
+        moving_platforms=[moving_platform(490, 310, 70, 14, 80, "y", 1.7)],
     ),
     level(
         40,
@@ -676,6 +761,7 @@ LEVELS: list[dict] = [
         (150, 70, 14),
         (680, 480, 20),
         [rect(420, 400, 220, 10), rect(620, 460, 100, 14), peg(420, 350, 16)],
+        seesaws=[seesaw(320, 430, 140, 10, -0.15)],
     ),
     level(
         42,
@@ -708,6 +794,7 @@ LEVELS: list[dict] = [
             rect(680, 440, 100, 14),
             peg(550, 450, 18),
         ],
+        magnets=[magnet(680, 500, 65, -75)],
     ),
     level(
         44,
@@ -770,6 +857,7 @@ LEVELS: list[dict] = [
             wall(490, 250, 100),
             peg(400, 420, 18),
         ],
+        bouncers=[bouncer(400, 380, 100, 14)],
     ),
     level(
         48,
@@ -800,12 +888,13 @@ LEVELS: list[dict] = [
             rect(650, 440, 100, 14),
             peg(400, 450, 16),
         ],
+        moving_platforms=[moving_platform(400, 390, 120, 14, 140, "x", 1.3)],
     ),
     level(
         50,
         "Gravity Master",
         "The ultimate test — prove you master gravity.",
-        "Bumpers, gates, gears, and a tiny goal — everything you have learned, one level.",
+        "Bumpers, gates, gears, bouncers, magnets — everything you have learned, one level.",
         260,
         (400, 55, 13),
         (400, 520, 18),
@@ -825,6 +914,8 @@ LEVELS: list[dict] = [
             gear(480, 300, 24, -2.4),
             gear(400, 400, 30, 1.6, teeth=16),
         ],
+        bouncers=[bouncer(400, 290, 80, 12, 0.15)],
+        magnets=[magnet(400, 520, 60, 70)],
     ),
 ]
 
@@ -873,6 +964,14 @@ def render_python(levels: list[dict]) -> str:
         }
         if "gears" in lv:
             entry["gears"] = lv["gears"]
+        if "moving_platforms" in lv:
+            entry["moving_platforms"] = lv["moving_platforms"]
+        if "bouncers" in lv:
+            entry["bouncers"] = lv["bouncers"]
+        if "seesaws" in lv:
+            entry["seesaws"] = lv["seesaws"]
+        if "magnets" in lv:
+            entry["magnets"] = lv["magnets"]
         backend_levels.append(entry)
     parts = ["LEVELS: list[dict] = ["]
     for lv in backend_levels:
@@ -900,6 +999,41 @@ export interface GravityGear {
   teeth?: number
 }
 
+export interface GravityMovingPlatform {
+  x: number
+  y: number
+  width: number
+  height: number
+  travel: number
+  axis: 'x' | 'y'
+  speed: number
+  phase?: number
+}
+
+export interface GravityBouncer {
+  x: number
+  y: number
+  width: number
+  height: number
+  angle?: number
+  restitution?: number
+}
+
+export interface GravitySeesaw {
+  x: number
+  y: number
+  width: number
+  height?: number
+  angle?: number
+}
+
+export interface GravityMagnet {
+  x: number
+  y: number
+  radius: number
+  strength: number
+}
+
 export interface GravityLevel {
   id: number
   name: string
@@ -911,6 +1045,10 @@ export interface GravityLevel {
   target: { x: number; y: number; radius: number }
   static_bodies: GravityStaticBody[]
   gears?: GravityGear[]
+  moving_platforms?: GravityMovingPlatform[]
+  bouncers?: GravityBouncer[]
+  seesaws?: GravitySeesaw[]
+  magnets?: GravityMagnet[]
   /** Min axis scale when fitted to a viewport (design levels omit this). */
   layout_scale?: number
 }
@@ -951,6 +1089,34 @@ export function scaleLevelToViewport(level: GravityLevel, width: number, height:
       x: scale(g.x),
       y: scale(g.y),
       radius: scale(g.radius),
+    })),
+    moving_platforms: level.moving_platforms?.map((p) => ({
+      ...p,
+      x: scale(p.x),
+      y: scale(p.y),
+      width: scale(p.width),
+      height: scale(p.height),
+      travel: scale(p.travel),
+    })),
+    bouncers: level.bouncers?.map((b) => ({
+      ...b,
+      x: scale(b.x),
+      y: scale(b.y),
+      width: scale(b.width),
+      height: scale(b.height),
+    })),
+    seesaws: level.seesaws?.map((s) => ({
+      ...s,
+      x: scale(s.x),
+      y: scale(s.y),
+      width: scale(s.width),
+      height: s.height !== undefined ? scale(s.height) : undefined,
+    })),
+    magnets: level.magnets?.map((m) => ({
+      ...m,
+      x: scale(m.x),
+      y: scale(m.y),
+      radius: scale(m.radius),
     })),
   }
 }
@@ -998,13 +1164,52 @@ export function totalInkUsed(strokes: { x: number; y: number }[][]): number {
         parts.append(" }")
         return "".join(parts)
 
+    def ts_moving_platform(p: dict) -> str:
+        parts = [
+            f"      {{ x: {p['x']}, y: {p['y']}, width: {p['width']}, height: {p['height']}, travel: {p['travel']}, axis: '{p['axis']}', speed: {p['speed']}",
+        ]
+        if "phase" in p and p["phase"]:
+            parts.append(f", phase: {p['phase']}")
+        parts.append(" }")
+        return "".join(parts)
+
+    def ts_bouncer(b: dict) -> str:
+        parts = [f"      {{ x: {b['x']}, y: {b['y']}, width: {b['width']}, height: {b['height']}"]
+        if "angle" in b and b["angle"]:
+            parts.append(f", angle: {b['angle']}")
+        if "restitution" in b:
+            parts.append(f", restitution: {b['restitution']}")
+        parts.append(" }")
+        return "".join(parts)
+
+    def ts_seesaw(s: dict) -> str:
+        parts = [f"      {{ x: {s['x']}, y: {s['y']}, width: {s['width']}"]
+        if "height" in s:
+            parts.append(f", height: {s['height']}")
+        if "angle" in s and s["angle"]:
+            parts.append(f", angle: {s['angle']}")
+        parts.append(" }")
+        return "".join(parts)
+
+    def ts_magnet(m: dict) -> str:
+        return f"      {{ x: {m['x']}, y: {m['y']}, radius: {m['radius']}, strength: {m['strength']} }}"
+
+    optional_fields = [
+        ("gears", ts_gear),
+        ("moving_platforms", ts_moving_platform),
+        ("bouncers", ts_bouncer),
+        ("seesaws", ts_seesaw),
+        ("magnets", ts_magnet),
+    ]
+
     entries = []
     for lv in levels:
         bodies = ",\n".join(ts_body(b) for b in lv["static_bodies"])
-        gear_lines = ""
-        if lv.get("gears"):
-            gear_entries = ",\n".join(ts_gear(g) for g in lv["gears"])
-            gear_lines = f"\n    gears: [\n{gear_entries},\n    ],"
+        optional_lines = ""
+        for field_name, formatter in optional_fields:
+            if lv.get(field_name):
+                field_entries = ",\n".join(formatter(item) for item in lv[field_name])
+                optional_lines += f"\n    {field_name}: [\n{field_entries},\n    ],"
         entries.append(
             f"""  {{
     id: {lv['id']},
@@ -1017,7 +1222,7 @@ export function totalInkUsed(strokes: { x: number; y: number }[][]): number {
     target: {{ x: {lv['target']['x']}, y: {lv['target']['y']}, radius: {lv['target']['radius']} }},
     static_bodies: [
 {bodies},
-    ],{gear_lines}
+    ],{optional_lines}
   }}"""
         )
     return header + ",\n".join(entries) + footer
