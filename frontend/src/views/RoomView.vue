@@ -13,7 +13,7 @@ import DuelLobby from '@/games/duel/DuelLobby.vue'
 import TetrisLobby from '@/games/tetris/TetrisLobby.vue'
 import GravityMasterLobby from '@/games/gravity_master/GravityMasterLobby.vue'
 import PokerLobby from '@/games/poker/PokerLobby.vue'
-import { validateLobby as validateCodenamesLobby } from '@/games/codenames/lobbyValidation'
+import { validateLobby as validateCodenamesLobby, teamOperatives, teamSpymaster } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
 import { validateLobby as validateDuelLobby } from '@/games/duel/lobbyValidation'
@@ -175,6 +175,14 @@ function addAi(team?: string, role?: string) {
   } else {
     send({ type: 'add_ai_player' })
   }
+}
+
+function fillCodenamesWithAi() {
+  if (!room.value) return
+  const players = room.value.players
+  if (!teamSpymaster(players, 'blue')) addAi('blue', 'spymaster')
+  if (teamOperatives(players, 'red').length === 0) addAi('red', 'operative')
+  if (teamOperatives(players, 'blue').length === 0) addAi('blue', 'operative')
 }
 
 function removePlayer(id: string) {
@@ -351,8 +359,17 @@ async function copyUrl() {
 
         <template v-else>
           <p v-if="isHost" class="arrange-hint">
-            Assign each team one spymaster and at least one operative. Use slot buttons to move players or add AI.
+            You're set as Red Spymaster. Tap <em>Fill empty slots with AI</em> or use the per-slot buttons on each team.
           </p>
+
+          <button
+            v-if="isHost"
+            type="button"
+            class="btn-secondary fill-ai-btn"
+            @click="fillCodenamesWithAi"
+          >
+            Fill empty slots with AI
+          </button>
 
           <div class="teams stagger-in">
             <LobbyTeamPanel
@@ -589,6 +606,11 @@ async function copyUrl() {
   margin-bottom: 1rem;
   font-size: 0.85rem;
   color: var(--text-muted);
+}
+
+.fill-ai-btn {
+  margin-bottom: 1rem;
+  width: 100%;
 }
 
 .teams {

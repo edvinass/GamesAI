@@ -21,6 +21,9 @@ from app.utils import generate_session_token, hash_session_token, player_to_dict
 
 logger = logging.getLogger(__name__)
 
+# Games where lobby players are not assigned red/blue teams or spymaster roles.
+_NO_TEAM_LOBBY_GAMES = frozenset({"spyfall", "snake", "duel", "tetris", "poker", "gravity_master"})
+
 _ai_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -67,8 +70,8 @@ class RoomService:
             room_id=room.id,
             nickname=nickname,
             session_token_hash=hash_session_token(token),
-            team=Team.RED if game_type not in ("spyfall", "snake", "duel", "tetris") else None,
-            role=Role.SPYMASTER if game_type not in ("spyfall", "snake", "duel", "tetris") else None,
+            team=Team.RED if game_type not in _NO_TEAM_LOBBY_GAMES else None,
+            role=Role.SPYMASTER if game_type not in _NO_TEAM_LOBBY_GAMES else None,
             is_ai=False,
             is_connected=True,
         )
@@ -104,7 +107,7 @@ class RoomService:
         return room, player, token
 
     def _assign_lobby_slot(self, room: Room) -> tuple[Team | None, Role | None]:
-        if room.game_type in ("spyfall", "snake", "duel", "tetris"):
+        if room.game_type in _NO_TEAM_LOBBY_GAMES:
             return None, None
 
         red = [p for p in room.players if p.team == Team.RED]
@@ -168,7 +171,10 @@ class RoomService:
         if room.status != RoomStatus.LOBBY:
             raise ValueError("Cannot add AI after game started")
 
-        if room.game_type in ("spyfall", "snake", "duel", "tetris"):
+        if room.game_type == "gravity_master":
+            raise ValueError("Gravity Master is single-player only — AI players are not supported")
+
+        if room.game_type in _NO_TEAM_LOBBY_GAMES:
             settings = get_game(room.game_type).validate_settings(room.settings)
             if len(room.players) >= settings["max_players"]:
                 raise ValueError(f"Maximum {settings['max_players']} players allowed")
