@@ -637,7 +637,6 @@ async function copyUrl() {
   display: flex;
   gap: 0.75rem;
   align-items: flex-start;
-  margin-bottom: 1.25rem;
   padding: 1rem 1.25rem;
   transition: border-color 0.3s, background 0.3s, transform 0.3s var(--ease-bounce);
 }
@@ -693,6 +692,7 @@ async function copyUrl() {
 
 .start-btn {
   width: 100%;
+  margin-top: 1.25rem;
   font-size: 1.15rem;
   padding: 1rem;
   transition: transform 0.2s, box-shadow 0.3s;
