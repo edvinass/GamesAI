@@ -1,7 +1,20 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, PokerGameState } from '@/types'
 import PlayingCard from './PlayingCard.vue'
+import {
+  disposeSounds,
+  isSoundMuted,
+  playActionSound,
+  playBurnCard,
+  playDealCard,
+  playShowdownFlip,
+  playStreetReveal,
+  playWin,
+  playYourTurn,
+  setSoundMuted,
+  unlockAudio,
+} from './sounds'
 
 const CARD_REVEAL_MS = 380
 const TURN_DELAY_MS = 1100
@@ -43,6 +56,20 @@ const betPulseSeats = ref<Set<string>>(new Set())
 const actionHoldUntil = ref(0)
 const actionHoldActive = ref(false)
 const streetTransitionPending = ref(false)
+const soundMuted = ref(isSoundMuted())
+const suppressSounds = ref(true)
+
+function toggleSound() {
+  const next = !soundMuted.value
+  setSoundMuted(next)
+  soundMuted.value = next
+  if (!next) void unlockAudio()
+}
+
+function playSfx(fn: () => void) {
+  if (suppressSounds.value || soundMuted.value) return
+  fn()
+}
 
 const timers = new Set<ReturnType<typeof setTimeout>>()
 
@@ -272,6 +299,9 @@ function showPhaseBanner(phase: string) {
     hand_complete: 'Hand Complete',
     game_over: 'Game Over',
   }
+  if (phase === 'flop' || phase === 'turn' || phase === 'river') {
+    playSfx(() => playStreetReveal(phase))
+  }
   phaseBanner.value = { text: labels[phase] ?? phase, visible: true }
   schedule(() => {
     phaseBanner.value = { ...phaseBanner.value, visible: false }
@@ -396,6 +426,7 @@ function highlightActor(actorId: string | null, delayMs: number) {
   effectiveCurrentActorId.value = null
   schedule(() => {
     effectiveCurrentActorId.value = actorId
+    if (actorId === props.playerId) playSfx(playYourTurn)
   }, delayMs)
 }
 
@@ -421,6 +452,7 @@ function runHoleCardDealAnimation() {
         if (current < cardIndex) {
           holeCardsRevealed.value = { ...holeCardsRevealed.value, [seatId]: cardIndex }
           lastDealtHoleKey.value = `${props.gameState.hand_number}-${seatId}-${cardIndex}`
+          playSfx(playDealCard)
         }
       }, delay)
     }
@@ -460,6 +492,7 @@ function animateCommunityCards(targetCount: number) {
       schedule(() => {
         displayedCommunityCount.value = index
         lastDealtCommunityIndex.value = index - 1
+        playSfx(playDealCard)
       }, delay)
     }
     schedule(finishStreetDeal, delay + CARD_REVEAL_MS)
@@ -473,6 +506,7 @@ function animateCommunityCards(targetCount: number) {
   for (const milestone of milestones) {
     const street = milestone === 3 ? 'flop' : milestone === 4 ? 'turn' : 'river'
     showPhaseBanner(street)
+    schedule(() => playSfx(playBurnCard), delay + PHASE_BANNER_MS)
     delay += PHASE_BANNER_MS + BURN_CARD_MS
 
     for (let index = revealedUpTo + 1; index <= milestone; index++) {
@@ -480,6 +514,7 @@ function animateCommunityCards(targetCount: number) {
       schedule(() => {
         displayedCommunityCount.value = index
         lastDealtCommunityIndex.value = index - 1
+        playSfx(playDealCard)
       }, delay)
     }
     revealedUpTo = milestone
@@ -500,6 +535,7 @@ function runShowdownReveal() {
     if (seatId === props.playerId) continue
     schedule(() => {
       showdownRevealed.value = new Set([...showdownRevealed.value, seatId])
+      playSfx(playShowdownFlip)
     }, delay)
     delay += SHOWDOWN_REVEAL_MS
   }
@@ -569,26 +605,32 @@ function selectRaise(amount: number) {
 }
 
 function fold() {
+  void unlockAudio()
   emit('action', { type: 'fold' })
 }
 
 function check() {
+  void unlockAudio()
   emit('action', { type: 'check' })
 }
 
 function call() {
+  void unlockAudio()
   emit('action', { type: 'call' })
 }
 
 function raise() {
+  void unlockAudio()
   emit('action', { type: 'raise', amount: raiseAmount.value })
 }
 
 function allIn() {
+  void unlockAudio()
   emit('action', { type: 'all_in' })
 }
 
 function nextHand() {
+  void unlockAudio()
   emit('action', { type: 'next_hand' })
 }
 
@@ -635,6 +677,9 @@ watch(
     if (phase === 'showdown' || phase === 'hand_complete') {
       showPhaseBanner(phase)
       runShowdownReveal()
+      if (phase === 'hand_complete' && winnerSeatIds.value.has(props.playerId)) {
+        playSfx(playWin)
+      }
     } else if (phase === 'game_over') {
       showPhaseBanner(phase)
     }
@@ -648,12 +693,14 @@ watch(
     const prevKey = prev ? `${prev.player_id}-${prev.type}-${prev.amount ?? ''}` : ''
     const nextKey = `${action.player_id}-${action.type}-${action.amount ?? ''}`
     if (prevKey === nextKey) return
+    if (!prev && suppressSounds.value) return
 
     const playerId = String(action.player_id)
     const text = actionLabelFor(action)
     seatActionLabel.value = { playerId, text, type: String(action.type) }
     actionHighlightId.value = playerId
     holdForAction()
+    playSfx(() => playActionSound(String(action.type)))
 
     if (action.type === 'fold') {
       foldingSeats.value = new Set([...foldingSeats.value, playerId])
@@ -722,20 +769,44 @@ watch(
   { immediate: true },
 )
 
+onMounted(() => {
+  schedule(() => {
+    suppressSounds.value = false
+  }, 300)
+})
+
 onUnmounted(() => {
   clearAllTimers()
+  disposeSounds()
 })
 </script>
 
 <template>
   <div class="poker-board">
     <div class="status-bar card">
-      <span>Hand #{{ gameState.hand_number }}</span>
-      <span class="phase">{{ phaseLabel }}</span>
-      <span v-if="dealerPlayer" class="dealer-label">
-        Dealer: <strong>{{ dealerPlayer.nickname }}</strong>
-      </span>
-      <span class="pot">Pot: <strong class="pot__amount">{{ displayedPot }}</strong></span>
+      <div class="status-pills">
+        <span class="status-pill status-pill--hand">Hand #{{ gameState.hand_number }}</span>
+        <span class="status-pill status-pill--phase">{{ phaseLabel }}</span>
+        <span v-if="dealerPlayer" class="status-pill status-pill--dealer">
+          Dealer <strong>{{ dealerPlayer.nickname }}</strong>
+        </span>
+      </div>
+      <div class="status-bar__right">
+        <div class="status-pot">
+          <span class="status-pot__chip" aria-hidden="true" />
+          <span class="status-pot__label">Pot</span>
+          <strong class="status-pot__amount">{{ displayedPot }}</strong>
+        </div>
+        <button
+          type="button"
+          class="sound-toggle"
+          :aria-label="soundMuted ? 'Unmute sound' : 'Mute sound'"
+          :title="soundMuted ? 'Unmute' : 'Mute'"
+          @click="toggleSound"
+        >
+          {{ soundMuted ? '🔇' : '🔊' }}
+        </button>
+      </div>
     </div>
 
     <div class="poker-layout">
@@ -749,6 +820,7 @@ onUnmounted(() => {
         </p>
 
         <div class="table-wrap">
+          <div class="table-room-glow" aria-hidden="true" />
           <div class="table-felt">
         <Transition name="phase-banner">
           <div v-if="phaseBanner.visible" class="phase-banner">{{ phaseBanner.text }}</div>
@@ -785,7 +857,8 @@ onUnmounted(() => {
           </div>
         </Transition>
 
-        <div class="community">
+        <div class="community-zone">
+          <div class="community">
           <PlayingCard
             v-for="(card, i) in visibleCommunityCards"
             :key="`c-${gameState.hand_number}-${i}`"
@@ -794,9 +867,14 @@ onUnmounted(() => {
             :deal="i === lastDealtCommunityIndex"
             small
           />
-          <PlayingCard v-for="n in Math.max(0, 5 - visibleCommunityCards.length)" :key="`empty-${n}`" face-down small />
+          <PlayingCard v-for="n in Math.max(0, 5 - visibleCommunityCards.length)" :key="`empty-${n}`" class="community-slot" face-down small />
+          </div>
         </div>
         <div class="pot-center" :class="{ 'pot-center--pulse': actionHoldActive }">
+          <div class="pot-center__chips" aria-hidden="true">
+            <span class="chip-stack" />
+            <span class="chip-stack chip-stack--offset" />
+          </div>
           <span class="pot-center__label">Pot</span>
           <span class="pot-center__amount">{{ displayedPot }}</span>
         </div>
@@ -907,15 +985,33 @@ onUnmounted(() => {
           </h2>
         </div>
 
-        <div v-if="canAct" class="action-bar card">
-          <p class="turn-hint">Your turn — bet to call: {{ gameState.bet_to_call }}</p>
+        <div v-if="canAct" class="action-bar card action-bar--your-turn">
+          <p class="turn-hint">
+            <span class="turn-hint__dot" aria-hidden="true" />
+            Your turn
+            <span v-if="gameState.bet_to_call > 0" class="turn-hint__call">
+              — call {{ gameState.bet_to_call }}
+            </span>
+          </p>
           <div class="action-buttons">
-            <button type="button" class="btn-secondary" @click="fold">Fold</button>
-            <button v-if="gameState.can_check" type="button" class="btn-secondary" @click="check">Check</button>
-            <button v-if="gameState.bet_to_call > 0" type="button" class="btn-primary" @click="call">
+            <button type="button" class="btn-action btn-action--fold" @click="fold">Fold</button>
+            <button
+              v-if="gameState.can_check"
+              type="button"
+              class="btn-action btn-action--check"
+              @click="check"
+            >
+              Check
+            </button>
+            <button
+              v-if="gameState.bet_to_call > 0"
+              type="button"
+              class="btn-action btn-action--call"
+              @click="call"
+            >
               Call {{ gameState.bet_to_call }}
             </button>
-            <button type="button" class="btn-secondary" @click="allIn">All-in</button>
+            <button type="button" class="btn-action btn-action--all-in" @click="allIn">All-in</button>
           </div>
           <div v-if="raiseOptions.length" class="raise-row">
             <p class="raise-hint">
@@ -942,7 +1038,7 @@ onUnmounted(() => {
                   </option>
                 </select>
               </label>
-              <button type="button" class="btn-primary" @click="raise">
+              <button type="button" class="btn-action btn-action--raise" @click="raise">
                 Raise to {{ raiseAmount }}
               </button>
             </div>
@@ -980,6 +1076,9 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.75rem;
   min-height: calc(100vh - 5.5rem);
+  background:
+    radial-gradient(ellipse 90% 50% at 50% 0%, rgba(91, 156, 255, 0.06) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 40% at 50% 100%, rgba(61, 214, 140, 0.04) 0%, transparent 50%);
 }
 
 .poker-layout {
@@ -1007,29 +1106,111 @@ onUnmounted(() => {
 
 .status-bar {
   display: flex;
-  gap: 1.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   flex-wrap: wrap;
-  font-weight: 600;
-  padding: 0.75rem 1rem;
+  padding: 0.65rem 1rem;
+  background: linear-gradient(135deg, rgba(21, 28, 44, 0.98) 0%, rgba(16, 22, 36, 0.98) 100%);
+  border-color: rgba(42, 54, 80, 0.9);
 }
 
-.dealer-label {
-  color: #f0e6c8;
+.status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
 }
 
-.dealer-label strong {
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+}
+
+.status-pill--hand {
+  color: var(--text);
+  background: rgba(91, 156, 255, 0.1);
+  border-color: rgba(91, 156, 255, 0.22);
+}
+
+.status-pill--phase {
+  color: #ffe58a;
+  background: rgba(255, 215, 0, 0.1);
+  border-color: rgba(255, 215, 0, 0.25);
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+.status-pill--dealer strong {
   color: #fff;
+  font-weight: 800;
 }
 
-.pot {
-  color: var(--success, #2ecc71);
+.status-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
 }
 
-.pot__amount {
+.status-pot {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.status-pot__chip {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffe066 0%, #d4a017 55%, #b8860b 100%);
+  border: 2px dashed rgba(255, 255, 255, 0.55);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.status-pot__label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.status-pot__amount {
   font-size: 1.35rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: #ffd700;
+  text-shadow: 0 0 20px rgba(255, 215, 0, 0.25);
+}
+
+.sound-toggle {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.sound-toggle:hover {
+  background: var(--surface-hover);
+  transform: scale(1.05);
 }
 
 .last-action {
@@ -1277,62 +1458,192 @@ onUnmounted(() => {
   width: 100%;
   flex: 1;
   min-height: min(58vh, 520px);
+  padding: 1.25rem;
+  border-radius: 28px;
+  background:
+    radial-gradient(ellipse at center, rgba(40, 28, 12, 0.55) 0%, rgba(10, 14, 23, 0.92) 72%);
+  box-shadow:
+    inset 0 0 60px rgba(0, 0, 0, 0.55),
+    0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.table-room-glow {
+  position: absolute;
+  inset: 12% 8% 18%;
+  border-radius: 50% / 42%;
+  background: radial-gradient(ellipse at center, rgba(255, 200, 80, 0.07) 0%, transparent 68%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .table-felt {
   position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at center, #1e6b3a 0%, #0d3d22 100%);
+  inset: 1.25rem;
+  background:
+    radial-gradient(ellipse 85% 65% at 50% 42%, rgba(255, 255, 255, 0.06) 0%, transparent 55%),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 3px,
+      rgba(0, 0, 0, 0.025) 3px,
+      rgba(0, 0, 0, 0.025) 4px
+    ),
+    radial-gradient(ellipse at center, #2a8f4e 0%, #1a6b38 38%, #0d4a26 72%, #082e18 100%);
   border-radius: 50% / 40%;
-  border: 8px solid #5c3d1e;
-  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.4);
+  box-shadow:
+    inset 0 0 0 10px #4a2f18,
+    inset 0 0 0 12px #6b4423,
+    inset 0 0 0 14px #3d2512,
+    inset 0 0 0 16px #7a5030,
+    inset 0 0 50px rgba(0, 0, 0, 0.45),
+    0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 1;
+}
+
+.table-felt::before {
+  content: '';
+  position: absolute;
+  inset: 9% 11%;
+  border:  2px solid rgba(255, 215, 0, 0.1);
+  border-radius: 50% / 40%;
+  pointer-events: none;
+}
+
+.table-felt::after {
+  content: '';
+  position: absolute;
+  inset: 14% 16%;
+  border: 1px dashed rgba(255, 255, 255, 0.06);
+  border-radius: 50% / 40%;
+  pointer-events: none;
 }
 
 .table-felt :deep(.playing-card--small) {
   width: clamp(56px, 5.8vw, 80px);
   height: clamp(80px, 8.2vw, 114px);
-  font-size: clamp(0.9rem, 1.05vw, 1.1rem);
+  font-size: clamp(1.05rem, 1.25vw, 1.3rem);
 }
 
-.table-felt :deep(.rank) {
-  font-size: clamp(1rem, 1.2vw, 1.35rem);
+.table-felt :deep(.corner__rank) {
+  font-size: clamp(0.9rem, 1.2vw, 1.15rem);
 }
 
-.table-felt :deep(.suit) {
-  font-size: clamp(1.25rem, 1.5vw, 1.65rem);
+.table-felt :deep(.corner__suit) {
+  font-size: clamp(0.8rem, 1.05vw, 1rem);
+}
+
+.table-felt :deep(.suit--center) {
+  font-size: clamp(1.75rem, 2.4vw, 2.6rem);
 }
 
 .community :deep(.playing-card--small) {
   width: clamp(62px, 6.5vw, 90px);
   height: clamp(88px, 9.2vw, 128px);
+  font-size: clamp(1.1rem, 1.35vw, 1.4rem);
+}
+
+.community :deep(.corner__rank) {
+  font-size: clamp(0.95rem, 1.3vw, 1.25rem);
+}
+
+.community :deep(.corner__suit) {
+  font-size: clamp(0.85rem, 1.15vw, 1.1rem);
+}
+
+.community :deep(.suit--center) {
+  font-size: clamp(1.9rem, 2.6vw, 2.85rem);
+}
+
+.community :deep(.community-slot.playing-card--down) {
+  opacity: 0.35;
+  box-shadow: none;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.community :deep(.community-slot .card-back) {
+  opacity: 0.5;
+  border-style: dashed;
 }
 
 .seat.me .hole-cards :deep(.playing-card--small) {
   width: clamp(64px, 7vw, 94px);
   height: clamp(92px, 10vw, 136px);
+  font-size: clamp(1.15rem, 1.45vw, 1.5rem);
+}
+
+.seat.me .hole-cards :deep(.corner__rank) {
+  font-size: clamp(1rem, 1.35vw, 1.3rem);
+}
+
+.seat.me .hole-cards :deep(.corner__suit) {
+  font-size: clamp(0.9rem, 1.2vw, 1.15rem);
+}
+
+.seat.me .hole-cards :deep(.suit--center) {
+  font-size: clamp(2rem, 2.75vw, 3rem);
+}
+
+.community-zone {
+  position: absolute;
+  top: 34%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 0.65rem 1rem;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.25);
+  z-index: 2;
 }
 
 .community {
-  position: absolute;
-  top: 38%;
-  left: 50%;
-  transform: translate(-50%, -50%);
   display: flex;
   gap: 0.5rem;
 }
 
 .pot-center {
   position: absolute;
-  top: 52%;
+  top: 54%;
   left: 50%;
   transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.15rem;
+  gap: 0.2rem;
   text-align: center;
   pointer-events: none;
   transition: transform 0.3s ease, color 0.3s ease;
+  z-index: 2;
+}
+
+.pot-center__chips {
+  position: relative;
+  width: 2.5rem;
+  height: 1.1rem;
+  margin-bottom: 0.15rem;
+}
+
+.chip-stack {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin-left: -0.9rem;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffe066 0%, #d4a017 50%, #a67c00 100%);
+  border: 2px dashed rgba(255, 255, 255, 0.5);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.chip-stack--offset {
+  margin-left: 0.1rem;
+  bottom: 0.35rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  background: linear-gradient(145deg, #ff6b6b 0%, #c0392b 50%, #922b21 100%);
+  opacity: 0.92;
 }
 
 .pot-center__label {
@@ -1500,21 +1811,41 @@ onUnmounted(() => {
 }
 
 .seat-info {
-  background: rgba(0, 0, 0, 0.55);
-  padding: 0.35rem 0.5rem;
-  border-radius: 6px;
+  background: rgba(8, 12, 20, 0.72);
+  backdrop-filter: blur(8px);
+  padding: 0.4rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: #fff;
   font-size: 0.75rem;
-  margin-bottom: 0.25rem;
-  transition: background 0.3s ease, transform 0.3s ease;
+  margin-bottom: 0.3rem;
+  transition: background 0.3s ease, transform 0.3s ease, border-color 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 .seat-bet {
-  display: block;
-  margin-top: 0.15rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 215, 0, 0.12);
+  border: 1px solid rgba(255, 215, 0, 0.22);
   color: #ffd700;
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 0.72rem;
   transition: transform 0.25s ease;
+}
+
+.seat-bet__chip {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffe066, #c9a227);
+  border: 1px dashed rgba(255, 255, 255, 0.45);
+  flex-shrink: 0;
 }
 
 .seat-bet--pulse {
@@ -1552,18 +1883,20 @@ onUnmounted(() => {
 
 .dealer-chip {
   position: absolute;
-  top: -0.65rem;
-  right: -0.35rem;
-  background: linear-gradient(145deg, #fff 0%, #e8e8e8 100%);
+  top: -0.75rem;
+  right: -0.4rem;
+  background: linear-gradient(145deg, #fff 0%, #e0e0e0 100%);
   color: #1a1a1a;
   border: 2px solid #c9a227;
   border-radius: 50%;
-  width: 1.5rem;
-  height: 1.5rem;
-  line-height: 1.35rem;
-  font-size: 0.7rem;
+  width: 1.55rem;
+  height: 1.55rem;
+  line-height: 1.4rem;
+  font-size: 0.68rem;
   font-weight: 900;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
   z-index: 3;
 }
 
@@ -1571,20 +1904,23 @@ onUnmounted(() => {
   display: inline-block;
   font-size: 0.55rem;
   font-weight: 800;
-  padding: 0.1rem 0.3rem;
-  border-radius: 3px;
-  margin-right: 0.45rem;
+  padding: 0.12rem 0.35rem;
+  border-radius: 999px;
+  margin-right: 0.35rem;
   vertical-align: middle;
+  letter-spacing: 0.04em;
 }
 
 .blind-badge.sb {
-  background: #3498db;
+  background: rgba(52, 152, 219, 0.85);
   color: #fff;
+  box-shadow: 0 0 8px rgba(52, 152, 219, 0.35);
 }
 
 .blind-badge.bb {
-  background: #e67e22;
+  background: rgba(230, 126, 34, 0.9);
   color: #fff;
+  box-shadow: 0 0 8px rgba(230, 126, 34, 0.35);
 }
 
 .hole-cards {
@@ -1605,6 +1941,121 @@ onUnmounted(() => {
 .game-over,
 .next-hand {
   padding: 1rem;
+}
+
+.action-bar--your-turn {
+  border-color: rgba(255, 215, 0, 0.35);
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px rgba(255, 215, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: linear-gradient(160deg, rgba(28, 32, 48, 0.98) 0%, rgba(18, 24, 38, 0.98) 100%);
+}
+
+.turn-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  margin: 0;
+  color: #fff;
+}
+
+.turn-hint__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #7dffb0;
+  box-shadow: 0 0 10px rgba(125, 255, 176, 0.65);
+  animation: turnDotPulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.turn-hint__call {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+@keyframes turnDotPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(0.85);
+  }
+}
+
+.btn-action {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  font-weight: 700;
+  padding: 0.7rem 1rem;
+  font-size: 0.92rem;
+  transition:
+    background 0.2s var(--ease-smooth),
+    transform 0.15s var(--ease-smooth),
+    box-shadow 0.2s var(--ease-smooth);
+}
+
+.btn-action:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn-action--fold {
+  background: rgba(127, 140, 141, 0.25);
+  color: #dfe6e9;
+  border: 1px solid rgba(127, 140, 141, 0.45);
+}
+
+.btn-action--fold:hover:not(:disabled) {
+  background: rgba(127, 140, 141, 0.4);
+}
+
+.btn-action--check {
+  background: rgba(52, 152, 219, 0.2);
+  color: #74b9ff;
+  border: 1px solid rgba(52, 152, 219, 0.4);
+}
+
+.btn-action--check:hover:not(:disabled) {
+  background: rgba(52, 152, 219, 0.32);
+}
+
+.btn-action--call {
+  background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.btn-action--call:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(39, 174, 96, 0.35);
+}
+
+.btn-action--all-in {
+  background: rgba(230, 126, 34, 0.18);
+  color: #f39c12;
+  border: 1px solid rgba(230, 126, 34, 0.45);
+}
+
+.btn-action--all-in:hover:not(:disabled) {
+  background: rgba(230, 126, 34, 0.3);
+}
+
+.btn-action--raise {
+  background: linear-gradient(135deg, var(--accent) 0%, #7c6cf0 100%);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn-action--raise:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-glow);
 }
 
 .action-bar .action-buttons {
@@ -1689,11 +2140,6 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   flex: 1;
-}
-
-.turn-hint {
-  font-weight: 600;
-  margin: 0;
 }
 
 .winners--reveal {

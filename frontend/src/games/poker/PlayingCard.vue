@@ -49,28 +49,41 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
     }"
   >
     <template v-if="faceDown">
-      <div class="card-back" />
+      <div class="card-back">
+        <div class="card-back__inner" />
+      </div>
     </template>
     <template v-else>
-      <span class="rank">{{ rankDisplay }}</span>
-      <span class="suit">{{ suitSymbol }}</span>
+      <span class="corner corner--tl">
+        <span class="corner__rank">{{ rankDisplay }}</span>
+        <span class="corner__suit">{{ suitSymbol }}</span>
+      </span>
+      <span class="suit suit--center">{{ suitSymbol }}</span>
+      <span class="corner corner--br">
+        <span class="corner__rank">{{ rankDisplay }}</span>
+        <span class="corner__suit">{{ suitSymbol }}</span>
+      </span>
     </template>
   </div>
 </template>
 
 <style scoped>
 .playing-card {
+  position: relative;
   width: 64px;
   height: 90px;
-  border-radius: 8px;
-  background: #fff;
-  border: 1px solid #ccc;
+  font-size: 1.1rem;
+  border-radius: 10px;
+  background: linear-gradient(160deg, #fffef9 0%, #f4f0e6 100%);
+  border: 1px solid rgba(0, 0, 0, 0.12);
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 2px 4px rgba(0, 0, 0, 0.15),
+    0 6px 14px rgba(0, 0, 0, 0.22);
   transform-style: preserve-3d;
   backface-visibility: hidden;
 }
@@ -78,7 +91,7 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
 .playing-card--small {
   width: 48px;
   height: 68px;
-  font-size: 0.85rem;
+  font-size: 1rem;
 }
 
 .playing-card--deal {
@@ -112,38 +125,104 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
 }
 
 .playing-card--down {
-  background: #1a4d8f;
-  border-color: #0f3460;
+  background: linear-gradient(145deg, #1e3a6e 0%, #0f2448 100%);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .card-back {
-  width: 80%;
-  height: 80%;
+  width: 88%;
+  height: 90%;
+  border-radius: 6px;
+  border: 2px solid rgba(201, 162, 39, 0.55);
+  background: linear-gradient(135deg, #1a4d8f 0%, #0d2d5c 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.card-back__inner {
+  width: 78%;
+  height: 82%;
   border-radius: 4px;
-  background: repeating-linear-gradient(
-    45deg,
-    #2563b0,
-    #2563b0 4px,
-    #1a4d8f 4px,
-    #1a4d8f 8px
-  );
+  border: 1px solid rgba(255, 215, 0, 0.2);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(37, 99, 176, 0.9) 0,
+      rgba(37, 99, 176, 0.9) 3px,
+      rgba(26, 77, 143, 0.9) 3px,
+      rgba(26, 77, 143, 0.9) 6px
+    ),
+    radial-gradient(circle at center, rgba(255, 215, 0, 0.12) 0%, transparent 65%);
 }
 
 .red {
-  color: #c0392b;
+  color: #c62828;
 }
 
 .black {
   color: #1a1a1a;
 }
 
-.rank {
-  font-size: 1.1rem;
+.corner {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   line-height: 1;
+  gap: 0.05rem;
 }
 
-.suit {
-  font-size: 1.4rem;
+.corner--tl {
+  top: 5px;
+  left: 6px;
+}
+
+.corner--br {
+  bottom: 5px;
+  right: 6px;
+  transform: rotate(180deg);
+}
+
+.corner__rank {
+  font-size: 0.95em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.corner__suit {
+  font-size: 0.85em;
+}
+
+.suit--center {
+  font-size: 2.1em;
   line-height: 1;
+  opacity: 0.92;
+}
+
+.playing-card--small .corner--tl {
+  top: 3px;
+  left: 4px;
+}
+
+.playing-card--small .corner--br {
+  bottom: 3px;
+  right: 4px;
+}
+
+.playing-card--small .suit--center {
+  font-size: 1.75em;
+}
+
+.playing-card--small .corner__rank {
+  font-size: 0.9em;
+}
+
+.playing-card--small .corner__suit {
+  font-size: 0.82em;
 }
 </style>
