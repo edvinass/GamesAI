@@ -13,6 +13,7 @@ from app.games.codenames.ai import ai_operative_guesses, ai_spymaster_clue, fall
 from app.games.codenames.engine import CodenamesEngine
 from app.games.poker.ai import choose_poker_action
 from app.games.poker.engine import PokerEngine
+from app.services.poker_reactions import schedule_poker_reactions
 from app.games.spyfall.ai import ai_answer_question, ai_ask_question, ai_cast_vote, ai_spy_guess
 from app.games.spyfall.engine import SpyfallEngine
 from app.games.registry import get_game
@@ -855,6 +856,7 @@ async def _process_poker_ai_turn(
             room_id, actor.id, fallback, allow_ai=True
         )
     await broadcast_fn(room, events)
+    schedule_poker_reactions(room_id, room, state, events, str(actor.id), action)
     await asyncio.sleep(AI_POKER_TURN_PAUSE_SEC)
     return True
 

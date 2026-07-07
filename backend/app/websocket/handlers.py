@@ -11,11 +11,12 @@ from app.db.session import async_session
 from app.games.registry import get_game
 from app.services.game_loop import start_game_loop, stop_game_loop
 from app.services.room_service import RoomService, process_ai_turns
+from app.services.poker_reactions import schedule_poker_reactions
 from app.utils import player_to_dict, room_to_dict
 
 logger = logging.getLogger(__name__)
 
-POKER_REACTIONS = frozenset({"👍", "🔥", "😂", "😮", "👏", "🃏", "💰", "😎", "🫡", "💀"})
+from app.games.poker.reactions import POKER_REACTIONS
 
 
 class ConnectionManager:
@@ -229,6 +230,8 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                 # Game actions — delegate to the active game plugin
                 room, state, events = await service.apply_game_action(room_id, pid, data)
                 await broadcast_room_state(room, events)
+                if room.game_type == "poker":
+                    schedule_poker_reactions(room_id, room, state, events, player_id, data)
                 if room.game_type not in ("snake", "duel", "tetris"):
                     schedule_ai_turn(room_id)
 
