@@ -857,26 +857,28 @@ onUnmounted(() => {
           </div>
         </Transition>
 
-        <div class="community-zone">
-          <div class="community">
-          <PlayingCard
-            v-for="(card, i) in visibleCommunityCards"
-            :key="`c-${gameState.hand_number}-${i}`"
-            :rank="card.rank"
-            :suit="card.suit"
-            :deal="i === lastDealtCommunityIndex"
-            small
-          />
-          <PlayingCard v-for="n in Math.max(0, 5 - visibleCommunityCards.length)" :key="`empty-${n}`" class="community-slot" face-down small />
+        <div class="table-center">
+          <div class="community-zone">
+            <div class="community">
+            <PlayingCard
+              v-for="(card, i) in visibleCommunityCards"
+              :key="`c-${gameState.hand_number}-${i}`"
+              :rank="card.rank"
+              :suit="card.suit"
+              :deal="i === lastDealtCommunityIndex"
+              small
+            />
+            <PlayingCard v-for="n in Math.max(0, 5 - visibleCommunityCards.length)" :key="`empty-${n}`" face-down small />
+            </div>
           </div>
-        </div>
-        <div class="pot-center" :class="{ 'pot-center--pulse': actionHoldActive }">
-          <div class="pot-center__chips" aria-hidden="true">
-            <span class="chip-stack" />
-            <span class="chip-stack chip-stack--offset" />
+          <div class="pot-center" :class="{ 'pot-center--pulse': actionHoldActive }">
+            <div class="pot-center__chips" aria-hidden="true">
+              <span class="chip-stack" />
+              <span class="chip-stack chip-stack--offset" />
+            </div>
+            <span class="pot-center__label">Pot</span>
+            <span class="pot-center__amount">{{ displayedPot }}</span>
           </div>
-          <span class="pot-center__label">Pot</span>
-          <span class="pot-center__amount">{{ displayedPot }}</span>
         </div>
 
         <div
@@ -1430,9 +1432,9 @@ onUnmounted(() => {
 
 .burn-hint {
   position: absolute;
-  top: 28%;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, calc(-50% - 5.5rem));
   z-index: 5;
   color: #f0e6c8;
   font-size: 0.8rem;
@@ -1554,18 +1556,6 @@ onUnmounted(() => {
   font-size: clamp(1.9rem, 2.6vw, 2.85rem);
 }
 
-.community :deep(.community-slot.playing-card--down) {
-  opacity: 0.35;
-  box-shadow: none;
-  border-style: dashed;
-  border-color: rgba(255, 255, 255, 0.15);
-}
-
-.community :deep(.community-slot .card-back) {
-  opacity: 0.5;
-  border-style: dashed;
-}
-
 .seat.me .hole-cards :deep(.playing-card--small) {
   width: clamp(64px, 7vw, 94px);
   height: clamp(92px, 10vw, 136px);
@@ -1584,17 +1574,25 @@ onUnmounted(() => {
   font-size: clamp(2rem, 2.75vw, 3rem);
 }
 
-.community-zone {
+.table-center {
   position: absolute;
-  top: 34%;
+  top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  z-index: 2;
+}
+
+.community-zone {
+  position: relative;
   padding: 0.65rem 1rem;
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.25);
-  z-index: 2;
 }
 
 .community {
@@ -1603,10 +1601,7 @@ onUnmounted(() => {
 }
 
 .pot-center {
-  position: absolute;
-  top: 54%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1614,7 +1609,6 @@ onUnmounted(() => {
   text-align: center;
   pointer-events: none;
   transition: transform 0.3s ease, color 0.3s ease;
-  z-index: 2;
 }
 
 .pot-center__chips {
