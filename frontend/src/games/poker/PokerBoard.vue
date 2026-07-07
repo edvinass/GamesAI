@@ -861,14 +861,13 @@ onUnmounted(() => {
           <div class="community-zone">
             <div class="community">
             <PlayingCard
-              v-for="(card, i) in visibleCommunityCards"
-              :key="`c-${gameState.hand_number}-${i}`"
-              :rank="card.rank"
-              :suit="card.suit"
-              :deal="i === lastDealtCommunityIndex"
+              v-for="slot in 5"
+              :key="`c-${gameState.hand_number}-${slot}`"
+              :rank="visibleCommunityCards[slot - 1]?.rank"
+              :suit="visibleCommunityCards[slot - 1]?.suit"
+              :face-down="slot > displayedCommunityCount"
               small
             />
-            <PlayingCard v-for="n in Math.max(0, 5 - visibleCommunityCards.length)" :key="`empty-${n}`" face-down small />
             </div>
           </div>
           <div class="pot-center" :class="{ 'pot-center--pulse': actionHoldActive }">
@@ -918,21 +917,11 @@ onUnmounted(() => {
           <div class="hole-cards" :class="{ 'hole-cards--folding': foldingSeats.has(seat.id) }">
             <template v-for="cardIndex in 2" :key="`${seat.id}-hole-${cardIndex}`">
               <PlayingCard
-                v-if="
-                  visibleHoleCount(seat.id) >= cardIndex &&
-                  showHoleCardFaceUp(seat.id) &&
-                  seat.player?.hole_cards[cardIndex - 1]
-                "
+                v-if="visibleHoleCount(seat.id) >= cardIndex && seat.player?.status !== 'folded'"
                 :rank="seat.player?.hole_cards[cardIndex - 1]?.rank"
                 :suit="seat.player?.hole_cards[cardIndex - 1]?.suit"
+                :face-down="!showHoleCardFaceUp(seat.id)"
                 :deal="shouldAnimateHoleCard(seat.id, cardIndex)"
-                :flip="showdownRevealed.has(seat.id) && seat.id !== playerId"
-                small
-              />
-              <PlayingCard
-                v-else-if="visibleHoleCount(seat.id) >= cardIndex && seat.player?.status !== 'folded'"
-                :deal="shouldAnimateHoleCard(seat.id, cardIndex)"
-                face-down
                 small
               />
             </template>

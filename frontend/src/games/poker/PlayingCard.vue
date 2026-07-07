@@ -7,11 +7,10 @@ const props = defineProps<{
   faceDown?: boolean
   small?: boolean
   deal?: boolean
-  flip?: boolean
 }>()
 
 const suitSymbol = computed(() => {
-  if (props.faceDown || !props.suit) return ''
+  if (!props.suit) return ''
   const map: Record<string, string> = {
     hearts: '♥',
     diamonds: '♦',
@@ -22,7 +21,7 @@ const suitSymbol = computed(() => {
 })
 
 const rankDisplay = computed(() => {
-  if (props.faceDown || !props.rank) return ''
+  if (!props.rank) return ''
   const map: Record<string, string> = {
     T: '10',
     J: 'J',
@@ -40,30 +39,28 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
   <div
     class="playing-card"
     :class="{
-      'playing-card--down': faceDown,
       'playing-card--small': small,
       'playing-card--deal': deal,
-      'playing-card--flip': flip,
-      red: isRed,
-      black: !isRed && !faceDown,
     }"
   >
-    <template v-if="faceDown">
-      <div class="card-back">
-        <div class="card-back__inner" />
+    <div class="card-inner" :class="{ 'card-inner--face-down': faceDown }">
+      <div class="card-face card-face--front" :class="{ red: isRed, black: !isRed }">
+        <span class="corner corner--tl">
+          <span class="corner__rank">{{ rankDisplay }}</span>
+          <span class="corner__suit">{{ suitSymbol }}</span>
+        </span>
+        <span class="suit suit--center">{{ suitSymbol }}</span>
+        <span class="corner corner--br">
+          <span class="corner__rank">{{ rankDisplay }}</span>
+          <span class="corner__suit">{{ suitSymbol }}</span>
+        </span>
       </div>
-    </template>
-    <template v-else>
-      <span class="corner corner--tl">
-        <span class="corner__rank">{{ rankDisplay }}</span>
-        <span class="corner__suit">{{ suitSymbol }}</span>
-      </span>
-      <span class="suit suit--center">{{ suitSymbol }}</span>
-      <span class="corner corner--br">
-        <span class="corner__rank">{{ rankDisplay }}</span>
-        <span class="corner__suit">{{ suitSymbol }}</span>
-      </span>
-    </template>
+      <div class="card-face card-face--back">
+        <div class="card-back">
+          <div class="card-back__inner" />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -72,61 +69,67 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
   position: relative;
   width: 64px;
   height: 90px;
-  font-size: 1.1rem;
-  border-radius: 10px;
-  background: linear-gradient(160deg, #fffef9 0%, #f4f0e6 100%);
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.8) inset,
-    0 2px 4px rgba(0, 0, 0, 0.15),
-    0 6px 14px rgba(0, 0, 0, 0.22);
-  transform-style: preserve-3d;
-  backface-visibility: hidden;
+  perspective: 900px;
+  flex-shrink: 0;
 }
 
 .playing-card--small {
   width: 48px;
   height: 68px;
-  font-size: 1rem;
 }
 
 .playing-card--deal {
   animation: cardDeal 0.35s ease-out;
 }
 
-.playing-card--flip {
-  animation: cardFlip 0.4s ease-out;
+.card-inner {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-style: preserve-3d;
+  transform: rotateY(0deg);
+  transition: transform 0.6s cubic-bezier(0.4, 0.15, 0.2, 1.05);
 }
 
-@keyframes cardDeal {
-  from {
-    opacity: 0;
-    transform: translateY(-18px) scale(0.78) rotate(-6deg);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1) rotate(0deg);
-  }
+.card-inner--face-down {
+  transform: rotateY(180deg);
 }
 
-@keyframes cardFlip {
-  0% {
-    transform: rotateY(90deg) scale(0.9);
-    opacity: 0.2;
-  }
-  100% {
-    transform: rotateY(0deg) scale(1);
-    opacity: 1;
-  }
+.card-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  font-size: 1.1rem;
+  font-weight: 700;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 2px 4px rgba(0, 0, 0, 0.15),
+    0 6px 14px rgba(0, 0, 0, 0.22);
 }
 
-.playing-card--down {
+.playing-card--small .card-face {
+  font-size: 1rem;
+  border-radius: 8px;
+}
+
+.card-face--front {
+  background: linear-gradient(160deg, #fffef9 0%, #f4f0e6 100%);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotateY(0deg);
+}
+
+.card-face--back {
   background: linear-gradient(145deg, #1e3a6e 0%, #0f2448 100%);
-  border-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transform: rotateY(180deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.06) inset,
     0 4px 12px rgba(0, 0, 0, 0.35);
@@ -224,5 +227,26 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
 
 .playing-card--small .corner__suit {
   font-size: 0.82em;
+}
+
+@keyframes cardDeal {
+  from {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.78) rotate(-6deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-inner {
+    transition: none;
+  }
+
+  .playing-card--deal {
+    animation: none;
+  }
 }
 </style>
