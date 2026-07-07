@@ -58,6 +58,7 @@ class PokerEngine(GamePlugin):
                 "hole_cards": [],
                 "bet_this_round": 0,
                 "total_bet_hand": 0,
+                "acted_this_round": False,
                 "status": "active",
             }
             for p in players
@@ -113,11 +114,13 @@ class PokerEngine(GamePlugin):
 
         if action_type == "fold":
             pstate["status"] = "folded"
+            pstate["acted_this_round"] = True
             state["last_action"] = {"type": "fold", "player_id": actor_id}
             events.append({"type": "player_folded", "player_id": actor_id})
         elif action_type == "check":
             if self._bet_to_call(state, pstate) > 0:
                 raise ValueError("Cannot check facing a bet")
+            pstate["acted_this_round"] = True
             state["last_action"] = {"type": "check", "player_id": actor_id}
             events.append({"type": "player_checked", "player_id": actor_id})
         elif action_type == "call":
@@ -125,11 +128,13 @@ class PokerEngine(GamePlugin):
             if to_call <= 0:
                 raise ValueError("Nothing to call")
             self._commit_bet(state, actor_id, to_call)
+            pstate["acted_this_round"] = True
             state["last_action"] = {"type": "call", "player_id": actor_id, "amount": to_call}
             events.append({"type": "player_called", "player_id": actor_id, "amount": to_call})
         elif action_type == "raise":
             total = int(action.get("amount", 0))
             self._apply_raise(state, actor_id, total)
+            self._mark_raise(state, actor_id)
             state["last_action"] = {
                 "type": "raise",
                 "player_id": actor_id,
@@ -147,10 +152,12 @@ class PokerEngine(GamePlugin):
             total = pstate["bet_this_round"] + pstate["chips"]
             if total <= state["current_bet"]:
                 self._commit_bet(state, actor_id, pstate["chips"])
+                pstate["acted_this_round"] = True
                 state["last_action"] = {"type": "all_in", "player_id": actor_id, "amount": total}
                 events.append({"type": "player_all_in", "player_id": actor_id, "amount": total})
             else:
                 self._apply_raise(state, actor_id, total)
+                self._mark_raise(state, actor_id)
                 state["last_action"] = {
                     "type": "all_in",
                     "player_id": actor_id,
@@ -278,6 +285,7 @@ class PokerEngine(GamePlugin):
             p["hole_cards"] = []
             p["bet_this_round"] = 0
             p["total_bet_hand"] = 0
+            p["acted_this_round"] = False
             if p["chips"] > 0:
                 p["status"] = "active"
             else:
@@ -415,6 +423,19 @@ class PokerEngine(GamePlugin):
     def _in_hand(self, state: dict, player_id: str) -> bool:
         return state["players"][player_id]["status"] in ("active", "all_in")
 
+    def _mark_raise(self, state: dict, raiser_id: str) -> None:
+        state["players"][raiser_id]["acted_this_round"] = True
+        for pid in state["seat_order"]:
+            p = state["players"][pid]
+            if p["status"] == "active" and pid != raiser_id:
+                p["acted_this_round"] = False
+
+    def _reset_acted_for_street(self, state: dict) -> None:
+        for pid in state["seat_order"]:
+            p = state["players"][pid]
+            if p["status"] == "active":
+                p["acted_this_round"] = False
+
     def _betting_round_complete(self, state: dict) -> bool:
         active = [
             state["players"][pid]
@@ -426,11 +447,14 @@ class PokerEngine(GamePlugin):
         can_act = [p for p in active if p["status"] == "active"]
         if not can_act:
             return True
+        if not all(p["acted_this_round"] for p in can_act):
+            return False
         return all(p["bet_this_round"] == state["current_bet"] for p in can_act)
 
     def _advance_street(self, state: dict) -> dict:
         for pid in state["seat_order"]:
             state["players"][pid]["bet_this_round"] = 0
+        self._reset_acted_for_street(state)
         state["current_bet"] = 0
         state["min_raise"] = state["settings"]["big_blind"]
         state["last_raise_size"] = state["settings"]["big_blind"]

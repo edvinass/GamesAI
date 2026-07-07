@@ -4,12 +4,15 @@ import type { Room, PokerGameState } from '@/types'
 import PlayingCard from './PlayingCard.vue'
 
 const CARD_REVEAL_MS = 700
-const TURN_DELAY_MS = 900
+const TURN_DELAY_MS = 1100
 const ACTION_HOLD_MS = 1500
 const SHOWDOWN_REVEAL_MS = 850
 const PHASE_BANNER_MS = 2000
 const BURN_CARD_MS = 700
 const FOLD_ANIM_MS = 900
+const ROUND_CIRCLE_PAUSE_MS = 1000
+const POST_DEAL_PAUSE_MS = 1600
+const POST_STREET_PAUSE_MS = 1400
 
 const props = defineProps<{
   gameState: PokerGameState
@@ -29,6 +32,7 @@ const effectiveCurrentActorId = ref<string | null>(null)
 const lastDealtCommunityIndex = ref(-1)
 const lastDealtHoleKey = ref('')
 const dealInProgress = ref(false)
+const bettingRoundReady = ref(false)
 const showdownRevealStarted = ref(false)
 const displayedPot = ref(0)
 const phaseBanner = ref<{ text: string; visible: boolean }>({ text: '', visible: false })
@@ -228,6 +232,7 @@ function msUntilActionHoldDone(): number {
 const canAct = computed(
   () =>
     !dealInProgress.value &&
+    bettingRoundReady.value &&
     !streetTransitionPending.value &&
     !actionHoldActive.value &&
     isMyTurn.value &&
@@ -237,9 +242,11 @@ const canAct = computed(
 )
 
 function visibleHoleCount(seatId: string): number {
-  if (seatId === props.playerId) return holeCardsRevealed.value[seatId] ?? 0
-  if (showdownRevealed.value.has(seatId)) return 2
-  return 0
+  return holeCardsRevealed.value[seatId] ?? 0
+}
+
+function showHoleCardFaceUp(seatId: string): boolean {
+  return seatId === props.playerId || showdownRevealed.value.has(seatId)
 }
 
 function shouldAnimateHoleCard(seatId: string, cardIndex: number): boolean {
@@ -262,18 +269,35 @@ function resetHandAnimations() {
   actionHoldUntil.value = 0
   actionHoldActive.value = false
   streetTransitionPending.value = false
+  bettingRoundReady.value = false
   displayedPot.value = props.gameState.pot_total
+}
+
+function highlightActor(actorId: string | null, delayMs: number) {
+  if (!actorId) {
+    effectiveCurrentActorId.value = null
+    return
+  }
+  effectiveCurrentActorId.value = null
+  schedule(() => {
+    effectiveCurrentActorId.value = actorId
+  }, delayMs)
 }
 
 function runHoleCardDealAnimation() {
   const order = dealOrder.value
   if (!order.length) {
     dealInProgress.value = false
+    bettingRoundReady.value = true
     return
   }
   dealInProgress.value = true
+  bettingRoundReady.value = false
   let delay = 0
   for (let round = 0; round < 2; round++) {
+    if (round > 0) {
+      delay += ROUND_CIRCLE_PAUSE_MS
+    }
     for (const seatId of order) {
       delay += CARD_REVEAL_MS
       const cardIndex = round + 1
@@ -288,8 +312,20 @@ function runHoleCardDealAnimation() {
   }
   schedule(() => {
     dealInProgress.value = false
-    effectiveCurrentActorId.value = props.gameState.current_actor_id
+    schedule(() => {
+      bettingRoundReady.value = true
+      highlightActor(props.gameState.current_actor_id, TURN_DELAY_MS)
+    }, POST_DEAL_PAUSE_MS)
   }, delay + CARD_REVEAL_MS)
+}
+
+function finishStreetDeal() {
+  streetTransitionPending.value = false
+  schedule(() => {
+    if (props.gameState.current_actor_id) {
+      highlightActor(props.gameState.current_actor_id, TURN_DELAY_MS)
+    }
+  }, POST_STREET_PAUSE_MS)
 }
 
 function animateCommunityCards(targetCount: number) {
@@ -309,9 +345,9 @@ function animateCommunityCards(targetCount: number) {
       schedule(() => {
         displayedCommunityCount.value = index
         lastDealtCommunityIndex.value = index - 1
-        if (index === targetCount) streetTransitionPending.value = false
       }, delay)
     }
+    schedule(finishStreetDeal, delay + CARD_REVEAL_MS)
     return
   }
 
@@ -334,9 +370,7 @@ function animateCommunityCards(targetCount: number) {
     revealedUpTo = milestone
   }
 
-  schedule(() => {
-    streetTransitionPending.value = false
-  }, delay + CARD_REVEAL_MS)
+  schedule(finishStreetDeal, delay + CARD_REVEAL_MS)
 }
 
 function runShowdownReveal() {
@@ -362,9 +396,9 @@ const seatPositions = computed(() => {
   const rotated = [...order.slice(myIndex), ...order.slice(0, myIndex)]
   return rotated.map((id, visualIndex) => {
     const player = props.gameState.players.find((p) => p.id === id)
-    const angle = (visualIndex / rotated.length) * 360 - 90
-    const radiusX = 42
-    const radiusY = 38
+    const angle = (visualIndex / rotated.length) * 360 + 90
+    const radiusX = 46
+    const radiusY = 42
     const x = 50 + radiusX * Math.cos((angle * Math.PI) / 180)
     const y = 50 + radiusY * Math.sin((angle * Math.PI) / 180)
     return { id, player, x, y, visualIndex }
@@ -494,30 +528,16 @@ watch(
 watch(
   () => props.gameState.current_actor_id,
   (newId, oldId) => {
-    if (dealInProgress.value) return
+    if (dealInProgress.value || !bettingRoundReady.value) return
     if (!newId) {
       effectiveCurrentActorId.value = null
       return
     }
-    const delay =
-      !oldId || oldId === newId
-        ? msUntilActionHoldDone() || 0
-        : Math.max(TURN_DELAY_MS, msUntilActionHoldDone())
+    if (oldId === newId) return
 
-    if (!oldId || oldId === newId) {
-      if (delay === 0) {
-        effectiveCurrentActorId.value = newId
-        return
-      }
-    } else {
-      effectiveCurrentActorId.value = null
-    }
-
-    schedule(() => {
-      effectiveCurrentActorId.value = newId
-    }, delay)
+    const delay = Math.max(TURN_DELAY_MS, msUntilActionHoldDone())
+    highlightActor(newId, delay)
   },
-  { immediate: true },
 )
 
 watch(
@@ -544,12 +564,18 @@ onUnmounted(() => {
       <span class="pot">Pot: {{ displayedPot }}</span>
     </div>
 
-    <p v-if="lastActionText" class="last-action" :class="{ 'last-action--pop': actionHoldActive }">
-      {{ lastActionText }}
-    </p>
+    <div class="poker-layout">
+      <div class="table-column">
+        <p
+          v-if="lastActionText"
+          class="last-action last-action--table"
+          :class="{ 'last-action--pop': actionHoldActive }"
+        >
+          {{ lastActionText }}
+        </p>
 
-    <div class="table-wrap">
-      <div class="table-felt">
+        <div class="table-wrap">
+          <div class="table-felt">
         <Transition name="phase-banner">
           <div v-if="phaseBanner.visible" class="phase-banner">{{ phaseBanner.text }}</div>
         </Transition>
@@ -611,14 +637,23 @@ onUnmounted(() => {
           <div class="hole-cards" :class="{ 'hole-cards--folding': foldingSeats.has(seat.id) }">
             <template v-for="cardIndex in 2" :key="`${seat.id}-hole-${cardIndex}`">
               <PlayingCard
-                v-if="visibleHoleCount(seat.id) >= cardIndex && seat.player?.hole_cards[cardIndex - 1]"
+                v-if="
+                  visibleHoleCount(seat.id) >= cardIndex &&
+                  showHoleCardFaceUp(seat.id) &&
+                  seat.player?.hole_cards[cardIndex - 1]
+                "
                 :rank="seat.player?.hole_cards[cardIndex - 1]?.rank"
                 :suit="seat.player?.hole_cards[cardIndex - 1]?.suit"
                 :deal="shouldAnimateHoleCard(seat.id, cardIndex)"
                 :flip="showdownRevealed.has(seat.id) && seat.id !== playerId"
                 small
               />
-              <PlayingCard v-else-if="seat.player?.status !== 'folded'" face-down small />
+              <PlayingCard
+                v-else-if="visibleHoleCount(seat.id) >= cardIndex && seat.player?.status !== 'folded'"
+                :deal="shouldAnimateHoleCard(seat.id, cardIndex)"
+                face-down
+                small
+              />
             </template>
           </div>
           <p
@@ -631,83 +666,123 @@ onUnmounted(() => {
           >
             {{ seat.player.hand_description }}
           </p>
+          </div>
         </div>
       </div>
-    </div>
-
-    <div v-if="gameState.winners.length && gameState.phase === 'hand_complete'" class="winners card winners--reveal">
-      <h3>Hand winners</h3>
-      <ul>
-        <li v-for="(w, i) in gameState.winners" :key="i">
-          {{ gameState.players.find((p) => p.id === w.player_id)?.nickname }} wins {{ w.amount }}
-          <span v-if="w.hand"> ({{ w.hand.replace(/_/g, ' ') }})</span>
-        </li>
-      </ul>
-    </div>
-
-    <div v-if="gameState.phase === 'game_over'" class="game-over card">
-      <h2>
-        {{ gameState.players.find((p) => p.id === gameState.winner)?.nickname }} wins the game!
-      </h2>
-    </div>
-
-    <div v-if="canAct" class="action-bar card">
-      <p class="turn-hint">Your turn — bet to call: {{ gameState.bet_to_call }}</p>
-      <div class="action-buttons">
-        <button type="button" class="btn-secondary" @click="fold">Fold</button>
-        <button v-if="gameState.can_check" type="button" class="btn-secondary" @click="check">Check</button>
-        <button v-if="gameState.bet_to_call > 0" type="button" class="btn-primary" @click="call">
-          Call {{ gameState.bet_to_call }}
-        </button>
-        <button type="button" class="btn-secondary" @click="allIn">All-in</button>
       </div>
-      <div class="raise-row">
-        <label>
-          Raise to
-          <input
-            v-model.number="raiseAmount"
-            type="range"
-            :min="gameState.min_raise_to"
-            :max="gameState.max_raise_to"
-            @focus="syncRaiseDefault"
-          />
-          <span>{{ raiseAmount || gameState.min_raise_to }}</span>
-        </label>
-        <button
-          type="button"
-          class="btn-primary"
-          :disabled="raiseAmount < gameState.min_raise_to"
-          @click="raise"
+
+      <aside class="poker-sidebar">
+        <p
+          v-if="lastActionText"
+          class="last-action last-action--sidebar"
+          :class="{ 'last-action--pop': actionHoldActive }"
         >
-          Raise
-        </button>
-      </div>
-    </div>
+          {{ lastActionText }}
+        </p>
 
-    <div v-else-if="!canAct && ['preflop', 'flop', 'turn', 'river'].includes(gameState.phase)" class="waiting card">
-      <p v-if="dealInProgress">Dealing cards…</p>
-      <p v-else-if="streetTransitionPending">Dealing the {{ phaseLabel.toLowerCase() }}…</p>
-      <p v-else-if="actionHoldActive">{{ lastActionText }}</p>
-      <p v-else>
-        Waiting for
-        {{ gameState.players.find((p) => p.id === (effectiveCurrentActorId ?? gameState.current_actor_id))?.nickname }}…
-      </p>
-    </div>
+        <div v-if="gameState.winners.length && gameState.phase === 'hand_complete'" class="winners card winners--reveal">
+          <h3>Hand winners</h3>
+          <ul>
+            <li v-for="(w, i) in gameState.winners" :key="i">
+              {{ gameState.players.find((p) => p.id === w.player_id)?.nickname }} wins {{ w.amount }}
+              <span v-if="w.hand"> ({{ w.hand.replace(/_/g, ' ') }})</span>
+            </li>
+          </ul>
+        </div>
 
-    <div v-if="gameState.phase === 'hand_complete' && isHost && !gameState.winner" class="next-hand card">
-      <button type="button" class="btn-primary" @click="nextHand">Deal next hand</button>
+        <div v-if="gameState.phase === 'game_over'" class="game-over card">
+          <h2>
+            {{ gameState.players.find((p) => p.id === gameState.winner)?.nickname }} wins the game!
+          </h2>
+        </div>
+
+        <div v-if="canAct" class="action-bar card">
+          <p class="turn-hint">Your turn — bet to call: {{ gameState.bet_to_call }}</p>
+          <div class="action-buttons">
+            <button type="button" class="btn-secondary" @click="fold">Fold</button>
+            <button v-if="gameState.can_check" type="button" class="btn-secondary" @click="check">Check</button>
+            <button v-if="gameState.bet_to_call > 0" type="button" class="btn-primary" @click="call">
+              Call {{ gameState.bet_to_call }}
+            </button>
+            <button type="button" class="btn-secondary" @click="allIn">All-in</button>
+          </div>
+          <div class="raise-row">
+            <label>
+              Raise to
+              <input
+                v-model.number="raiseAmount"
+                type="range"
+                :min="gameState.min_raise_to"
+                :max="gameState.max_raise_to"
+                @focus="syncRaiseDefault"
+              />
+              <span>{{ raiseAmount || gameState.min_raise_to }}</span>
+            </label>
+            <button
+              type="button"
+              class="btn-primary"
+              :disabled="raiseAmount < gameState.min_raise_to"
+              @click="raise"
+            >
+              Raise
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-else-if="!canAct && ['preflop', 'flop', 'turn', 'river'].includes(gameState.phase)"
+          class="waiting card"
+        >
+          <p v-if="dealInProgress">Dealing hole cards…</p>
+          <p v-else-if="!bettingRoundReady">Cards dealt — betting begins…</p>
+          <p v-else-if="streetTransitionPending">Dealing the {{ phaseLabel.toLowerCase() }}…</p>
+          <p v-else-if="actionHoldActive">{{ lastActionText }}</p>
+          <p v-else>
+            Waiting for
+            {{ gameState.players.find((p) => p.id === (effectiveCurrentActorId ?? gameState.current_actor_id))?.nickname }}…
+          </p>
+        </div>
+
+        <div v-if="gameState.phase === 'hand_complete' && isHost && !gameState.winner" class="next-hand card">
+          <button type="button" class="btn-primary" @click="nextHand">Deal next hand</button>
+        </div>
+      </aside>
     </div>
   </div>
 </template>
 
 <style scoped>
 .poker-board {
-  max-width: 900px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 0 1rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
+  min-height: calc(100vh - 5.5rem);
+}
+
+.poker-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.table-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.poker-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .status-bar {
@@ -715,6 +790,7 @@ onUnmounted(() => {
   gap: 1.5rem;
   flex-wrap: wrap;
   font-weight: 600;
+  padding: 0.75rem 1rem;
 }
 
 .dealer-label {
@@ -733,7 +809,16 @@ onUnmounted(() => {
   text-align: center;
   color: var(--text-muted);
   font-size: 0.95rem;
+  margin: 0;
   transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+.last-action--sidebar {
+  display: none;
+}
+
+.last-action--table {
+  flex-shrink: 0;
 }
 
 .last-action--pop {
@@ -812,7 +897,8 @@ onUnmounted(() => {
 .table-wrap {
   position: relative;
   width: 100%;
-  padding-bottom: 75%;
+  flex: 1;
+  min-height: min(58vh, 520px);
 }
 
 .table-felt {
@@ -822,6 +908,11 @@ onUnmounted(() => {
   border-radius: 50% / 40%;
   border: 8px solid #5c3d1e;
   box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.4);
+}
+
+.table-felt :deep(.playing-card--small) {
+  width: clamp(44px, 4.2vw, 58px);
+  height: clamp(62px, 5.9vw, 82px);
 }
 
 .community {
@@ -869,7 +960,7 @@ onUnmounted(() => {
   position: absolute;
   transform: translate(-50%, -50%);
   text-align: center;
-  min-width: 100px;
+  min-width: clamp(90px, 8vw, 120px);
   transition: filter 0.35s ease, opacity 0.5s ease, transform 0.5s ease;
 }
 
@@ -1098,6 +1189,31 @@ onUnmounted(() => {
   padding: 1rem;
 }
 
+.action-bar .action-buttons {
+  flex-direction: column;
+}
+
+.action-bar .action-buttons button {
+  width: 100%;
+}
+
+.action-bar .raise-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.action-bar .raise-row label {
+  width: 100%;
+}
+
+.action-bar .raise-row button {
+  width: 100%;
+}
+
+.next-hand button {
+  width: 100%;
+}
+
 .action-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -1159,5 +1275,51 @@ onUnmounted(() => {
 
 .game-over {
   text-align: center;
+}
+
+@media (min-width: 1024px) {
+  .poker-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .table-wrap {
+    min-height: min(72vh, 780px);
+  }
+
+  .last-action--table {
+    display: none;
+  }
+
+  .last-action--sidebar {
+    display: block;
+    text-align: left;
+  }
+
+  .poker-sidebar {
+    position: sticky;
+    top: 0.75rem;
+    align-self: start;
+    max-height: calc(100vh - 6rem);
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .poker-board {
+    padding: 0 0.75rem 0.75rem;
+    min-height: auto;
+  }
+
+  .table-wrap {
+    min-height: min(52vh, 440px);
+  }
+
+  .status-bar {
+    gap: 0.75rem;
+    font-size: 0.9rem;
+  }
 }
 </style>

@@ -84,6 +84,95 @@ def test_check_advances_when_possible(engine: PokerEngine, state: dict) -> None:
     assert state["phase"] in ("flop", "turn", "river", "showdown", "hand_complete")
 
 
+def test_big_blind_gets_option_when_everyone_limps(engine: PokerEngine) -> None:
+    state = engine.create_initial_state(
+        make_players(3), {"host_id": "p0", "small_blind": 5, "big_blind": 10}
+    )
+    bb_id = next(
+        pid
+        for pid in state["seat_order"]
+        if state["players"][pid]["bet_this_round"] == state["current_bet"]
+    )
+
+    for _ in range(2):
+        actor_id = state["current_actor_id"]
+        assert actor_id is not None
+        assert actor_id != bb_id
+        actor = {"id": actor_id, "nickname": actor_id, "is_ai": False}
+        state, _ = engine.apply_action(state, {"type": "call"}, actor)
+
+    assert state["phase"] == "preflop"
+    assert state["current_actor_id"] == bb_id
+
+    bb = {"id": bb_id, "nickname": bb_id, "is_ai": False}
+    state, _ = engine.apply_action(state, {"type": "check"}, bb)
+    assert state["phase"] == "flop"
+    assert len(state["community_cards"]) == 3
+
+
+def test_postflop_requires_action_before_advancing(engine: PokerEngine) -> None:
+    state = engine.create_initial_state(
+        make_players(3), {"host_id": "p0", "small_blind": 5, "big_blind": 10}
+    )
+    while state["phase"] == "preflop" and state.get("current_actor_id"):
+        actor_id = state["current_actor_id"]
+        actor = {"id": actor_id, "nickname": actor_id, "is_ai": False}
+        p = state["players"][actor_id]
+        to_call = state["current_bet"] - p["bet_this_round"]
+        if to_call == 0:
+            state, _ = engine.apply_action(state, {"type": "check"}, actor)
+        else:
+            state, _ = engine.apply_action(state, {"type": "call"}, actor)
+
+    assert state["phase"] == "flop"
+    assert state["current_actor_id"] is not None
+
+    first_actor = state["current_actor_id"]
+    actor = {"id": first_actor, "nickname": first_actor, "is_ai": False}
+    state, _ = engine.apply_action(state, {"type": "check"}, actor)
+    assert state["phase"] == "flop"
+    assert state["current_actor_id"] is not None
+    assert state["current_actor_id"] != first_actor
+
+
+def test_heads_up_big_blind_acts_after_small_blind_calls(engine: PokerEngine) -> None:
+    state = engine.create_initial_state(
+        make_players(2), {"host_id": "p0", "small_blind": 5, "big_blind": 10}
+    )
+    sb_id = state["seat_order"][state["dealer_index"]]
+    bb_id = next(pid for pid in state["seat_order"] if pid != sb_id)
+
+    assert state["current_actor_id"] == sb_id
+    sb = {"id": sb_id, "nickname": sb_id, "is_ai": False}
+    state, _ = engine.apply_action(state, {"type": "call"}, sb)
+
+    assert state["phase"] == "preflop"
+    assert state["current_actor_id"] == bb_id
+
+    bb = {"id": bb_id, "nickname": bb_id, "is_ai": False}
+    state, _ = engine.apply_action(state, {"type": "check"}, bb)
+    assert state["phase"] == "flop"
+
+
+def test_raise_reopens_action(engine: PokerEngine) -> None:
+    state = engine.create_initial_state(
+        make_players(3), {"host_id": "p0", "small_blind": 5, "big_blind": 10}
+    )
+    raiser_id = state["current_actor_id"]
+    raiser = {"id": raiser_id, "nickname": raiser_id, "is_ai": False}
+    state, _ = engine.apply_action(state, {"type": "raise", "amount": 30}, raiser)
+
+    next_actor = state["current_actor_id"]
+    assert next_actor is not None
+    assert next_actor != raiser_id
+    caller = {"id": next_actor, "nickname": next_actor, "is_ai": False}
+    state, _ = engine.apply_action(state, {"type": "call"}, caller)
+
+    assert state["phase"] == "preflop"
+    assert state["current_actor_id"] is not None
+    assert state["current_actor_id"] not in (raiser_id, next_actor)
+
+
 def test_side_pot_calculation(engine: PokerEngine) -> None:
     state = {
         "seat_order": ["a", "b", "c"],
