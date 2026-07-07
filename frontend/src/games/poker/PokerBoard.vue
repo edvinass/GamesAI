@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, PokerGameState } from '@/types'
 import PlayingCard from './PlayingCard.vue'
+import { pokerReactionEmojis, type PokerReaction } from './reactions'
 import {
   disposeSounds,
   isSoundMuted,
@@ -31,10 +32,12 @@ const props = defineProps<{
   gameState: PokerGameState
   room: Room
   playerId: string
+  reactions: PokerReaction[]
 }>()
 
 const emit = defineEmits<{
   action: [data: Record<string, unknown>]
+  reaction: [emoji: string]
 }>()
 
 const raiseAmount = ref(0)
@@ -58,6 +61,7 @@ const actionHoldActive = ref(false)
 const streetTransitionPending = ref(false)
 const soundMuted = ref(isSoundMuted())
 const suppressSounds = ref(true)
+const reactionCooldown = ref(false)
 
 function toggleSound() {
   const next = !soundMuted.value
@@ -634,6 +638,19 @@ function nextHand() {
   emit('action', { type: 'next_hand' })
 }
 
+function sendReaction(emoji: string) {
+  if (reactionCooldown.value) return
+  reactionCooldown.value = true
+  emit('reaction', emoji)
+  schedule(() => {
+    reactionCooldown.value = false
+  }, 1500)
+}
+
+function reactionsForSeat(seatId: string): PokerReaction[] {
+  return props.reactions.filter((reaction) => reaction.playerId === seatId)
+}
+
 watch(
   () => props.gameState.hand_number,
   (handNum, prevHandNum) => {
@@ -904,6 +921,15 @@ onUnmounted(() => {
               {{ seatActionBubble(seat.id) }}
             </div>
           </Transition>
+          <div
+            v-for="(reaction, reactionIndex) in reactionsForSeat(seat.id)"
+            :key="reaction.id"
+            class="seat-reaction"
+            :style="{ '--reaction-offset': reactionIndex }"
+            :title="`${reaction.nickname} reacted ${reaction.emoji}`"
+          >
+            {{ reaction.emoji }}
+          </div>
           <div v-if="gameState.dealer_player_id === seat.id" class="dealer-chip" title="Dealer">D</div>
           <div class="seat-info">
             <span class="seat-name">{{ seat.player?.nickname }}</span>
@@ -1053,6 +1079,23 @@ onUnmounted(() => {
         <div v-if="gameState.phase === 'hand_complete' && isHost && !gameState.winner" class="next-hand card">
           <button type="button" class="btn-primary" @click="nextHand">Deal next hand</button>
         </div>
+
+        <section class="reactions card" aria-label="Emoji reactions">
+          <span class="reactions-label">React</span>
+          <div class="reaction-buttons" role="toolbar" aria-label="Send reaction">
+            <button
+              v-for="emoji in pokerReactionEmojis"
+              :key="emoji"
+              type="button"
+              class="reaction-btn"
+              :disabled="reactionCooldown"
+              :aria-label="`React with ${emoji}`"
+              @click="sendReaction(emoji)"
+            >
+              {{ emoji }}
+            </button>
+          </div>
+        </section>
       </aside>
     </div>
   </div>
@@ -1275,8 +1318,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-  border-radius: inherit;
   pointer-events: none;
 }
 
@@ -1730,6 +1771,38 @@ onUnmounted(() => {
   color: #fff;
 }
 
+.seat-reaction {
+  position: absolute;
+  top: -2.4rem;
+  left: calc(50% + (var(--reaction-offset, 0) * 1.4rem));
+  transform: translateX(-50%);
+  font-size: 1.65rem;
+  line-height: 1;
+  z-index: 5;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
+  animation: reactionFloat 2.2s ease-out forwards;
+}
+
+@keyframes reactionFloat {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px) scale(0.45);
+  }
+  18% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1.15);
+  }
+  72% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-14px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-30px) scale(0.85);
+  }
+}
+
 .action-bubble-enter-active {
   animation: bubbleIn 0.4s ease-out;
 }
@@ -1932,8 +2005,59 @@ onUnmounted(() => {
 .waiting,
 .winners,
 .game-over,
-.next-hand {
+.next-hand,
+.reactions {
   padding: 1rem;
+}
+
+.reactions {
+  margin-top: auto;
+}
+
+.reactions-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.6rem;
+}
+
+.reaction-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.reaction-btn {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    transform 0.15s var(--ease-bounce),
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.reaction-btn:hover:not(:disabled) {
+  transform: scale(1.1);
+  border-color: rgba(255, 215, 80, 0.45);
+  background: rgba(255, 215, 80, 0.1);
+}
+
+.reaction-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.reaction-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .action-bar--your-turn {

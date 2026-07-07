@@ -15,6 +15,8 @@ from app.utils import player_to_dict, room_to_dict
 
 logger = logging.getLogger(__name__)
 
+POKER_REACTIONS = frozenset({"👍", "🔥", "😂", "😮", "👏", "🃏", "💰", "😎", "🫡", "💀"})
+
 
 class ConnectionManager:
     def __init__(self):
@@ -204,6 +206,23 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                 await manager.broadcast(str(room_id), {
                     "type": "returned_to_lobby",
                     "room": room_to_dict(room),
+                })
+
+            elif action_type == "reaction":
+                emoji = data.get("emoji", "")
+                if emoji not in POKER_REACTIONS:
+                    raise ValueError("Invalid reaction")
+                room = await service._load_room(room_id)
+                if not room or room.status.value != "playing":
+                    return
+                player = next((p for p in room.players if str(p.id) == player_id), None)
+                if not player:
+                    return
+                await manager.broadcast(str(room_id), {
+                    "type": "reaction",
+                    "player_id": player_id,
+                    "nickname": player.nickname,
+                    "emoji": emoji,
                 })
 
             else:

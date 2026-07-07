@@ -337,6 +337,8 @@ export interface WsMessage {
   room?: Room
   game_state?: GameState | null
   player_id?: string
+  nickname?: string
+  emoji?: string
   events?: Array<{ type: string; [key: string]: unknown }>
   message?: string
 }

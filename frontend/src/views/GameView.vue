@@ -13,6 +13,8 @@ import GravityMasterBoard from '@/games/gravity_master/GravityMasterBoard.vue'
 import PokerBoard from '@/games/poker/PokerBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
+import type { PokerReaction } from '@/games/poker/reactions'
+import { pokerReactionSet } from '@/games/poker/reactions'
 import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState } from '@/types'
 import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState, isPokerState } from '@/types'
 
@@ -27,6 +29,7 @@ const gameState = ref<GameState | null>(null)
 const toast = ref('')
 const showRules = ref(false)
 const showPokerHands = ref(false)
+const pokerReactions = ref<PokerReaction[]>([])
 
 const wsToken = computed(() => playerStore.sessionToken)
 const { connected, lastMessage, error, send } = useWebSocket(roomId, wsToken)
@@ -97,6 +100,18 @@ watch(lastMessage, (msg) => {
     toast.value = msg.message ?? 'Error'
     setTimeout(() => (toast.value = ''), 3000)
   }
+  if (msg.type === 'reaction' && msg.player_id && msg.emoji && pokerReactionSet.has(msg.emoji)) {
+    const reaction: PokerReaction = {
+      id: `${msg.player_id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      playerId: msg.player_id,
+      nickname: msg.nickname ?? 'Player',
+      emoji: msg.emoji,
+    }
+    pokerReactions.value = [...pokerReactions.value, reaction]
+    setTimeout(() => {
+      pokerReactions.value = pokerReactions.value.filter((entry) => entry.id !== reaction.id)
+    }, 2400)
+  }
 })
 
 watch(error, (e) => {
@@ -111,6 +126,10 @@ function sendAction(data: Record<string, unknown>) {
     toast.value = 'Not connected — try again in a moment'
     setTimeout(() => (toast.value = ''), 3000)
   }
+}
+
+function sendReaction(emoji: string) {
+  sendAction({ type: 'reaction', emoji })
 }
 
 function backToLobby() {
@@ -195,7 +214,9 @@ function backToLobby() {
       :game-state="pokerState"
       :room="room"
       :player-id="playerStore.playerId"
+      :reactions="pokerReactions"
       @action="sendAction"
+      @reaction="sendReaction"
     />
 
     <div v-else class="container-wide loading">
