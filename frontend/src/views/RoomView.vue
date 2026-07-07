@@ -6,6 +6,7 @@ import { useRoom } from '@/composables/useRoom'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useLeaveRoom } from '@/composables/useLeaveRoom'
 import GameRulesModal from '@/components/GameRulesModal.vue'
+import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import LobbyTeamPanel from '@/components/lobby/LobbyTeamPanel.vue'
 import SpyfallLobby from '@/games/spyfall/SpyfallLobby.vue'
 import SnakeLobby from '@/games/snake/SnakeLobby.vue'
@@ -35,6 +36,7 @@ const needsJoin = ref(false)
 const copied = ref(false)
 const toast = ref('')
 const showRules = ref(false)
+const showPokerHands = ref(false)
 
 const wsToken = ref(playerStore.sessionToken)
 const { connected, lastMessage, send, disconnect } = useWebSocket(roomId, wsToken)
@@ -234,6 +236,9 @@ async function copyUrl() {
         </div>
         <div class="header-actions">
           <button type="button" class="btn-secondary" @click="leaveRoom(disconnect)">Leave</button>
+          <button v-if="isPoker" type="button" class="btn-secondary" @click="showPokerHands = true">
+            Hand rankings
+          </button>
           <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
         </div>
       </header>
@@ -429,6 +434,8 @@ async function copyUrl() {
       :game-type="room.game_type"
       @close="showRules = false"
     />
+
+    <PokerHandsModal v-if="showPokerHands" @close="showPokerHands = false" />
   </div>
 </template>
 

@@ -12,6 +12,7 @@ import TetrisBoard from '@/games/tetris/TetrisBoard.vue'
 import GravityMasterBoard from '@/games/gravity_master/GravityMasterBoard.vue'
 import PokerBoard from '@/games/poker/PokerBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
+import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState } from '@/types'
 import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState, isPokerState } from '@/types'
 
@@ -25,6 +26,7 @@ const room = ref<Room | null>(null)
 const gameState = ref<GameState | null>(null)
 const toast = ref('')
 const showRules = ref(false)
+const showPokerHands = ref(false)
 
 const wsToken = computed(() => playerStore.sessionToken)
 const { connected, lastMessage, error, send } = useWebSocket(roomId, wsToken)
@@ -68,6 +70,8 @@ const gravityMasterState = computed(() =>
 const pokerState = computed(() =>
   gameState.value && isPokerState(gameState.value) ? gameState.value as PokerGameState : null,
 )
+
+const isPoker = computed(() => room.value?.game_type === 'poker')
 
 const isFullscreenGame = computed(() => Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value))
 
@@ -130,6 +134,9 @@ function backToLobby() {
       </div>
       <div class="header-actions">
         <button type="button" class="btn-secondary" @click="backToLobby">Lobby</button>
+        <button v-if="isPoker" type="button" class="btn-secondary" @click="showPokerHands = true">
+          Hand rankings
+        </button>
         <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
       </div>
     </header>
@@ -205,6 +212,8 @@ function backToLobby() {
       :game-type="room?.game_type ?? 'codenames'"
       @close="showRules = false"
     />
+
+    <PokerHandsModal v-if="showPokerHands" @close="showPokerHands = false" />
   </div>
 </template>
 
