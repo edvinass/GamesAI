@@ -24,7 +24,7 @@ export const pokerRules: GameRules = {
     },
     {
       heading: 'Betting',
-      body: 'On your turn you may fold, check (if no bet to call), call, raise, or go all-in. Betting rounds happen after the deal, flop, turn, and river.',
+      body: 'On your turn you may fold, check (if no bet to call), call, raise in big-blind increments, or go all-in. Betting rounds happen after the deal, flop, turn, and river.',
     },
     {
       heading: 'Showdown',

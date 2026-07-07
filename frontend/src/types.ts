@@ -298,6 +298,8 @@ export interface PokerGameState {
   can_check: boolean
   min_raise_to: number
   max_raise_to: number
+  raise_options: number[]
+  raise_increment: number
 }
 
 export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState

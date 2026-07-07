@@ -243,6 +243,10 @@ class PokerEngine(GamePlugin):
             "can_check": self._can_check_for_viewer(state, viewer_id),
             "min_raise_to": self._min_raise_to_for_viewer(state, viewer_id),
             "max_raise_to": self._max_raise_to_for_viewer(state, viewer_id),
+            "raise_options": self._legal_raise_to_amounts(state, viewer_id)
+            if viewer_id
+            else [],
+            "raise_increment": self._raise_increment(state),
         }
 
     def check_winner(self, state: dict) -> str | None:
@@ -406,6 +410,12 @@ class PokerEngine(GamePlugin):
         min_total = state["current_bet"] + state["min_raise"]
         if total_bet < min_total and needed < p["chips"]:
             raise ValueError(f"Minimum raise to {min_total}")
+        if needed < p["chips"] and total_bet not in self._legal_raise_to_amounts(
+            state, player_id
+        ):
+            legal = self._legal_raise_to_amounts(state, player_id)
+            hint = legal[0] if legal else min_total
+            raise ValueError(f"Raises must be in {self._raise_increment(state)} chip increments (min {hint})")
         raise_size = total_bet - state["current_bet"]
         self._commit_bet(state, player_id, needed)
         if raise_size >= state["min_raise"]:
@@ -597,6 +607,39 @@ class PokerEngine(GamePlugin):
                 pots.append({"amount": amount, "eligible_player_ids": eligible})
             prev = level
         return pots
+
+    def _raise_increment(self, state: dict) -> int:
+        return state["settings"]["big_blind"]
+
+    def _legal_raise_to_amounts(self, state: dict, player_id: str | None) -> list[int]:
+        if not player_id:
+            return []
+        p = state["players"].get(player_id)
+        if not p or p["status"] != "active":
+            return []
+        increment = self._raise_increment(state)
+        current_bet = state["current_bet"]
+        min_raise = state["min_raise"]
+        max_to = p["bet_this_round"] + p["chips"]
+        min_to = max(current_bet + min_raise, p["bet_this_round"] + 1)
+        if min_to > max_to:
+            return []
+
+        min_raise_size = min_raise
+        if min_raise_size % increment != 0:
+            min_raise_size += increment - (min_raise_size % increment)
+
+        first = current_bet + min_raise_size
+        if first < min_to:
+            steps = (min_to - first + increment - 1) // increment
+            first += steps * increment
+
+        amounts: list[int] = []
+        target = first
+        while target <= max_to:
+            amounts.append(target)
+            target += increment
+        return amounts
 
     def _bet_to_call_for_viewer(self, state: dict, viewer_id: str | None) -> int:
         if not viewer_id or state["phase"] not in self.BETTING_PHASES:

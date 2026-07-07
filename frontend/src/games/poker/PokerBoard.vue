@@ -147,6 +147,55 @@ const phaseLabel = computed(() => {
   return map[props.gameState.phase] ?? props.gameState.phase
 })
 
+const winnerSeatIds = computed(() => {
+  const ids = new Set(props.gameState.winners.map((winner) => winner.player_id))
+  if (props.gameState.phase === 'game_over' && props.gameState.winner) {
+    ids.add(props.gameState.winner)
+  }
+  return ids
+})
+
+const iWonHand = computed(() => winnerSeatIds.value.has(props.playerId))
+
+const winnerCallout = computed(() => {
+  if (props.gameState.phase === 'game_over' && props.gameState.winner) {
+    const name =
+      props.gameState.players.find((player) => player.id === props.gameState.winner)?.nickname ??
+      'Player'
+    return {
+      type: 'game' as const,
+      eyebrow: 'Game over',
+      title: `${name} wins!`,
+      entries: [] as { playerId: string; name: string; amount: number; hand: string | null }[],
+    }
+  }
+
+  if (props.gameState.phase === 'hand_complete' && props.gameState.winners.length) {
+    const entries = props.gameState.winners.map((winner) => ({
+      playerId: winner.player_id,
+      name:
+        props.gameState.players.find((player) => player.id === winner.player_id)?.nickname ??
+        'Player',
+      amount: winner.amount,
+      hand: winner.hand ? winner.hand.replace(/_/g, ' ') : null,
+    }))
+    const totalPot = entries.reduce((sum, entry) => sum + entry.amount, 0)
+    const title =
+      entries.length === 1
+        ? `${entries[0].name} wins ${entries[0].amount}!`
+        : `Split pot — ${totalPot} chips`
+
+    return {
+      type: 'hand' as const,
+      eyebrow: entries.length === 1 ? 'Winner' : 'Winners',
+      title,
+      entries,
+    }
+  }
+
+  return null
+})
+
 const lastActionText = computed(() => seatActionLabel.value?.text ?? '')
 
 function actionLabelFor(action: Record<string, unknown>): string {
@@ -405,8 +454,52 @@ const seatPositions = computed(() => {
   })
 })
 
+function snapToRaiseOption(target: number, options: number[]): number | null {
+  if (!options.length) return null
+  const legal = options.filter((amount) => amount >= target)
+  if (legal.length) return legal[0]
+  return options[options.length - 1]
+}
+
+const raiseOptions = computed(() => props.gameState.raise_options ?? [])
+
+const raisePresets = computed(() => {
+  const options = raiseOptions.value
+  if (!options.length) return []
+
+  const bb = props.gameState.raise_increment || 10
+  const pot = props.gameState.pot_total
+  const currentBet = props.gameState.current_bet
+  const candidates = [
+    { label: 'Min', target: options[0] },
+    { label: '2× BB', target: currentBet + bb * 2 },
+    { label: '3× BB', target: currentBet + bb * 3 },
+    { label: '½ Pot', target: currentBet + Math.floor(pot / 2) },
+    { label: 'Pot', target: currentBet + pot + props.gameState.bet_to_call },
+  ]
+
+  const seen = new Set<number>()
+  const presets: { label: string; amount: number }[] = []
+  for (const candidate of candidates) {
+    const amount =
+      candidate.label === 'Min'
+        ? candidate.target
+        : snapToRaiseOption(candidate.target, options)
+    if (amount == null || seen.has(amount)) continue
+    seen.add(amount)
+    presets.push({ label: candidate.label, amount })
+  }
+  return presets
+})
+
 function syncRaiseDefault() {
-  raiseAmount.value = props.gameState.min_raise_to || props.gameState.current_bet + props.gameState.min_raise
+  const options = raiseOptions.value
+  raiseAmount.value = options[0] ?? props.gameState.min_raise_to
+}
+
+function selectRaise(amount: number) {
+  raiseAmount.value = amount
+  raise()
 }
 
 function fold() {
@@ -541,9 +634,12 @@ watch(
 )
 
 watch(
-  () => props.gameState.min_raise_to,
-  (val) => {
-    if (val > 0) raiseAmount.value = val
+  () => props.gameState.raise_options,
+  (options) => {
+    if (!options?.length) return
+    if (!options.includes(raiseAmount.value)) {
+      raiseAmount.value = options[0]
+    }
   },
   { immediate: true },
 )
@@ -561,7 +657,7 @@ onUnmounted(() => {
       <span v-if="dealerPlayer" class="dealer-label">
         Dealer: <strong>{{ dealerPlayer.nickname }}</strong>
       </span>
-      <span class="pot">Pot: {{ displayedPot }}</span>
+      <span class="pot">Pot: <strong class="pot__amount">{{ displayedPot }}</strong></span>
     </div>
 
     <div class="poker-layout">
@@ -586,6 +682,31 @@ onUnmounted(() => {
           </div>
         </Transition>
 
+        <Transition name="winner-banner">
+          <div v-if="winnerCallout" class="winner-overlay" role="status" aria-live="polite">
+            <div class="winner-banner" :class="`winner-banner--${winnerCallout.type}`">
+              <p class="winner-banner__eyebrow">{{ winnerCallout.eyebrow }}</p>
+              <h2 class="winner-banner__title">{{ winnerCallout.title }}</h2>
+              <ul v-if="winnerCallout.entries.length > 1" class="winner-banner__list">
+                <li v-for="entry in winnerCallout.entries" :key="entry.playerId">
+                  <strong>{{ entry.name }}</strong>
+                  <span class="winner-banner__amount">+{{ entry.amount }}</span>
+                  <span v-if="entry.hand" class="winner-banner__hand">{{ entry.hand }}</span>
+                </li>
+              </ul>
+              <p
+                v-else-if="winnerCallout.entries.length === 1 && winnerCallout.entries[0].hand"
+                class="winner-banner__hand winner-banner__hand--solo"
+              >
+                {{ winnerCallout.entries[0].hand }}
+              </p>
+              <p v-if="iWonHand && winnerCallout.type === 'hand'" class="winner-banner__you">
+                You won this hand!
+              </p>
+            </div>
+          </div>
+        </Transition>
+
         <div class="community">
           <PlayingCard
             v-for="(card, i) in visibleCommunityCards"
@@ -598,7 +719,8 @@ onUnmounted(() => {
           <PlayingCard v-for="n in Math.max(0, 5 - visibleCommunityCards.length)" :key="`empty-${n}`" face-down small />
         </div>
         <div class="pot-center" :class="{ 'pot-center--pulse': actionHoldActive }">
-          Pot {{ displayedPot }}
+          <span class="pot-center__label">Pot</span>
+          <span class="pot-center__amount">{{ displayedPot }}</span>
         </div>
 
         <div
@@ -612,6 +734,7 @@ onUnmounted(() => {
             folded: seat.player?.status === 'folded',
             dealer: gameState.dealer_player_id === seat.id,
             me: seat.id === playerId,
+            winner: winnerSeatIds.has(seat.id),
           }"
           :style="{ left: `${seat.x}%`, top: `${seat.y}%` }"
         >
@@ -680,17 +803,27 @@ onUnmounted(() => {
           {{ lastActionText }}
         </p>
 
-        <div v-if="gameState.winners.length && gameState.phase === 'hand_complete'" class="winners card winners--reveal">
-          <h3>Hand winners</h3>
-          <ul>
-            <li v-for="(w, i) in gameState.winners" :key="i">
-              {{ gameState.players.find((p) => p.id === w.player_id)?.nickname }} wins {{ w.amount }}
-              <span v-if="w.hand"> ({{ w.hand.replace(/_/g, ' ') }})</span>
+        <div
+          v-if="winnerCallout"
+          class="winners card winners--reveal"
+          :class="{
+            'winners--you': iWonHand,
+            'winners--game': winnerCallout.type === 'game',
+          }"
+        >
+          <p class="winners__eyebrow">{{ winnerCallout.eyebrow }}</p>
+          <h3 class="winners__title">{{ winnerCallout.title }}</h3>
+          <ul v-if="winnerCallout.entries.length" class="winners__list">
+            <li v-for="entry in winnerCallout.entries" :key="entry.playerId">
+              <span class="winners__name">{{ entry.name }}</span>
+              <span class="winners__amount">+{{ entry.amount }}</span>
+              <span v-if="entry.hand" class="winners__hand">{{ entry.hand }}</span>
             </li>
           </ul>
+          <p v-if="iWonHand && winnerCallout.type === 'hand'" class="winners__you">Nice hand!</p>
         </div>
 
-        <div v-if="gameState.phase === 'game_over'" class="game-over card">
+        <div v-else-if="gameState.phase === 'game_over'" class="game-over card game-over--reveal">
           <h2>
             {{ gameState.players.find((p) => p.id === gameState.winner)?.nickname }} wins the game!
           </h2>
@@ -706,26 +839,35 @@ onUnmounted(() => {
             </button>
             <button type="button" class="btn-secondary" @click="allIn">All-in</button>
           </div>
-          <div class="raise-row">
-            <label>
-              Raise to
-              <input
-                v-model.number="raiseAmount"
-                type="range"
-                :min="gameState.min_raise_to"
-                :max="gameState.max_raise_to"
-                @focus="syncRaiseDefault"
-              />
-              <span>{{ raiseAmount || gameState.min_raise_to }}</span>
-            </label>
-            <button
-              type="button"
-              class="btn-primary"
-              :disabled="raiseAmount < gameState.min_raise_to"
-              @click="raise"
-            >
-              Raise
-            </button>
+          <div v-if="raiseOptions.length" class="raise-row">
+            <p class="raise-hint">
+              Raise in {{ gameState.raise_increment }} chip increments
+            </p>
+            <div class="raise-presets">
+              <button
+                v-for="preset in raisePresets"
+                :key="preset.label"
+                type="button"
+                class="btn-secondary"
+                :class="{ 'raise-preset--active': raiseAmount === preset.amount }"
+                @click="selectRaise(preset.amount)"
+              >
+                {{ preset.label }} ({{ preset.amount }})
+              </button>
+            </div>
+            <div class="raise-select-row">
+              <label>
+                Raise to
+                <select v-model.number="raiseAmount" @focus="syncRaiseDefault">
+                  <option v-for="amount in raiseOptions" :key="amount" :value="amount">
+                    {{ amount }}
+                  </option>
+                </select>
+              </label>
+              <button type="button" class="btn-primary" @click="raise">
+                Raise to {{ raiseAmount }}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -805,6 +947,13 @@ onUnmounted(() => {
   color: var(--success, #2ecc71);
 }
 
+.pot__amount {
+  font-size: 1.35rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #ffd700;
+}
+
 .last-action {
   text-align: center;
   color: var(--text-muted);
@@ -869,6 +1018,157 @@ onUnmounted(() => {
   transform: translate(-50%, -50%) scale(0.85);
 }
 
+.winner-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.winner-banner {
+  text-align: center;
+  max-width: min(92%, 420px);
+  padding: 1.35rem 1.75rem;
+  border-radius: 16px;
+  border: 3px solid rgba(255, 215, 0, 0.75);
+  background: linear-gradient(160deg, rgba(28, 18, 4, 0.96) 0%, rgba(8, 24, 14, 0.96) 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 215, 0, 0.2),
+    0 16px 48px rgba(0, 0, 0, 0.55),
+    0 0 40px rgba(255, 215, 0, 0.22);
+  animation: winnerGlow 2.4s ease-in-out infinite;
+}
+
+.winner-banner--game {
+  border-color: rgba(255, 180, 60, 0.9);
+  box-shadow:
+    0 0 0 1px rgba(255, 180, 60, 0.25),
+    0 20px 56px rgba(0, 0, 0, 0.6),
+    0 0 56px rgba(255, 140, 0, 0.35);
+}
+
+.winner-banner__eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #f0c84b;
+}
+
+.winner-banner__title {
+  margin: 0;
+  font-size: clamp(1.35rem, 4vw, 2rem);
+  font-weight: 900;
+  line-height: 1.15;
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+}
+
+.winner-banner__list {
+  list-style: none;
+  margin: 0.85rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.winner-banner__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  font-size: 0.95rem;
+  color: #f5f5f5;
+}
+
+.winner-banner__amount {
+  color: #7dffb0;
+  font-weight: 800;
+}
+
+.winner-banner__hand {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 215, 0, 0.16);
+  color: #ffe58a;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.winner-banner__hand--solo {
+  margin: 0.75rem 0 0;
+}
+
+.winner-banner__you {
+  margin: 0.85rem 0 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #7dffb0;
+}
+
+.winner-banner-enter-active,
+.winner-banner-leave-active {
+  transition: opacity 0.45s ease;
+}
+
+.winner-banner-enter-active .winner-banner,
+.winner-banner-leave-active .winner-banner {
+  transition: transform 0.45s ease, opacity 0.45s ease;
+}
+
+.winner-banner-enter-from,
+.winner-banner-leave-to {
+  opacity: 0;
+}
+
+.winner-banner-enter-from .winner-banner,
+.winner-banner-leave-to .winner-banner {
+  opacity: 0;
+  transform: scale(0.82) translateY(12px);
+}
+
+@keyframes winnerGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(255, 215, 0, 0.2),
+      0 16px 48px rgba(0, 0, 0, 0.55),
+      0 0 32px rgba(255, 215, 0, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(255, 215, 0, 0.35),
+      0 16px 48px rgba(0, 0, 0, 0.55),
+      0 0 52px rgba(255, 215, 0, 0.38);
+  }
+}
+
+.seat.winner .seat-info {
+  outline: 3px solid #ffd700;
+  background: rgba(80, 62, 8, 0.82);
+  animation: winnerSeatPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes winnerSeatPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 18px 6px rgba(255, 215, 0, 0.35);
+  }
+}
+
 .burn-hint {
   position: absolute;
   top: 28%;
@@ -911,8 +1211,27 @@ onUnmounted(() => {
 }
 
 .table-felt :deep(.playing-card--small) {
-  width: clamp(44px, 4.2vw, 58px);
-  height: clamp(62px, 5.9vw, 82px);
+  width: clamp(56px, 5.8vw, 80px);
+  height: clamp(80px, 8.2vw, 114px);
+  font-size: clamp(0.9rem, 1.05vw, 1.1rem);
+}
+
+.table-felt :deep(.rank) {
+  font-size: clamp(1rem, 1.2vw, 1.35rem);
+}
+
+.table-felt :deep(.suit) {
+  font-size: clamp(1.25rem, 1.5vw, 1.65rem);
+}
+
+.community :deep(.playing-card--small) {
+  width: clamp(62px, 6.5vw, 90px);
+  height: clamp(88px, 9.2vw, 128px);
+}
+
+.seat.me .hole-cards :deep(.playing-card--small) {
+  width: clamp(64px, 7vw, 94px);
+  height: clamp(92px, 10vw, 136px);
 }
 
 .community {
@@ -921,7 +1240,7 @@ onUnmounted(() => {
   left: 50%;
   transform: translate(-50%, -50%);
   display: flex;
-  gap: 0.35rem;
+  gap: 0.5rem;
 }
 
 .pot-center {
@@ -929,26 +1248,47 @@ onUnmounted(() => {
   top: 52%;
   left: 50%;
   transform: translate(-50%, -50%);
-  color: #f0e6c8;
-  font-weight: 700;
-  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  text-align: center;
+  pointer-events: none;
   transition: transform 0.3s ease, color 0.3s ease;
 }
 
-.pot-center--pulse {
-  animation: potPulse 0.6s ease-out;
+.pot-center__label {
+  color: #f0e6c8;
+  font-size: clamp(0.7rem, 1.1vw, 0.9rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.pot-center__amount {
   color: #ffd700;
+  font-size: clamp(2rem, 5.5vw, 3.75rem);
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55), 0 0 24px rgba(255, 215, 0, 0.25);
+}
+
+.pot-center--pulse .pot-center__amount {
+  animation: potPulse 0.6s ease-out;
+  color: #fff3a0;
 }
 
 @keyframes potPulse {
   0% {
-    transform: translate(-50%, -50%) scale(1);
+    transform: scale(1);
   }
   40% {
-    transform: translate(-50%, -50%) scale(1.18);
+    transform: scale(1.15);
   }
   100% {
-    transform: translate(-50%, -50%) scale(1);
+    transform: scale(1);
   }
 }
 
@@ -1155,7 +1495,7 @@ onUnmounted(() => {
   font-weight: 800;
   padding: 0.1rem 0.3rem;
   border-radius: 3px;
-  margin-left: 0.2rem;
+  margin-right: 0.45rem;
   vertical-align: middle;
 }
 
@@ -1171,7 +1511,7 @@ onUnmounted(() => {
 
 .hole-cards {
   display: flex;
-  gap: 0.2rem;
+  gap: 0.35rem;
   justify-content: center;
 }
 
@@ -1221,6 +1561,44 @@ onUnmounted(() => {
   margin: 0.75rem 0;
 }
 
+.raise-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  width: 100%;
+}
+
+.raise-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  width: 100%;
+}
+
+.raise-preset--active {
+  outline: 2px solid var(--accent, #ffd700);
+}
+
+.raise-select-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.raise-select-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.raise-select-row select {
+  min-width: 6rem;
+  padding: 0.35rem 0.5rem;
+}
+
 .raise-row {
   display: flex;
   align-items: center;
@@ -1244,6 +1622,79 @@ onUnmounted(() => {
   animation: winnersIn 0.65s ease-out;
 }
 
+.winners {
+  border: 2px solid rgba(255, 215, 0, 0.55);
+  background: linear-gradient(160deg, rgba(36, 28, 8, 0.95) 0%, rgba(12, 28, 18, 0.95) 100%);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.winners--you {
+  border-color: rgba(125, 255, 176, 0.7);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.35),
+    0 0 24px rgba(125, 255, 176, 0.2);
+}
+
+.winners--game {
+  border-color: rgba(255, 160, 60, 0.75);
+}
+
+.winners__eyebrow {
+  margin: 0 0 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #f0c84b;
+}
+
+.winners__title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 900;
+  line-height: 1.2;
+  color: #fff;
+}
+
+.winners__list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.winners__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.winners__name {
+  font-weight: 700;
+  color: #fff;
+}
+
+.winners__amount {
+  color: #7dffb0;
+  font-weight: 800;
+}
+
+.winners__hand {
+  width: 100%;
+  font-size: 0.85rem;
+  color: #ffe58a;
+  text-transform: capitalize;
+}
+
+.winners__you {
+  margin: 0.75rem 0 0;
+  font-weight: 800;
+  color: #7dffb0;
+}
+
 @keyframes winnersIn {
   from {
     opacity: 0;
@@ -1260,6 +1711,23 @@ onUnmounted(() => {
   padding-left: 1.25rem;
 }
 
+.game-over {
+  text-align: center;
+  border: 2px solid rgba(255, 160, 60, 0.7);
+  background: linear-gradient(160deg, rgba(40, 20, 4, 0.95) 0%, rgba(18, 10, 4, 0.95) 100%);
+}
+
+.game-over--reveal {
+  animation: winnersIn 0.65s ease-out;
+}
+
+.game-over h2 {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: #ffd700;
+}
+
 .waiting {
   animation: fadeIn 0.35s ease-out;
 }
@@ -1271,10 +1739,6 @@ onUnmounted(() => {
   to {
     opacity: 1;
   }
-}
-
-.game-over {
-  text-align: center;
 }
 
 @media (min-width: 1024px) {

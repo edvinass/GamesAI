@@ -173,6 +173,28 @@ def test_raise_reopens_action(engine: PokerEngine) -> None:
     assert state["current_actor_id"] not in (raiser_id, next_actor)
 
 
+def test_raises_must_use_big_blind_increments(engine: PokerEngine) -> None:
+    state = engine.create_initial_state(
+        make_players(3), {"host_id": "p0", "small_blind": 5, "big_blind": 10}
+    )
+    raiser_id = state["current_actor_id"]
+    raiser = {"id": raiser_id, "nickname": raiser_id, "is_ai": False}
+
+    with pytest.raises(ValueError, match="increments"):
+        engine.apply_action(state, {"type": "raise", "amount": 25}, raiser)
+
+
+def test_legal_raise_options_are_big_blind_steps(engine: PokerEngine, state: dict) -> None:
+    viewer = {"id": state["current_actor_id"], "nickname": "Actor", "is_ai": False}
+    public = engine.get_public_state(state, viewer)
+    options = public["raise_options"]
+
+    assert options
+    assert all(amount % 10 == 0 for amount in options)
+    assert options[0] == public["min_raise_to"]
+    assert options[1] - options[0] == 10
+
+
 def test_side_pot_calculation(engine: PokerEngine) -> None:
     state = {
         "seat_order": ["a", "b", "c"],

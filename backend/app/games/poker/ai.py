@@ -54,6 +54,12 @@ def _pot_odds(state: dict, to_call: int) -> float:
     return to_call / max(1, pot + to_call)
 
 
+def _legal_raise_targets(state: dict, player_id: str) -> list[int]:
+    from app.games.poker.engine import PokerEngine
+
+    return PokerEngine()._legal_raise_to_amounts(state, player_id)
+
+
 def choose_poker_action(state: dict, player_id: str) -> dict[str, Any]:
     p = state["players"][player_id]
     to_call = _bet_to_call(state, player_id)
@@ -62,18 +68,13 @@ def choose_poker_action(state: dict, player_id: str) -> dict[str, Any]:
     bluff = random.random() < 0.1
 
     max_raise_to = p["bet_this_round"] + p["chips"]
-    min_raise_to = max(
-        state["current_bet"] + state["min_raise"],
-        p["bet_this_round"] + 1,
-    )
+    legal_raises = _legal_raise_targets(state, player_id)
 
     if to_call == 0:
         if strength >= 0.65 or bluff:
-            if p["chips"] > 0 and max_raise_to >= min_raise_to:
-                target = min(
-                    max_raise_to,
-                    max(min_raise_to, p["bet_this_round"] + state["settings"]["big_blind"] * 3),
-                )
+            if legal_raises:
+                preferred = p["bet_this_round"] + state["settings"]["big_blind"] * 3
+                target = min(legal_raises, key=lambda amount: abs(amount - preferred))
                 if target > p["bet_this_round"]:
                     return {"type": "raise", "amount": target}
         return {"type": "check"}
@@ -82,8 +83,8 @@ def choose_poker_action(state: dict, player_id: str) -> dict[str, Any]:
         return {"type": "fold"}
 
     if strength >= pot_odds + 0.15 or strength >= 0.55:
-        if strength >= 0.75 and p["chips"] > to_call and random.random() < 0.35:
-            target = min(max_raise_to, max(min_raise_to, state["current_bet"] + state["min_raise"] * 2))
+        if strength >= 0.75 and legal_raises and random.random() < 0.35:
+            target = legal_raises[min(1, len(legal_raises) - 1)]
             if target > p["bet_this_round"]:
                 return {"type": "raise", "amount": target}
         if to_call >= p["chips"]:
