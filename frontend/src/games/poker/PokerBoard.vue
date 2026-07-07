@@ -3,16 +3,16 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import type { Room, PokerGameState } from '@/types'
 import PlayingCard from './PlayingCard.vue'
 
-const CARD_REVEAL_MS = 700
+const CARD_REVEAL_MS = 380
 const TURN_DELAY_MS = 1100
 const ACTION_HOLD_MS = 1500
-const SHOWDOWN_REVEAL_MS = 850
-const PHASE_BANNER_MS = 2000
-const BURN_CARD_MS = 700
+const SHOWDOWN_REVEAL_MS = 500
+const PHASE_BANNER_MS = 1100
+const BURN_CARD_MS = 350
 const FOLD_ANIM_MS = 900
-const ROUND_CIRCLE_PAUSE_MS = 1000
-const POST_DEAL_PAUSE_MS = 1600
-const POST_STREET_PAUSE_MS = 1400
+const ROUND_CIRCLE_PAUSE_MS = 400
+const POST_DEAL_PAUSE_MS = 700
+const POST_STREET_PAUSE_MS = 600
 
 const props = defineProps<{
   gameState: PokerGameState
@@ -171,23 +171,48 @@ const winnerCallout = computed(() => {
   }
 
   if (props.gameState.phase === 'hand_complete' && props.gameState.winners.length) {
-    const entries = props.gameState.winners.map((winner) => ({
-      playerId: winner.player_id,
-      name:
+    const aggregated = new Map<
+      string,
+      { playerId: string; name: string; amount: number; hand: string | null }
+    >()
+
+    for (const winner of props.gameState.winners) {
+      const name =
         props.gameState.players.find((player) => player.id === winner.player_id)?.nickname ??
-        'Player',
-      amount: winner.amount,
-      hand: winner.hand ? winner.hand.replace(/_/g, ' ') : null,
-    }))
+        'Player'
+      const hand = winner.hand ? winner.hand.replace(/_/g, ' ') : null
+      const existing = aggregated.get(winner.player_id)
+      if (existing) {
+        existing.amount += winner.amount
+        if (!existing.hand && hand) existing.hand = hand
+      } else {
+        aggregated.set(winner.player_id, {
+          playerId: winner.player_id,
+          name,
+          amount: winner.amount,
+          hand,
+        })
+      }
+    }
+
+    const entries = [...aggregated.values()]
     const totalPot = entries.reduce((sum, entry) => sum + entry.amount, 0)
-    const title =
-      entries.length === 1
-        ? `${entries[0].name} wins ${entries[0].amount}!`
-        : `Split pot — ${totalPot} chips`
+    const isSplitPot =
+      entries.length > 1 &&
+      entries.every((entry) => entry.amount === entries[0].amount && entry.hand === entries[0].hand)
+
+    let title: string
+    if (entries.length === 1) {
+      title = `${entries[0].name} wins ${entries[0].amount}!`
+    } else if (isSplitPot) {
+      title = `Split pot — ${totalPot} chips`
+    } else {
+      title = entries.map((entry) => `${entry.name} +${entry.amount}`).join(' · ')
+    }
 
     return {
       type: 'hand' as const,
-      eyebrow: entries.length === 1 ? 'Winner' : 'Winners',
+      eyebrow: entries.length === 1 ? 'Winner' : isSplitPot ? 'Split pot' : 'Winners',
       title,
       entries,
     }
@@ -320,6 +345,47 @@ function resetHandAnimations() {
   streetTransitionPending.value = false
   bettingRoundReady.value = false
   displayedPot.value = props.gameState.pot_total
+}
+
+function syncHandStateFromServer() {
+  const gs = props.gameState
+  const holeRevealed: Record<string, number> = {}
+
+  if (gs.hand_number > 0) {
+    for (const seatId of gs.seat_order) {
+      const player = gs.players.find((p) => p.id === seatId)
+      if (player && player.status !== 'eliminated') {
+        holeRevealed[seatId] = 2
+      }
+    }
+  }
+
+  holeCardsRevealed.value = holeRevealed
+  displayedCommunityCount.value = gs.community_cards.length
+  displayedPot.value = gs.pot_total
+  dealInProgress.value = false
+  bettingRoundReady.value = gs.hand_number > 0
+  streetTransitionPending.value = false
+  effectiveCurrentActorId.value = gs.current_actor_id
+  lastDealtHoleKey.value = ''
+  lastDealtCommunityIndex.value = -1
+  showdownRevealStarted.value = false
+  showdownRevealed.value = new Set()
+
+  if (['showdown', 'hand_complete', 'game_over'].includes(gs.phase)) {
+    showdownRevealStarted.value = true
+    const revealed = new Set<string>()
+    for (const player of gs.players) {
+      if (
+        player.id !== props.playerId &&
+        player.status !== 'folded' &&
+        player.hole_cards.length >= 2
+      ) {
+        revealed.add(player.id)
+      }
+    }
+    showdownRevealed.value = revealed
+  }
 }
 
 function highlightActor(actorId: string | null, delayMs: number) {
@@ -528,8 +594,12 @@ function nextHand() {
 
 watch(
   () => props.gameState.hand_number,
-  (handNum) => {
+  (handNum, prevHandNum) => {
     clearAllTimers()
+    if (prevHandNum === undefined) {
+      syncHandStateFromServer()
+      return
+    }
     resetHandAnimations()
     if (handNum > 0) {
       showPhaseBanner('preflop')
@@ -543,7 +613,11 @@ watch(
 
 watch(
   () => props.gameState.community_cards.length,
-  (communityCount) => {
+  (communityCount, prevCount) => {
+    if (prevCount === undefined) {
+      displayedCommunityCount.value = communityCount
+      return
+    }
     if (communityCount < displayedCommunityCount.value) {
       displayedCommunityCount.value = communityCount
       return
@@ -612,7 +686,11 @@ watch(
 
 watch(
   () => props.gameState.pot_total,
-  (target) => {
+  (target, prev) => {
+    if (prev === undefined) {
+      displayedPot.value = target
+      return
+    }
     animatePotTo(target)
   },
   { immediate: true },

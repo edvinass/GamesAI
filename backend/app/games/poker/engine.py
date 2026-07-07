@@ -3,7 +3,7 @@ from typing import Any
 
 from app.games.base import GamePlugin
 from app.games.poker.deck import Deck
-from app.games.poker.hand_eval import describe_hand, evaluate_hand, hand_category_name
+from app.games.poker.hand_eval import describe_hand, evaluate_hand
 
 
 class PokerEngine(GamePlugin):
@@ -212,7 +212,9 @@ class PokerEngine(GamePlugin):
             }
             if reveal_hands and p["status"] != "folded":
                 entry["hole_cards"] = copy.deepcopy(p["hole_cards"])
-                entry["hand_description"] = describe_hand(p["hole_cards"] + state["community_cards"])
+                all_cards = p["hole_cards"] + state["community_cards"]
+                if len(all_cards) >= 5:
+                    entry["hand_description"] = describe_hand(all_cards)
             elif viewer_id and str(pid) == viewer_id and p["status"] != "folded":
                 entry["hole_cards"] = copy.deepcopy(p["hole_cards"])
             players.append(entry)
@@ -525,14 +527,17 @@ class PokerEngine(GamePlugin):
                 continue
             best_score = None
             best_ids: list[str] = []
+            best_cards: dict[str, list[dict[str, str]]] = {}
             for pid in contenders:
                 cards = state["players"][pid]["hole_cards"] + state["community_cards"]
                 score = evaluate_hand(cards)
                 if best_score is None or score > best_score:
                     best_score = score
                     best_ids = [pid]
+                    best_cards = {pid: cards}
                 elif score == best_score:
                     best_ids.append(pid)
+                    best_cards[pid] = cards
             share = pot["amount"] // len(best_ids)
             remainder = pot["amount"] % len(best_ids)
             for i, pid in enumerate(best_ids):
@@ -542,7 +547,7 @@ class PokerEngine(GamePlugin):
                     {
                         "player_id": pid,
                         "amount": award,
-                        "hand": hand_category_name(best_score) if best_score else None,
+                        "hand": describe_hand(best_cards[pid]),
                     }
                 )
         state["winners"] = winners

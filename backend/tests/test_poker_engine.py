@@ -67,6 +67,10 @@ def test_fold_wins_pot(engine: PokerEngine, state: dict) -> None:
         state, events = engine.apply_action(state, {"type": "fold"}, actor)
     assert state["phase"] in ("hand_complete", "game_over")
     assert state["winners"]
+    viewer = {"id": state["winners"][0]["player_id"], "nickname": "Winner", "is_ai": False}
+    public = engine.get_public_state(state, viewer)
+    winner = next(p for p in public["players"] if p["id"] == viewer["id"])
+    assert "hand_description" not in winner
 
 
 def test_check_advances_when_possible(engine: PokerEngine, state: dict) -> None:
@@ -208,6 +212,46 @@ def test_side_pot_calculation(engine: PokerEngine) -> None:
     }
     pots = engine._calculate_side_pots(state)
     assert sum(p["amount"] for p in pots) == 500
+
+
+def test_higher_trips_wins_showdown(engine: PokerEngine) -> None:
+    from app.games.poker.deck import make_card
+
+    state = {
+        "seat_order": ["a", "b"],
+        "players": {
+            "a": {
+                "hole_cards": [make_card("K", "hearts"), make_card("K", "clubs")],
+                "status": "active",
+                "chips": 500,
+                "total_bet_hand": 100,
+                "bet_this_round": 0,
+            },
+            "b": {
+                "hole_cards": [make_card("7", "diamonds"), make_card("7", "spades")],
+                "status": "active",
+                "chips": 500,
+                "total_bet_hand": 100,
+                "bet_this_round": 0,
+            },
+        },
+        "community_cards": [
+            make_card("K", "diamonds"),
+            make_card("7", "hearts"),
+            make_card("2", "spades"),
+            make_card("4", "clubs"),
+            make_card("9", "diamonds"),
+        ],
+        "phase": "showdown",
+    }
+    resolved = engine._resolve_showdown(state)
+    assert resolved["winners"] == [
+        {
+            "player_id": "a",
+            "amount": 200,
+            "hand": "Three of a Kind, Kings",
+        }
+    ]
 
 
 def test_next_hand_requires_host(engine: PokerEngine, state: dict) -> None:

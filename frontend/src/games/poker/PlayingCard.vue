@@ -82,11 +82,11 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
 }
 
 .playing-card--deal {
-  animation: cardDeal 0.55s ease-out;
+  animation: cardDeal 0.35s ease-out;
 }
 
 .playing-card--flip {
-  animation: cardFlip 0.65s ease-out;
+  animation: cardFlip 0.4s ease-out;
 }
 
 @keyframes cardDeal {

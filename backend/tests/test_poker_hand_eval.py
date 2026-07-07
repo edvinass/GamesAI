@@ -11,6 +11,8 @@ from app.games.poker.hand_eval import (
     CATEGORY_STRAIGHT_FLUSH,
     CATEGORY_THREE_KIND,
     CATEGORY_TWO_PAIR,
+    compare_hands,
+    describe_hand,
     evaluate_hand,
     hand_category_name,
 )
@@ -136,3 +138,27 @@ def test_best_five_of_seven() -> None:
     ]
     score = evaluate_hand(hole + board)
     assert hand_category_name(score) == "full_house"
+
+
+def test_three_of_a_kind_description() -> None:
+    cards = [
+        make_card("K", "hearts"),
+        make_card("K", "clubs"),
+        make_card("K", "diamonds"),
+        make_card("4", "spades"),
+        make_card("2", "hearts"),
+    ]
+    assert describe_hand(cards) == "Three of a Kind, Kings"
+
+
+def test_higher_three_of_a_kind_beats_lower() -> None:
+    board = [
+        make_card("K", "diamonds"),
+        make_card("7", "hearts"),
+        make_card("2", "spades"),
+        make_card("4", "clubs"),
+        make_card("9", "diamonds"),
+    ]
+    kings = [make_card("K", "hearts"), make_card("K", "clubs")]
+    sevens = [make_card("7", "diamonds"), make_card("7", "spades")]
+    assert compare_hands(kings + board, sevens + board) == 1

@@ -135,7 +135,61 @@ def rank_to_display(rank: str) -> str:
     return display.get(rank, rank)
 
 
+def value_to_rank(value: int) -> str:
+    for rank, rank_value in RANK_TO_VALUE.items():
+        if rank_value == value:
+            return rank_to_display(rank)
+    return str(value)
+
+
+def value_to_name(value: int, *, plural: bool = False) -> str:
+    names = {
+        14: ("Ace", "Aces"),
+        13: ("King", "Kings"),
+        12: ("Queen", "Queens"),
+        11: ("Jack", "Jacks"),
+        10: ("Ten", "Tens"),
+        9: ("Nine", "Nines"),
+        8: ("Eight", "Eights"),
+        7: ("Seven", "Sevens"),
+        6: ("Six", "Sixes"),
+        5: ("Five", "Fives"),
+        4: ("Four", "Fours"),
+        3: ("Three", "Threes"),
+        2: ("Two", "Twos"),
+    }
+    singular, plural_name = names.get(value, (str(value), f"{value}s"))
+    return plural_name if plural else singular
+
+
 def describe_hand(cards: list[dict[str, str]]) -> str:
     score = evaluate_hand(cards)
     category = hand_category_name(score)
+    kickers = score[1]
+
+    if category == "high_card":
+        return f"High Card, {value_to_name(kickers[0])}"
+    if category == "pair":
+        return f"Pair of {value_to_name(kickers[0], plural=True)}"
+    if category == "two_pair":
+        return (
+            f"Two Pair, {value_to_name(kickers[0], plural=True)} "
+            f"and {value_to_name(kickers[1], plural=True)}"
+        )
+    if category == "three_of_a_kind":
+        return f"Three of a Kind, {value_to_name(kickers[0], plural=True)}"
+    if category == "straight":
+        return f"Straight, {value_to_name(kickers[0])} high"
+    if category == "flush":
+        return f"Flush, {value_to_name(kickers[0])} high"
+    if category == "full_house":
+        return (
+            f"Full House, {value_to_name(kickers[0], plural=True)} "
+            f"full of {value_to_name(kickers[1], plural=True)}"
+        )
+    if category == "four_of_a_kind":
+        return f"Four of a Kind, {value_to_name(kickers[0], plural=True)}"
+    if category == "straight_flush":
+        return f"Straight Flush, {value_to_name(kickers[0])} high"
+
     return category.replace("_", " ").title()
