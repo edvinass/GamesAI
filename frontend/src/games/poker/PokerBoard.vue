@@ -1672,7 +1672,7 @@ onUnmounted(() => {
   position: absolute;
   transform: translate(-50%, -50%);
   text-align: center;
-  min-width: clamp(90px, 8vw, 120px);
+  min-width: clamp(112px, 11vw, 158px);
   transition: filter 0.35s ease, opacity 0.5s ease, transform 0.5s ease;
 }
 
@@ -1796,12 +1796,12 @@ onUnmounted(() => {
 .seat-info {
   background: rgba(8, 12, 20, 0.72);
   backdrop-filter: blur(8px);
-  padding: 0.4rem 0.55rem;
+  padding: 0.55rem 0.75rem;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #fff;
-  font-size: 0.75rem;
-  margin-bottom: 0.3rem;
+  font-size: clamp(0.82rem, 1.15vw, 0.95rem);
+  margin-bottom: 0.35rem;
   transition: background 0.3s ease, transform 0.3s ease, border-color 0.3s ease;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
@@ -1811,14 +1811,14 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 0.3rem;
-  margin-top: 0.2rem;
-  padding: 0.12rem 0.45rem;
+  margin-top: 0.25rem;
+  padding: 0.15rem 0.5rem;
   border-radius: 999px;
   background: rgba(255, 215, 0, 0.12);
   border: 1px solid rgba(255, 215, 0, 0.22);
   color: #ffd700;
   font-weight: 800;
-  font-size: 0.72rem;
+  font-size: clamp(0.75rem, 1vw, 0.82rem);
   transition: transform 0.25s ease;
 }
 
@@ -1862,20 +1862,30 @@ onUnmounted(() => {
 .seat-name {
   display: block;
   font-weight: 700;
+  font-size: clamp(0.88rem, 1.25vw, 1.05rem);
+  line-height: 1.25;
+}
+
+.seat-chips {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: clamp(0.78rem, 1.05vw, 0.88rem);
+  line-height: 1.3;
+  opacity: 0.92;
 }
 
 .dealer-chip {
   position: absolute;
-  top: -0.75rem;
-  right: -0.4rem;
+  top: -0.9rem;
+  right: -0.5rem;
   background: linear-gradient(145deg, #fff 0%, #e0e0e0 100%);
   color: #1a1a1a;
   border: 2px solid #c9a227;
   border-radius: 50%;
-  width: 1.55rem;
-  height: 1.55rem;
-  line-height: 1.4rem;
-  font-size: 0.68rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  line-height: 1.65rem;
+  font-size: 0.78rem;
   font-weight: 900;
   box-shadow:
     0 2px 6px rgba(0, 0, 0, 0.45),
@@ -1885,9 +1895,9 @@ onUnmounted(() => {
 
 .blind-badge {
   display: inline-block;
-  font-size: 0.55rem;
+  font-size: 0.62rem;
   font-weight: 800;
-  padding: 0.12rem 0.35rem;
+  padding: 0.15rem 0.4rem;
   border-radius: 999px;
   margin-right: 0.35rem;
   vertical-align: middle;
