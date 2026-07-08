@@ -344,6 +344,7 @@ async function copyUrl() {
         v-model:starting-chips="startingChips"
         v-model:small-blind="smallBlind"
         v-model:big-blind="bigBlind"
+        v-model:ai-difficulty="aiDifficulty"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

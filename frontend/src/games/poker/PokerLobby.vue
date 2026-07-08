@@ -16,6 +16,7 @@ const soloPractice = defineModel<boolean>('soloPractice', { required: true })
 const startingChips = defineModel<number>('startingChips', { required: true })
 const smallBlind = defineModel<number>('smallBlind', { required: true })
 const bigBlind = defineModel<number>('bigBlind', { required: true })
+const aiDifficulty = defineModel<string>('aiDifficulty', { required: true })
 
 const emit = defineEmits<{
   addAi: []
@@ -45,6 +46,12 @@ const stakePresets = [
   { id: 'high', label: 'High stakes', chips: 5000, sb: 25, bb: 50 },
 ] as const
 
+const difficultyOptions = [
+  { value: 'easy', label: 'Easy', detail: 'Loose & predictable' },
+  { value: 'medium', label: 'Medium', detail: 'Balanced play' },
+  { value: 'hard', label: 'Hard', detail: 'Equity-driven' },
+] as const
+
 const maxPlayers = computed(() => Number(props.room.settings?.max_players ?? 6))
 const playerCount = computed(() => props.room.players.length)
 const canAddAi = computed(
@@ -59,6 +66,10 @@ const gameMode = computed<GameMode>({
 })
 
 const activeMode = computed(() => gameModes.find((mode) => mode.id === gameMode.value) ?? gameModes[0])
+
+const activeDifficulty = computed(
+  () => difficultyOptions.find((opt) => opt.value === aiDifficulty.value) ?? difficultyOptions[1],
+)
 
 const activePresetId = computed(() => {
   const match = stakePresets.find(
@@ -168,6 +179,28 @@ function seatInitial(nickname: string): string {
           {{ bbDepth }} BB deep
         </p>
       </div>
+
+      <div class="difficulty-section">
+        <div class="difficulty-header">
+          <h2 class="section-title">AI strength</h2>
+          <span class="difficulty-hint">{{ activeDifficulty.detail }}</span>
+        </div>
+        <div class="difficulty-row" role="radiogroup" aria-label="AI difficulty">
+          <button
+            v-for="opt in difficultyOptions"
+            :key="opt.value"
+            type="button"
+            class="difficulty-chip"
+            :class="{ active: aiDifficulty === opt.value }"
+            role="radio"
+            :aria-checked="aiDifficulty === opt.value"
+            @click="aiDifficulty = opt.value"
+          >
+            <span class="diff-label">{{ opt.label }}</span>
+            <span class="diff-detail">{{ opt.detail }}</span>
+          </button>
+        </div>
+      </div>
     </section>
 
     <section v-else class="mode-summary card">
@@ -176,13 +209,17 @@ function seatInitial(nickname: string): string {
         <p class="mode-summary-label">{{ activeMode.label }}</p>
         <p class="mode-summary-desc">{{ activeMode.description }}</p>
         <p class="mode-summary-stakes">
-          {{ startingChips.toLocaleString() }} chips · blinds {{ smallBlind }}/{{ bigBlind }}
+          {{ startingChips.toLocaleString() }} chips · blinds {{ smallBlind }}/{{ bigBlind }} ·
+          AI {{ activeDifficulty.label }}
         </p>
       </div>
     </section>
 
     <section v-if="soloPractice" class="solo-notice card">
-      <p>Solo practice auto-adds 2 AI players when you start. You'll play a 3-handed Texas Hold'em game.</p>
+      <p>
+        Solo practice auto-adds 2 AI players when you start. You'll play 3-handed Texas Hold'em
+        against {{ activeDifficulty.label.toLowerCase() }} bots.
+      </p>
     </section>
 
     <template v-else>
@@ -382,6 +419,63 @@ function seatInitial(nickname: string): string {
   gap: 0.85rem;
   padding-top: 0.25rem;
   border-top: 1px solid var(--border);
+}
+
+.difficulty-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.difficulty-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.difficulty-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.difficulty-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.difficulty-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-elevated, rgba(255, 255, 255, 0.03));
+  cursor: pointer;
+  text-align: left;
+}
+
+.difficulty-chip:hover {
+  border-color: var(--accent);
+}
+
+.difficulty-chip.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.diff-label {
+  font-weight: 600;
+}
+
+.diff-detail {
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .preset-row {

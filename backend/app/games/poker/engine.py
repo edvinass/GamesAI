@@ -4,6 +4,7 @@ from typing import Any
 from app.games.base import GamePlugin
 from app.games.poker.deck import Deck
 from app.games.poker.hand_eval import describe_hand, evaluate_hand
+from app.games.poker.opponent_model import capture_to_call, on_hand_started, record_action
 
 
 class PokerEngine(GamePlugin):
@@ -19,6 +20,7 @@ class PokerEngine(GamePlugin):
             "small_blind": 5,
             "big_blind": 10,
             "solo_practice": False,
+            "ai_difficulty": "medium",
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -30,6 +32,12 @@ class PokerEngine(GamePlugin):
         merged["small_blind"] = max(1, int(merged.get("small_blind", 5)))
         merged["big_blind"] = max(merged["small_blind"] + 1, int(merged.get("big_blind", 10)))
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
+        difficulty = str(merged.get("ai_difficulty", "medium")).lower()
+        if difficulty == "normal":
+            difficulty = "medium"
+        if difficulty not in ("easy", "medium", "hard"):
+            difficulty = "medium"
+        merged["ai_difficulty"] = difficulty
         return merged
 
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
@@ -81,6 +89,7 @@ class PokerEngine(GamePlugin):
             "win_reason": None,
             "settings": settings,
             "host_id": settings.get("host_id") or (players[0]["id"] if players else None),
+            "opponent_stats": {},
         }
         return self._start_hand(state)
 
@@ -111,6 +120,8 @@ class PokerEngine(GamePlugin):
         pstate = state["players"][actor_id]
         if pstate["status"] != "active":
             raise ValueError("You cannot act")
+
+        to_call_before = capture_to_call(state, actor_id)
 
         if action_type == "fold":
             pstate["status"] = "folded"
@@ -172,6 +183,8 @@ class PokerEngine(GamePlugin):
                 )
         else:
             raise ValueError(f"Unknown action: {action_type}")
+
+        record_action(state, actor_id, action, to_call_before=to_call_before)
 
         remaining = self._players_in_hand(state)
         if len(remaining) == 1:
@@ -304,6 +317,7 @@ class PokerEngine(GamePlugin):
         state["deck"] = deck.to_list()
 
         self._post_blinds(state, eligible)
+        on_hand_started(state, eligible)
         self._set_first_actor_preflop(state, eligible)
         return state
 
