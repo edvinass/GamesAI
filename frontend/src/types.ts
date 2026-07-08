@@ -341,7 +341,59 @@ export interface ChessGameState {
   viewer_color: 'w' | 'b' | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState
+export interface GoPlayerState {
+  id: string
+  nickname: string
+  is_ai: boolean
+  color: 'B' | 'W'
+}
+
+export interface GoMove {
+  type: 'play' | 'pass'
+  coord?: string
+  row?: number
+  col?: number
+  player_id?: string
+  color?: 'B' | 'W'
+  captured?: { B: number; W: number }
+}
+
+export interface GoScore {
+  black_stones: number
+  white_stones: number
+  black_territory: number
+  white_territory: number
+  black_score: number
+  white_score: number
+  komi: number
+  winner_color: 'B' | 'W' | null
+}
+
+export interface GoGameState {
+  phase: 'playing' | 'game_over'
+  board: Array<Array<string | null>>
+  board_size: number
+  players: GoPlayerState[]
+  black_player_id: string
+  white_player_id: string
+  current_color: 'B' | 'W'
+  current_actor_id: string | null
+  legal_plays: Array<{ row: number; col: number; coord: string }>
+  move_history: GoMove[]
+  last_move: GoMove | null
+  consecutive_passes: number
+  captured: { B: number; W: number }
+  winner: string | null
+  winner_color: 'B' | 'W' | null
+  win_reason: string | null
+  score: GoScore | null
+  settings: Record<string, unknown>
+  host_id: string | null
+  viewer_id: string | null
+  viewer_color: 'B' | 'W' | null
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -373,6 +425,10 @@ export function isPokerState(state: GameState): state is PokerGameState {
 
 export function isChessState(state: GameState): state is ChessGameState {
   return 'fen' in state && 'legal_moves' in state && 'white_player_id' in state
+}
+
+export function isGoState(state: GameState): state is GoGameState {
+  return 'legal_plays' in state && 'black_player_id' in state && !('fen' in state)
 }
 
 export interface WsMessage {

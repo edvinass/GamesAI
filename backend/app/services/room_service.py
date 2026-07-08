@@ -13,6 +13,8 @@ from app.games.codenames.ai import ai_operative_guesses, ai_spymaster_clue, fall
 from app.games.codenames.engine import CodenamesEngine
 from app.games.chess.ai import choose_chess_move
 from app.games.chess.engine import ChessEngine
+from app.games.go.ai import choose_go_move
+from app.games.go.engine import GoEngine
 from app.games.poker.ai import choose_poker_action
 from app.games.poker.engine import PokerEngine
 from app.services.poker_reactions import schedule_poker_reactions
@@ -25,7 +27,7 @@ from app.utils import generate_session_token, hash_session_token, player_to_dict
 logger = logging.getLogger(__name__)
 
 # Games where lobby players are not assigned red/blue teams or spymaster roles.
-_NO_TEAM_LOBBY_GAMES = frozenset({"spyfall", "snake", "duel", "tetris", "poker", "gravity_master", "chess"})
+_NO_TEAM_LOBBY_GAMES = frozenset({"spyfall", "snake", "duel", "tetris", "poker", "gravity_master", "chess", "go"})
 
 _ai_locks: dict[str, asyncio.Lock] = {}
 
@@ -325,7 +327,7 @@ class RoomService:
 
         game = get_game(room.game_type)
         settings = game.validate_settings(room.settings)
-        if room.game_type in ("poker", "chess") and room.host_player_id:
+        if room.game_type in ("poker", "chess", "go") and room.host_player_id:
             settings = {**settings, "host_id": str(room.host_player_id)}
         players_data = [self._player_data(p) for p in room.players]
 
@@ -348,6 +350,8 @@ class RoomService:
                 await self._setup_poker_solo(room)
             elif room.game_type == "chess":
                 await self._setup_chess_solo(room)
+            elif room.game_type == "go":
+                await self._setup_go_solo(room)
             await self.db.refresh(room, ["players"])
         elif settings.get("single_player") and room.game_type == "tetris":
             await self._setup_tetris_single_player(room)
@@ -542,6 +546,26 @@ class RoomService:
         )
         await self.db.flush()
 
+    async def _setup_go_solo(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+        token = generate_session_token()
+        self.db.add(
+            RoomPlayer(
+                room_id=room.id,
+                nickname="🤖 AI Opponent",
+                session_token_hash=hash_session_token(token),
+                team=None,
+                role=None,
+                is_ai=True,
+                is_connected=True,
+            )
+        )
+        await self.db.flush()
+
     async def _setup_tetris_solo(self, room: Room) -> None:
         settings = get_game("tetris").validate_settings(room.settings or {})
         max_players = settings["max_players"]
@@ -682,6 +706,8 @@ AI_POKER_THINK_PAUSE_SEC = 3.0
 AI_POKER_TURN_PAUSE_SEC = 1.5
 AI_CHESS_THINK_PAUSE_SEC = 1.2
 AI_CHESS_TURN_PAUSE_SEC = 0.6
+AI_GO_THINK_PAUSE_SEC = 1.0
+AI_GO_TURN_PAUSE_SEC = 0.5
 
 
 async def _process_codenames_ai_turn(
@@ -933,6 +959,46 @@ async def _process_chess_ai_turn(
     return True
 
 
+async def _process_go_ai_turn(
+    service: RoomService,
+    room_id: uuid.UUID,
+    room: Room,
+    broadcast_fn,
+) -> bool:
+    """Run one Go AI action. Returns True if an action was taken."""
+    engine: GoEngine = get_game("go")  # type: ignore
+    state = room.game_state.state
+    if state.get("winner") or state.get("phase") != "playing":
+        return False
+
+    actor_data = engine.get_current_actor(state)
+    if not actor_data or not actor_data.get("is_ai"):
+        return False
+
+    actor = next((p for p in room.players if str(p.id) == actor_data["id"]), None)
+    if not actor:
+        return False
+
+    await asyncio.sleep(AI_GO_THINK_PAUSE_SEC)
+    action = choose_go_move(state, str(actor_data["id"]))
+    try:
+        room, state, events = await service.apply_game_action(
+            room_id, actor.id, action, allow_ai=True
+        )
+    except ValueError:
+        legal = state.get("legal_plays") or []
+        if not legal:
+            fallback = {"type": "pass"}
+        else:
+            fallback = {"type": "play", "coord": legal[0]["coord"]}
+        room, state, events = await service.apply_game_action(
+            room_id, actor.id, fallback, allow_ai=True
+        )
+    await broadcast_fn(room, events)
+    await asyncio.sleep(AI_GO_TURN_PAUSE_SEC)
+    return True
+
+
 async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
     lock = _get_ai_lock(str(room_id))
     if lock.locked():
@@ -956,6 +1022,8 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                         acted = await _process_poker_ai_turn(service, room_id, room, broadcast_fn)
                     elif room.game_type == "chess":
                         acted = await _process_chess_ai_turn(service, room_id, room, broadcast_fn)
+                    elif room.game_type == "go":
+                        acted = await _process_go_ai_turn(service, room_id, room, broadcast_fn)
                     else:
                         return
 

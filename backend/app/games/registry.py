@@ -1,12 +1,14 @@
-from app.games.base import GamePlugin
 from app.games.chess.engine import ChessEngine
 from app.games.codenames.engine import CodenamesEngine
 from app.games.duel.engine import DuelEngine
+from app.games.go.engine import GoEngine
 from app.games.gravity_master.engine import GravityMasterEngine
 from app.games.snake.engine import SnakeEngine
 from app.games.poker.engine import PokerEngine
 from app.games.spyfall.engine import SpyfallEngine
 from app.games.tetris.engine import TetrisEngine
+
+from app.games.base import GamePlugin
 
 _REGISTRY: dict[str, GamePlugin] = {
     "codenames": CodenamesEngine(),
@@ -17,6 +19,7 @@ _REGISTRY: dict[str, GamePlugin] = {
     "gravity_master": GravityMasterEngine(),
     "poker": PokerEngine(),
     "chess": ChessEngine(),
+    "go": GoEngine(),
 }
 
 
@@ -36,6 +39,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "gravity_master": {"name": "Gravity Master", "description": "Draw shapes that fall and become walls — guide the ball to the target"},
     "poker": {"name": "Poker", "description": "Texas Hold'em — bluff, bet, and beat your friends (or AI)"},
     "chess": {"name": "Chess", "description": "Classic chess — play a friend or challenge the AI"},
+    "go": {"name": "Go", "description": "9×9 Go — surround territory and beat the AI"},
 }
 
 

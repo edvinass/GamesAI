@@ -54,6 +54,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '♟️',
     lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
   },
+  go: {
+    name: 'Go',
+    description: '9×9 Go — surround territory and beat the AI.',
+    emoji: '⚫',
+    lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
+  },
 }
 
 export interface GameListItem {

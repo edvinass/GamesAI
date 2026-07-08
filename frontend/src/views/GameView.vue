@@ -12,12 +12,13 @@ import TetrisBoard from '@/games/tetris/TetrisBoard.vue'
 import GravityMasterBoard from '@/games/gravity_master/GravityMasterBoard.vue'
 import PokerBoard from '@/games/poker/PokerBoard.vue'
 import ChessBoard from '@/games/chess/ChessBoard.vue'
+import GoBoard from '@/games/go/GoBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
 import { pokerReactionSet } from '@/games/poker/reactions'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState, GoGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -45,6 +46,7 @@ const gameTitle = computed(() => {
   if (type === 'gravity_master') return 'Gravity Master'
   if (type === 'poker') return 'Poker'
   if (type === 'chess') return 'Chess'
+  if (type === 'go') return 'Go'
   return type ?? 'Game'
 })
 
@@ -80,10 +82,14 @@ const chessState = computed(() =>
   gameState.value && isChessState(gameState.value) ? gameState.value as ChessGameState : null,
 )
 
+const goState = computed(() =>
+  gameState.value && isGoState(gameState.value) ? gameState.value as GoGameState : null,
+)
+
 const isPoker = computed(() => room.value?.game_type === 'poker')
 
 const isFullscreenGame = computed(() =>
-  Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value),
+  Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value),
 )
 
 onMounted(async () => {
@@ -230,6 +236,14 @@ function backToLobby() {
     <ChessBoard
       v-else-if="chessState && room"
       :game-state="chessState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <GoBoard
+      v-else-if="goState && room"
+      :game-state="goState"
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"
