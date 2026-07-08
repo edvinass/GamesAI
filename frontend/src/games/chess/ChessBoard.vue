@@ -13,19 +13,28 @@ const emit = defineEmits<{
 }>()
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const
+/** Use filled chess glyphs for both sides so styles match; color via CSS. */
 const PIECE_GLYPH: Record<string, string> = {
-  K: '♔',
-  Q: '♕',
-  R: '♖',
-  B: '♗',
-  N: '♘',
-  P: '♙',
+  K: '♚',
+  Q: '♛',
+  R: '♜',
+  B: '♝',
+  N: '♞',
+  P: '♟',
   k: '♚',
   q: '♛',
   r: '♜',
   b: '♝',
   n: '♞',
   p: '♟',
+}
+
+function pieceGlyph(piece: string): string {
+  return PIECE_GLYPH[piece] ?? piece
+}
+
+function isWhitePiece(piece: string): boolean {
+  return piece === piece.toUpperCase()
 }
 
 const selected = ref<string | null>(null)
@@ -309,11 +318,9 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
                 <span
                   v-if="pieceAt(file, rankIndex)"
                   class="piece"
-                  :class="{
-                    white: pieceAt(file, rankIndex) === pieceAt(file, rankIndex)!.toUpperCase(),
-                  }"
+                  :class="{ white: isWhitePiece(pieceAt(file, rankIndex)!) }"
                 >
-                  {{ PIECE_GLYPH[pieceAt(file, rankIndex)!] }}
+                  {{ pieceGlyph(pieceAt(file, rankIndex)!) }}
                 </span>
                 <span
                   v-if="selectedTargets.has(squareOf(file, rankIndex)) && !pieceAt(file, rankIndex)"
@@ -329,14 +336,14 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
               <p>Promote to</p>
               <div class="promo-choices">
                 <button
-                  v-for="p in viewerColor === 'b' ? ['q', 'r', 'b', 'n'] : ['Q', 'R', 'B', 'N']"
+                  v-for="p in ['q', 'r', 'b', 'n']"
                   :key="p"
                   type="button"
                   class="promo-btn"
-                  :class="{ white: p === p.toUpperCase() }"
-                  @click="choosePromotion(p.toLowerCase())"
+                  :class="{ white: viewerColor !== 'b' }"
+                  @click="choosePromotion(p)"
                 >
-                  {{ PIECE_GLYPH[p] }}
+                  {{ pieceGlyph(viewerColor === 'b' ? p : p.toUpperCase()) }}
                 </button>
               </div>
               <button
@@ -655,8 +662,8 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 .piece {
   z-index: 1;
   user-select: none;
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35));
-  color: #151515;
+  color: #1a1410;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
   transition: transform 0.12s var(--ease-smooth);
 }
 
@@ -665,9 +672,11 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 }
 
 .piece.white {
-  color: #faf6ef;
-  -webkit-text-stroke: 1.1px #1d1610;
-  paint-order: stroke fill;
+  color: #f4efe6;
+  filter:
+    drop-shadow(0 0 0.6px #1a1410)
+    drop-shadow(0 0 0.6px #1a1410)
+    drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
 }
 
 .target-dot {
@@ -749,13 +758,15 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   border: 1px solid var(--border);
   background: #b58863;
   cursor: pointer;
-  color: #151515;
+  color: #1a1410;
 }
 
 .promo-btn.white {
-  background: #e8d5b5;
-  color: #faf6ef;
-  -webkit-text-stroke: 1px #1d1610;
+  background: #c99a62;
+  color: #f4efe6;
+  filter:
+    drop-shadow(0 0 0.55px #1a1410)
+    drop-shadow(0 0 0.55px #1a1410);
 }
 
 .promo-cancel {
