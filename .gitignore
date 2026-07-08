@@ -12,5 +12,7 @@ build/
 .mypy_cache/
 node_modules/
 frontend/dist/
+frontend/public/tfjs/
+frontend/public/models/
 .DS_Store
 *.log

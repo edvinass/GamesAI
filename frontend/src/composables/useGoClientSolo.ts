@@ -1,6 +1,7 @@
 import { computed, onUnmounted, watch, type Ref } from 'vue'
 import type { GoGameState } from '@/types'
 import { chooseGoMoveAsync, cancelPendingGoAiRequests, terminateGoAiWorker } from '@/games/go/goAiClient'
+import { preloadKataGo } from '@/games/go/katago/katagoGoClient'
 import {
   aiDifficultyFromSettings,
   getAiPlayerId,
@@ -25,6 +26,14 @@ export function useGoClientSolo(
     return `${state.move_history.length}:${state.current_actor_id}`
   })
 
+  watch(
+    () => (goState.value && isGoClientSolo(goState.value) ? aiDifficultyFromSettings(goState.value.settings) : null),
+    (difficulty) => {
+      if (difficulty === 'hard') preloadKataGo().catch(() => {})
+    },
+    { immediate: true },
+  )
+
   watch(aiTurnKey, (turnKey) => {
     if (!turnKey || !playerId.value) return
 
@@ -43,7 +52,7 @@ export function useGoClientSolo(
 
     window.setTimeout(() => {
       if (generation !== requestGeneration) return
-      chooseGoMoveAsync(position, aiColor, difficulty)
+      chooseGoMoveAsync(position, aiColor, difficulty, state)
         .then((move) => {
           if (generation !== requestGeneration) return
           sendAction({ type: 'client_ai_move', move })

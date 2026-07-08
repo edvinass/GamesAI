@@ -1,9 +1,11 @@
+import type { GoGameState } from '@/types'
 import type { GoAiDifficulty } from './ai'
 import type { GoAiAction } from './ai'
 import type { GoPosition } from './board'
 import type { GoAiWorkerRequest, GoAiWorkerResponse } from './goAi.worker'
+import { chooseKataGoMove, terminateKataGoClient } from './katago/katagoGoClient'
 
-const AI_TIMEOUT_MS = 8000
+const HEURISTIC_TIMEOUT_MS = 12_000
 
 let worker: Worker | null = null
 let nextId = 0
@@ -49,7 +51,7 @@ function getWorker(): Worker {
   return worker
 }
 
-export function chooseGoMoveAsync(
+function chooseHeuristicMoveAsync(
   position: GoPosition,
   aiColor: 'B' | 'W',
   difficulty: GoAiDifficulty,
@@ -60,10 +62,25 @@ export function chooseGoMoveAsync(
     const timer = setTimeout(() => {
       pending.delete(id)
       reject(new Error('Go AI timed out'))
-    }, AI_TIMEOUT_MS)
+    }, HEURISTIC_TIMEOUT_MS)
     pending.set(id, { resolve, reject, timer })
     getWorker().postMessage(request)
   })
+}
+
+export function chooseGoMoveAsync(
+  position: GoPosition,
+  aiColor: 'B' | 'W',
+  difficulty: GoAiDifficulty,
+  gameState?: GoGameState,
+): Promise<GoAiAction> {
+  if (difficulty === 'hard' && gameState) {
+    return chooseKataGoMove(gameState, aiColor).catch((err) => {
+      console.warn('[go-ai] KataGo failed, using heuristic MCTS', err)
+      return chooseHeuristicMoveAsync(position, aiColor, 'hard')
+    })
+  }
+  return chooseHeuristicMoveAsync(position, aiColor, difficulty)
 }
 
 export function cancelPendingGoAiRequests(): void {
@@ -74,4 +91,5 @@ export function terminateGoAiWorker(): void {
   cancelPendingGoAiRequests()
   worker?.terminate()
   worker = null
+  terminateKataGoClient()
 }
