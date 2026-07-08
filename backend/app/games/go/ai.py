@@ -147,7 +147,7 @@ def _mcts_best_play(
 
         # Expansion
         if node.untried:
-            move = node.untried.pop(random.randint(0, len(node.untried)))
+            move = node.untried.pop(random.randrange(len(node.untried)))
             state = go.apply_play_raw(state, move["row"], move["col"])
             child = _MCTSNode(move, node, go.generate_legal_plays(state))
             node.children[move["coord"]] = child

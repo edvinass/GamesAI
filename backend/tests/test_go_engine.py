@@ -90,6 +90,22 @@ def test_ai_returns_legal_move():
         assert any(p["coord"] == action["coord"] for p in state["legal_plays"])
 
 
+def test_ai_mcts_does_not_crash():
+    from app.games.go.ai import _mcts_best_play
+
+    engine = GoEngine()
+    state = engine.create_initial_state(_players(), {"ai_difficulty": "medium"})
+    opening = ["e5", "d3", "f3", "d6", "c6", "f6"]
+    for i, coord in enumerate(opening):
+        pid = "p1" if i % 2 == 0 else "p2"
+        state, _ = engine.apply_action(state, {"type": "play", "coord": coord}, {"id": pid})
+
+    position = state["position"]
+    for _ in range(5):
+        play = _mcts_best_play(position, go.WHITE, 40)
+        assert play is None or "coord" in play
+
+
 def test_suicide_illegal():
     pos = go.create_position()
     # Single black stone with one liberty — playing inside own eye is suicide
