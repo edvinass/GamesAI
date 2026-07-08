@@ -183,7 +183,7 @@ def apply_play_raw(position: dict[str, Any], row: int, col: int) -> dict[str, An
                 # Potential ko: single stone captured, replanting may recreate ko
                 ko_point = next(iter(group))
 
-    new_pos["captured"][opponent_char] += captured_stones
+    new_pos["captured"][color_char] += captured_stones
     new_pos["ko_point"] = ko_point
     new_pos["consecutive_passes"] = 0
     new_pos["turn"] = opponent_char

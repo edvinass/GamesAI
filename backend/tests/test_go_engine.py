@@ -56,7 +56,7 @@ def test_capture():
     ]
     for pid, coord in plays:
         state, _ = engine.apply_action(state, {"type": "play", "coord": coord}, {"id": pid})
-    assert state["position"]["captured"]["W"] >= 1
+    assert state["position"]["captured"]["B"] >= 1
 
 
 def test_double_pass_scores_game():
