@@ -12,14 +12,14 @@ from app.games.go import board as go
 
 DIFFICULTY_BUDGET_SEC = {
     "easy": 0.0,
-    "medium": 2.0,
-    "hard": 4.0,
+    "medium": 4.0,
+    "hard": 8.0,
 }
 
 DIFFICULTY_MAX_SIMS = {
     "easy": 0,
-    "medium": 3200,
-    "hard": 5000,
+    "medium": 6400,
+    "hard": 10000,
 }
 
 OPENING_POINTS = {

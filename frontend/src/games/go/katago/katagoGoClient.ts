@@ -11,7 +11,7 @@ import {
 import { katagoPositionFromGameState } from './positionBridge'
 
 const INIT_TIMEOUT_MS = 90_000
-const ANALYZE_TIMEOUT_MS = 30_000
+const ANALYZE_TIMEOUT_MS = 45_000
 
 let initPromise: Promise<void> | null = null
 

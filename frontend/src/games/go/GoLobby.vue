@@ -39,8 +39,8 @@ const gameModes: { id: GameMode; label: string; description: string; glyph: stri
 
 const difficultyOptions = [
   { value: 'easy', label: 'Easy', detail: 'Heuristic', depth: 'Smart hints' },
-  { value: 'medium', label: 'Medium', detail: 'Guided MCTS', depth: '~2s think' },
-  { value: 'hard', label: 'Hard', detail: 'KataGo neural net', depth: '~4s think' },
+  { value: 'medium', label: 'Medium', detail: 'Guided MCTS', depth: '~4s think' },
+  { value: 'hard', label: 'Hard', detail: 'KataGo neural net', depth: '~8s think' },
 ] as const
 
 const gameMode = computed<GameMode>({

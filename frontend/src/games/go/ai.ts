@@ -22,15 +22,15 @@ export type GoAiDifficulty = 'easy' | 'medium' | 'hard'
 /** Wall-clock budget in the worker — keeps Hard responsive. */
 export const DIFFICULTY_BUDGET_MS: Record<GoAiDifficulty, number> = {
   easy: 0,
-  medium: 2000,
-  hard: 4000,
+  medium: 4000,
+  hard: 8000,
 }
 
 /** Safety cap so fast devices do not over-search. */
 export const DIFFICULTY_MAX_SIMS: Record<GoAiDifficulty, number> = {
   easy: 0,
-  medium: 3200,
-  hard: 5000,
+  medium: 6400,
+  hard: 10000,
 }
 
 const OPENING_POINTS = new Set(['2,2', '2,6', '6,2', '6,6', '4,4'])
