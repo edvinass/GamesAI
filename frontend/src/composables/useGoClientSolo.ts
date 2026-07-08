@@ -1,6 +1,6 @@
-import { ref, watch, type Ref } from 'vue'
+import { onUnmounted, ref, watch, type Ref } from 'vue'
 import type { GoGameState } from '@/types'
-import { chooseGoMove } from '@/games/go/ai'
+import { chooseGoMoveAsync, cancelPendingGoAiRequests, terminateGoAiWorker } from '@/games/go/goAiClient'
 import {
   aiDifficultyFromSettings,
   getAiPlayerId,
@@ -9,7 +9,7 @@ import {
   positionFromGameState,
 } from '@/games/go/stateBridge'
 
-const AI_THINK_MS = 650
+const AI_THINK_MS = 400
 
 export function useGoClientSolo(
   goState: Ref<GoGameState | null>,
@@ -17,6 +17,7 @@ export function useGoClientSolo(
   sendAction: (data: Record<string, unknown>) => void,
 ) {
   const aiPending = ref(false)
+  let requestGeneration = 0
 
   watch(
     goState,
@@ -29,6 +30,7 @@ export function useGoClientSolo(
       const aiId = getAiPlayerId(state)
       if (!aiId || humanId === aiId) return
 
+      const generation = ++requestGeneration
       aiPending.value = true
       const position = positionFromGameState(state)
       const aiPlayer = state.players.find((p) => p.id === aiId)
@@ -36,18 +38,30 @@ export function useGoClientSolo(
       const difficulty = aiDifficultyFromSettings(state.settings)
 
       window.setTimeout(() => {
-        try {
-          const move = chooseGoMove(position, aiColor, difficulty)
-          sendAction({ type: 'client_ai_move', move })
-        } finally {
-          window.setTimeout(() => {
-            aiPending.value = false
-          }, 200)
-        }
+        chooseGoMoveAsync(position, aiColor, difficulty)
+          .then((move) => {
+            if (generation !== requestGeneration) return
+            sendAction({ type: 'client_ai_move', move })
+          })
+          .catch(() => {
+            if (generation !== requestGeneration) return
+          })
+          .finally(() => {
+            if (generation !== requestGeneration) return
+            window.setTimeout(() => {
+              if (generation === requestGeneration) aiPending.value = false
+            }, 150)
+          })
       }, AI_THINK_MS)
     },
     { deep: true },
   )
+
+  onUnmounted(() => {
+    requestGeneration++
+    cancelPendingGoAiRequests()
+    terminateGoAiWorker()
+  })
 
   return { aiPending }
 }
