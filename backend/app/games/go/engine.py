@@ -17,6 +17,7 @@ class GoEngine(GamePlugin):
             "min_players": 2,
             "max_players": 2,
             "solo_practice": False,
+            "client_side_ai": False,
             "ai_difficulty": "medium",  # easy | medium | hard
             "board_size": 9,
             "komi": go.DEFAULT_KOMI,
@@ -28,6 +29,12 @@ class GoEngine(GamePlugin):
         merged["min_players"] = 2
         merged["max_players"] = 2
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
+        if merged["solo_practice"]:
+            merged["client_side_ai"] = bool(
+                (settings or {}).get("client_side_ai", True)
+            )
+        else:
+            merged["client_side_ai"] = False
         merged["board_size"] = 9
         difficulty = str(merged.get("ai_difficulty", "medium")).lower()
         if difficulty not in ("easy", "medium", "hard"):
@@ -126,6 +133,27 @@ class GoEngine(GamePlugin):
         action_type = action.get("type")
         events: list[dict] = []
         player_id = str(player["id"])
+
+        if action_type == "client_ai_move":
+            settings = state.get("settings") or {}
+            if not settings.get("solo_practice") or not settings.get("client_side_ai"):
+                raise ValueError("Client AI moves are only allowed in solo practice")
+            if player.get("is_ai"):
+                raise ValueError("AI players act automatically")
+            actor_id = str(state.get("current_actor_id") or "")
+            actor = state["players"].get(actor_id)
+            if not actor or not actor.get("is_ai"):
+                raise ValueError("Not AI turn")
+            move = action.get("move") or {}
+            move_type = move.get("type")
+            if move_type == "pass":
+                return self.apply_action(state, {"type": "pass"}, {"id": actor_id, **actor})
+            if move_type == "play":
+                coord = str(move.get("coord", "")).lower()
+                return self.apply_action(
+                    state, {"type": "play", "coord": coord}, {"id": actor_id, **actor}
+                )
+            raise ValueError("Invalid client AI move")
 
         if action_type == "resign":
             if state.get("winner") or state["phase"] != "playing":
@@ -255,6 +283,7 @@ class GoEngine(GamePlugin):
             "last_move": copy.deepcopy(state.get("last_move")),
             "consecutive_passes": state.get("consecutive_passes", 0),
             "captured": copy.deepcopy(state["position"].get("captured", {"B": 0, "W": 0})),
+            "ko_point": copy.deepcopy(state["position"].get("ko_point")),
             "winner": state.get("winner"),
             "winner_color": state.get("winner_color"),
             "win_reason": state.get("win_reason"),

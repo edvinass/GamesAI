@@ -1,4 +1,4 @@
-"""Go AI — heuristic move ordering with MCTS for medium/hard difficulties."""
+"""Go AI — heuristic-guided MCTS with policy playouts."""
 
 from __future__ import annotations
 
@@ -11,11 +11,10 @@ from app.games.go import board as go
 
 DIFFICULTY_SIMULATIONS = {
     "easy": 0,
-    "medium": 120,
-    "hard": 400,
+    "medium": 400,
+    "hard": 1500,
 }
 
-# 9×9 star points and center for opening bias
 OPENING_POINTS = {
     (2, 2),
     (2, 6),
@@ -30,56 +29,98 @@ def _color_int(game_state: dict[str, Any], player_id: str) -> int:
     return go.CHAR_COLOR[color_char]
 
 
+def _stone_count(position: dict[str, Any]) -> int:
+    return sum(1 for row in position["board"] for c in row if c != go.EMPTY)
+
+
 def _heuristic_score(position: dict[str, Any], row: int, col: int, color: int) -> float:
+    board = position["board"]
     score = 0.0
-    temp = copy.deepcopy(position["board"])
+    temp = copy.deepcopy(board)
     temp[row][col] = color
+
     for group in go._captures_if_played(temp, row, col, color):
-        score += len(group) * 12.0
+        score += len(group) * 20.0
 
     for nr, nc in go.neighbors(row, col):
-        stone = position["board"][nr][nc]
+        stone = board[nr][nc]
         if stone == color:
-            score += 3.0
+            score += 4.0
+            group = go.get_group(board, nr, nc)
+            if len(go.group_liberties(board, group)) == 1:
+                score += 8.0
         elif stone == go.OPPONENT[color]:
-            score += 1.5
+            score += 2.0
 
-    if (row, col) in OPENING_POINTS and sum(
-        1 for r in position["board"] for c in r if c != go.EMPTY
-    ) < 12:
-        score += 2.0
+    for nr, nc in go.neighbors(row, col):
+        if temp[nr][nc] != go.OPPONENT[color]:
+            continue
+        group = go.get_group(temp, nr, nc)
+        if len(go.group_liberties(temp, group)) == 1:
+            score += 7.0
 
-    # Prefer moves near center early
+    stones = _stone_count(position)
+    if (row, col) in OPENING_POINTS and stones < 14:
+        score += 4.0
     dist = abs(row - 4) + abs(col - 4)
-    if dist <= 2:
-        score += 1.0
+    if stones < 20 and dist <= 2:
+        score += 2.0
+    if stones < 16 and (row == 0 or row == 8 or col == 0 or col == 8):
+        score -= 2.0
 
     return score
 
 
 def _order_plays(position: dict[str, Any], color: int) -> list[dict[str, Any]]:
     plays = go.generate_legal_plays(position)
-    scored = [( _heuristic_score(position, p["row"], p["col"], color), p) for p in plays]
+    scored = [(_heuristic_score(position, p["row"], p["col"], color), p) for p in plays]
     scored.sort(key=lambda x: x[0], reverse=True)
     return [p for _, p in scored]
 
 
-def _random_playout(position: dict[str, Any], max_moves: int = 80) -> float:
-    """Return +1 if black wins, -1 if white wins, 0 for draw."""
+def _weighted_pick_play(
+    position: dict[str, Any], color: int, top_k: int = 8
+) -> dict[str, Any] | None:
+    ordered = _order_plays(position, color)
+    if not ordered:
+        return None
+    pool = ordered[: min(top_k, len(ordered))]
+    weights = [max(0.5, _heuristic_score(position, p["row"], p["col"], color)) for p in pool]
+    total = sum(weights)
+    roll = random.random() * total
+    for play, weight in zip(pool, weights):
+        roll -= weight
+        if roll <= 0:
+            return play
+    return pool[-1]
+
+
+def _policy_playout(position: dict[str, Any], max_moves: int = 100) -> float:
     state = copy.deepcopy(position)
     passes = 0
     for _ in range(max_moves):
         if go.game_over_by_passes(state):
             break
         legal = go.generate_legal_plays(state)
-        if not legal or random.random() < 0.08:
+        late_game = _stone_count(state) > 55
+
+        if not legal:
             state = go.apply_pass_raw(state)
             passes += 1
             if passes >= 2:
                 break
             continue
+
+        if late_game and passes == 0 and random.random() < 0.12:
+            state = go.apply_pass_raw(state)
+            passes += 1
+            continue
+
         passes = 0
-        play = random.choice(legal)
+        color = go.CHAR_COLOR[state["turn"]]
+        play = _weighted_pick_play(state, color, top_k=6)
+        if not play:
+            break
         state = go.apply_play_raw(state, play["row"], play["col"])
 
     if not go.game_over_by_passes(state):
@@ -130,7 +171,8 @@ def _mcts_best_play(
     if not root_plays:
         return None
 
-    root = _MCTSNode(None, None, list(root_plays))
+    ordered_root = _order_plays(position, ai_color)
+    root = _MCTSNode(None, None, list(ordered_root))
     root.visits = 1
 
     for _ in range(simulations):
@@ -138,34 +180,31 @@ def _mcts_best_play(
         state = copy.deepcopy(position)
         path: list[_MCTSNode] = [root]
 
-        # Selection
         while not node.untried and node.children:
-            node = max(node.children.values(), key=lambda n: n.uct_score(1.4))
+            node = max(node.children.values(), key=lambda n: n.uct_score(1.25))
             if node.move:
                 state = go.apply_play_raw(state, node.move["row"], node.move["col"])
             path.append(node)
 
-        # Expansion
         if node.untried:
-            move = node.untried.pop(random.randrange(len(node.untried)))
+            move = node.untried.pop(0)
             state = go.apply_play_raw(state, move["row"], move["col"])
-            child = _MCTSNode(move, node, go.generate_legal_plays(state))
+            next_color = go.CHAR_COLOR[state["turn"]]
+            child = _MCTSNode(move, node, _order_plays(state, next_color))
             node.children[move["coord"]] = child
             node = child
             path.append(node)
 
-        # Simulation
-        outcome = _random_playout(state)
+        outcome = _policy_playout(state)
         ai_sign = 1.0 if ai_color == go.BLACK else -1.0
         result = outcome * ai_sign
 
-        # Backpropagation
         for n in path:
             n.visits += 1
             n.value += result
 
     if not root.children:
-        return root_plays[0]
+        return ordered_root[0] if ordered_root else root_plays[0]
 
     best_child = max(root.children.values(), key=lambda n: n.visits)
     return best_child.move
@@ -180,16 +219,14 @@ def choose_go_move(game_state: dict[str, Any], player_id: str) -> dict[str, Any]
         difficulty = "medium"
 
     ai_color = _color_int(game_state, player_id)
-    color_char = go.COLOR_CHAR[ai_color]
 
-    # Easy: often random, sometimes heuristic
     if difficulty == "easy":
-        if random.random() < 0.5 and legal:
+        if random.random() < 0.35 and legal:
             play = random.choice(legal)
             return {"type": "play", "coord": play["coord"]}
         ordered = _order_plays(position, ai_color)
         if ordered:
-            top = ordered[: max(3, len(ordered) // 3)]
+            top = ordered[: max(3, len(ordered) // 4)]
             play = random.choice(top)
             return {"type": "play", "coord": play["coord"]}
         return {"type": "pass"}
@@ -199,5 +236,4 @@ def choose_go_move(game_state: dict[str, Any], player_id: str) -> dict[str, Any]
     if play:
         return {"type": "play", "coord": play["coord"]}
 
-    # Pass if no legal plays (shouldn't happen often)
     return {"type": "pass"}

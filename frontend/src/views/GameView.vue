@@ -13,6 +13,7 @@ import GravityMasterBoard from '@/games/gravity_master/GravityMasterBoard.vue'
 import PokerBoard from '@/games/poker/PokerBoard.vue'
 import ChessBoard from '@/games/chess/ChessBoard.vue'
 import GoBoard from '@/games/go/GoBoard.vue'
+import { useGoClientSolo } from '@/composables/useGoClientSolo'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
@@ -86,6 +87,8 @@ const goState = computed(() =>
   gameState.value && isGoState(gameState.value) ? gameState.value as GoGameState : null,
 )
 
+const playerId = computed(() => playerStore.playerId)
+
 const isPoker = computed(() => room.value?.game_type === 'poker')
 
 const isFullscreenGame = computed(() =>
@@ -141,6 +144,8 @@ function sendAction(data: Record<string, unknown>) {
     setTimeout(() => (toast.value = ''), 3000)
   }
 }
+
+useGoClientSolo(goState, playerId, sendAction)
 
 function sendReaction(emoji: string) {
   sendAction({ type: 'reaction', emoji })

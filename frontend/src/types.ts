@@ -383,6 +383,7 @@ export interface GoGameState {
   last_move: GoMove | null
   consecutive_passes: number
   captured: { B: number; W: number }
+  ko_point?: [number, number] | null
   winner: string | null
   winner_color: 'B' | 'W' | null
   win_reason: string | null

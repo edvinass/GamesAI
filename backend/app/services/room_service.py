@@ -1023,6 +1023,11 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                     elif room.game_type == "chess":
                         acted = await _process_chess_ai_turn(service, room_id, room, broadcast_fn)
                     elif room.game_type == "go":
+                        go_settings = (room.game_state.state or {}).get("settings") or {}
+                        if go_settings.get("solo_practice") and go_settings.get(
+                            "client_side_ai"
+                        ):
+                            return
                         acted = await _process_go_ai_turn(service, room_id, room, broadcast_fn)
                     else:
                         return

@@ -122,3 +122,19 @@ def test_score_empty_board():
     result = go.score_position(pos)
     assert result["black_score"] == 0
     assert result["white_score"] == go.DEFAULT_KOMI
+
+
+def test_client_ai_move_solo():
+    engine = GoEngine()
+    state = engine.create_initial_state(_players(), {"solo_practice": True})
+    assert state["settings"]["client_side_ai"] is True
+    state, _ = engine.apply_action(state, {"type": "play", "coord": "e5"}, {"id": "p1"})
+    assert state["current_actor_id"] == "p2"
+    state, events = engine.apply_action(
+        state,
+        {"type": "client_ai_move", "move": {"type": "play", "coord": "d3"}},
+        {"id": "p1"},
+    )
+    assert state["current_actor_id"] == "p1"
+    assert any(e["type"] == "play_made" for e in events)
+    assert state["board"][2][3] == "W"
