@@ -3,27 +3,45 @@ import type { GoAiAction } from './ai'
 import type { GoPosition } from './board'
 import type { GoAiWorkerRequest, GoAiWorkerResponse } from './goAi.worker'
 
+const AI_TIMEOUT_MS = 8000
+
 let worker: Worker | null = null
 let nextId = 0
 const pending = new Map<
   number,
-  { resolve: (move: GoAiAction) => void; reject: (err: Error) => void }
+  { resolve: (move: GoAiAction) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }
 >()
+
+function rejectAllPending(err: Error): void {
+  for (const [, entry] of pending) {
+    clearTimeout(entry.timer)
+    entry.reject(err)
+  }
+  pending.clear()
+}
 
 function getWorker(): Worker {
   if (!worker) {
     worker = new Worker(new URL('./goAi.worker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = (event: MessageEvent<GoAiWorkerResponse>) => {
-      const { id, move } = event.data
+      const { id, move, error } = event.data
       const entry = pending.get(id)
       if (!entry) return
+      clearTimeout(entry.timer)
       pending.delete(id)
+      if (error) {
+        entry.reject(new Error(error))
+        return
+      }
+      if (!move) {
+        entry.reject(new Error('Go AI returned no move'))
+        return
+      }
       entry.resolve(move)
     }
     worker.onerror = (event) => {
       const err = new Error(event.message || 'Go AI worker failed')
-      for (const [, entry] of pending) entry.reject(err)
-      pending.clear()
+      rejectAllPending(err)
       worker?.terminate()
       worker = null
     }
@@ -39,13 +57,17 @@ export function chooseGoMoveAsync(
   const id = ++nextId
   const request: GoAiWorkerRequest = { id, position, aiColor, difficulty }
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject })
+    const timer = setTimeout(() => {
+      pending.delete(id)
+      reject(new Error('Go AI timed out'))
+    }, AI_TIMEOUT_MS)
+    pending.set(id, { resolve, reject, timer })
     getWorker().postMessage(request)
   })
 }
 
 export function cancelPendingGoAiRequests(): void {
-  pending.clear()
+  rejectAllPending(new Error('Go AI request cancelled'))
 }
 
 export function terminateGoAiWorker(): void {

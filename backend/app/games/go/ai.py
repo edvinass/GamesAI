@@ -5,14 +5,21 @@ from __future__ import annotations
 import copy
 import math
 import random
+import time
 from typing import Any
 
 from app.games.go import board as go
 
-DIFFICULTY_SIMULATIONS = {
+DIFFICULTY_BUDGET_SEC = {
+    "easy": 0.0,
+    "medium": 0.28,
+    "hard": 0.7,
+}
+
+DIFFICULTY_MAX_SIMS = {
     "easy": 0,
-    "medium": 400,
-    "hard": 1500,
+    "medium": 450,
+    "hard": 850,
 }
 
 OPENING_POINTS = {
@@ -71,31 +78,49 @@ def _heuristic_score(position: dict[str, Any], row: int, col: int, color: int) -
     return score
 
 
-def _order_plays(position: dict[str, Any], color: int) -> list[dict[str, Any]]:
-    plays = go.generate_legal_plays(position)
-    scored = [(_heuristic_score(position, p["row"], p["col"], color), p) for p in plays]
+def _quick_heuristic(board: list[list[int]], row: int, col: int, color: int) -> float:
+    score = 0.0
+    for nr, nc in go.neighbors(row, col):
+        stone = board[nr][nc]
+        if stone == color:
+            score += 3.0
+        elif stone == go.OPPONENT[color]:
+            score += 1.5
+        else:
+            score += 0.4
+    dist = abs(row - 4) + abs(col - 4)
+    if dist <= 2:
+        score += 0.5
+    return score
+
+
+def _top_plays(position: dict[str, Any], color: int, limit: int) -> list[dict[str, Any]]:
+    legal = go.generate_legal_plays(position)
+    if len(legal) <= limit:
+        return legal
+    scored = [(_heuristic_score(position, p["row"], p["col"], color), p) for p in legal]
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [p for _, p in scored]
+    return [p for _, p in scored[:limit]]
 
 
-def _weighted_pick_play(
-    position: dict[str, Any], color: int, top_k: int = 8
-) -> dict[str, Any] | None:
-    ordered = _order_plays(position, color)
-    if not ordered:
+def _quick_pick_play(position: dict[str, Any], color: int) -> dict[str, Any] | None:
+    legal = go.generate_legal_plays(position)
+    if not legal:
         return None
-    pool = ordered[: min(top_k, len(ordered))]
-    weights = [max(0.5, _heuristic_score(position, p["row"], p["col"], color)) for p in pool]
-    total = sum(weights)
-    roll = random.random() * total
-    for play, weight in zip(pool, weights):
-        roll -= weight
-        if roll <= 0:
-            return play
-    return pool[-1]
+    board = position["board"]
+    best_score = float("-inf")
+    picks: list[dict[str, Any]] = []
+    for play in legal:
+        score = _quick_heuristic(board, play["row"], play["col"], color)
+        if score > best_score:
+            best_score = score
+            picks = [play]
+        elif score == best_score:
+            picks.append(play)
+    return random.choice(picks)
 
 
-def _policy_playout(position: dict[str, Any], max_moves: int = 100) -> float:
+def _policy_playout(position: dict[str, Any], max_moves: int = 55) -> float:
     state = copy.deepcopy(position)
     passes = 0
     for _ in range(max_moves):
@@ -111,14 +136,14 @@ def _policy_playout(position: dict[str, Any], max_moves: int = 100) -> float:
                 break
             continue
 
-        if late_game and passes == 0 and random.random() < 0.12:
+        if late_game and passes == 0 and random.random() < 0.1:
             state = go.apply_pass_raw(state)
             passes += 1
             continue
 
         passes = 0
         color = go.CHAR_COLOR[state["turn"]]
-        play = _weighted_pick_play(state, color, top_k=6)
+        play = _quick_pick_play(state, color)
         if not play:
             break
         state = go.apply_play_raw(state, play["row"], play["col"])
@@ -165,17 +190,20 @@ class _MCTSNode:
 def _mcts_best_play(
     position: dict[str, Any],
     ai_color: int,
-    simulations: int,
+    budget_sec: float,
+    max_sims: int,
 ) -> dict[str, Any] | None:
     root_plays = go.generate_legal_plays(position)
     if not root_plays:
         return None
 
-    ordered_root = _order_plays(position, ai_color)
+    ordered_root = _top_plays(position, ai_color, 22)
     root = _MCTSNode(None, None, list(ordered_root))
     root.visits = 1
+    deadline = time.monotonic() + budget_sec
+    sims = 0
 
-    for _ in range(simulations):
+    while sims < max_sims and time.monotonic() < deadline:
         node = root
         state = copy.deepcopy(position)
         path: list[_MCTSNode] = [root]
@@ -190,7 +218,7 @@ def _mcts_best_play(
             move = node.untried.pop(0)
             state = go.apply_play_raw(state, move["row"], move["col"])
             next_color = go.CHAR_COLOR[state["turn"]]
-            child = _MCTSNode(move, node, _order_plays(state, next_color))
+            child = _MCTSNode(move, node, _top_plays(state, next_color, 14))
             node.children[move["coord"]] = child
             node = child
             path.append(node)
@@ -202,6 +230,7 @@ def _mcts_best_play(
         for n in path:
             n.visits += 1
             n.value += result
+        sims += 1
 
     if not root.children:
         return ordered_root[0] if ordered_root else root_plays[0]
@@ -215,7 +244,7 @@ def choose_go_move(game_state: dict[str, Any], player_id: str) -> dict[str, Any]
     position = game_state["position"]
     legal = go.generate_legal_plays(position)
     difficulty = str(game_state.get("settings", {}).get("ai_difficulty", "medium")).lower()
-    if difficulty not in DIFFICULTY_SIMULATIONS:
+    if difficulty not in DIFFICULTY_BUDGET_SEC:
         difficulty = "medium"
 
     ai_color = _color_int(game_state, player_id)
@@ -224,15 +253,19 @@ def choose_go_move(game_state: dict[str, Any], player_id: str) -> dict[str, Any]
         if random.random() < 0.35 and legal:
             play = random.choice(legal)
             return {"type": "play", "coord": play["coord"]}
-        ordered = _order_plays(position, ai_color)
+        ordered = _top_plays(position, ai_color, 12)
         if ordered:
             top = ordered[: max(3, len(ordered) // 4)]
             play = random.choice(top)
             return {"type": "play", "coord": play["coord"]}
         return {"type": "pass"}
 
-    sims = DIFFICULTY_SIMULATIONS[difficulty]
-    play = _mcts_best_play(position, ai_color, sims)
+    play = _mcts_best_play(
+        position,
+        ai_color,
+        DIFFICULTY_BUDGET_SEC[difficulty],
+        DIFFICULTY_MAX_SIMS[difficulty],
+    )
     if play:
         return {"type": "play", "coord": play["coord"]}
 

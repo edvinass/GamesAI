@@ -39,8 +39,8 @@ const gameModes: { id: GameMode; label: string; description: string; glyph: stri
 
 const difficultyOptions = [
   { value: 'easy', label: 'Easy', detail: 'Heuristic', depth: 'Smart hints' },
-  { value: 'medium', label: 'Medium', detail: 'Guided MCTS', depth: '~400 sims' },
-  { value: 'hard', label: 'Hard', detail: 'Deep MCTS', depth: '~1500 sims' },
+  { value: 'medium', label: 'Medium', detail: 'Guided MCTS', depth: '~0.3s think' },
+  { value: 'hard', label: 'Hard', detail: 'Deep MCTS', depth: '~0.7s think' },
 ] as const
 
 const gameMode = computed<GameMode>({

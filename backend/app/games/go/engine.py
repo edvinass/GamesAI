@@ -30,9 +30,7 @@ class GoEngine(GamePlugin):
         merged["max_players"] = 2
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
         if merged["solo_practice"]:
-            merged["client_side_ai"] = bool(
-                (settings or {}).get("client_side_ai", True)
-            )
+            merged["client_side_ai"] = True
         else:
             merged["client_side_ai"] = False
         merged["board_size"] = 9

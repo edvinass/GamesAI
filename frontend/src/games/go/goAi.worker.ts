@@ -11,12 +11,21 @@ export interface GoAiWorkerRequest {
 
 export interface GoAiWorkerResponse {
   id: number
-  move: GoAiAction
+  move?: GoAiAction
+  error?: string
 }
 
 self.onmessage = (event: MessageEvent<GoAiWorkerRequest>) => {
   const { id, position, aiColor, difficulty } = event.data
-  const move = chooseGoMove(position, aiColor, difficulty)
-  const response: GoAiWorkerResponse = { id, move }
-  self.postMessage(response)
+  try {
+    const move = chooseGoMove(position, aiColor, difficulty)
+    const response: GoAiWorkerResponse = { id, move }
+    self.postMessage(response)
+  } catch (err) {
+    const response: GoAiWorkerResponse = {
+      id,
+      error: err instanceof Error ? err.message : 'Go AI worker failed',
+    }
+    self.postMessage(response)
+  }
 }

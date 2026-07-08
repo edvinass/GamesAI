@@ -14,46 +14,73 @@ import {
   capturesIfPlayed,
   gameOverByPasses,
   generateLegalPlays,
-  neighbors,
   scorePosition,
 } from './board'
 
 export type GoAiDifficulty = 'easy' | 'medium' | 'hard'
 
-/** Client-side solo can afford more sims than the old server budget. */
-export const DIFFICULTY_SIMULATIONS: Record<GoAiDifficulty, number> = {
+/** Wall-clock budget in the worker — keeps Hard responsive. */
+export const DIFFICULTY_BUDGET_MS: Record<GoAiDifficulty, number> = {
   easy: 0,
-  medium: 400,
-  hard: 1500,
+  medium: 280,
+  hard: 700,
+}
+
+/** Safety cap so fast devices do not over-search. */
+export const DIFFICULTY_MAX_SIMS: Record<GoAiDifficulty, number> = {
+  easy: 0,
+  medium: 450,
+  hard: 850,
 }
 
 const OPENING_POINTS = new Set(['2,2', '2,6', '6,2', '6,6', '4,4'])
+const NEIGHBOR_DELTAS: ReadonlyArray<readonly [number, number]> = [
+  [-1, 0],
+  [1, 0],
+  [0, -1],
+  [0, 1],
+]
+
+function cloneBoard(board: number[][]): number[][] {
+  const out = new Array<number[]>(9)
+  for (let r = 0; r < 9; r++) out[r] = board[r].slice()
+  return out
+}
 
 function clonePosition(position: GoPosition): GoPosition {
   return {
-    board: position.board.map((row) => [...row]),
+    board: cloneBoard(position.board),
     turn: position.turn,
-    ko_point: position.ko_point ? [...position.ko_point] as [number, number] : null,
+    ko_point: position.ko_point,
     consecutive_passes: position.consecutive_passes,
-    captured: { ...position.captured },
+    captured: { B: position.captured.B, W: position.captured.W },
   }
 }
 
-function stoneCount(position: GoPosition): number {
-  return position.board.reduce((n, row) => n + row.filter((c) => c !== EMPTY).length, 0)
+function countStones(board: number[][]): number {
+  let n = 0
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (board[r][c] !== EMPTY) n++
+    }
+  }
+  return n
 }
 
 function heuristicScore(position: GoPosition, row: number, col: number, color: number): number {
   const board = position.board
   let score = 0
-  const temp = board.map((r) => [...r])
+  const temp = cloneBoard(board)
   temp[row][col] = color
 
   for (const group of capturesIfPlayed(temp, row, col, color)) {
     score += group.size * 20
   }
 
-  for (const [nr, nc] of neighbors(row, col)) {
+  for (const [dr, dc] of NEIGHBOR_DELTAS) {
+    const nr = row + dr
+    const nc = col + dc
+    if (nr < 0 || nr > 8 || nc < 0 || nc > 8) continue
     const stone = board[nr][nc]
     if (stone === color) {
       score += 4
@@ -64,14 +91,16 @@ function heuristicScore(position: GoPosition, row: number, col: number, color: n
     }
   }
 
-  for (const [nr, nc] of neighbors(row, col)) {
+  for (const [dr, dc] of NEIGHBOR_DELTAS) {
+    const nr = row + dr
+    const nc = col + dc
+    if (nr < 0 || nr > 8 || nc < 0 || nc > 8) continue
     if (temp[nr][nc] !== OPPONENT[color]) continue
     const group = getGroup(temp, nr, nc)
-    const libs = groupLiberties(temp, group)
-    if (libs.size === 1) score += 7
+    if (groupLiberties(temp, group).size === 1) score += 7
   }
 
-  const stones = stoneCount(position)
+  const stones = countStones(board)
   if (OPENING_POINTS.has(`${row},${col}`) && stones < 14) score += 4
   const dist = Math.abs(row - 4) + Math.abs(col - 4)
   if (stones < 20 && dist <= 2) score += 2
@@ -80,44 +109,59 @@ function heuristicScore(position: GoPosition, row: number, col: number, color: n
   return score
 }
 
-function orderPlays(position: GoPosition, color: number): GoPlay[] {
-  const plays = generateLegalPlays(position)
-  return [...plays].sort(
-    (a, b) =>
-      heuristicScore(position, b.row, b.col, color) -
-      heuristicScore(position, a.row, a.col, color),
-  )
-}
-
-function weightedPickPlay(
-  position: GoPosition,
-  color: number,
-  topK = 8,
-): GoPlay | null {
-  const ordered = orderPlays(position, color)
-  if (ordered.length === 0) return null
-  const pool = ordered.slice(0, Math.min(topK, ordered.length))
-  const weights = pool.map((p) =>
-    Math.max(0.5, heuristicScore(position, p.row, p.col, color)),
-  )
-  const total = weights.reduce((sum, w) => sum + w, 0)
-  let roll = Math.random() * total
-  for (let i = 0; i < pool.length; i++) {
-    roll -= weights[i]
-    if (roll <= 0) return pool[i]
+function quickHeuristic(board: number[][], row: number, col: number, color: number): number {
+  let score = 0
+  for (const [dr, dc] of NEIGHBOR_DELTAS) {
+    const nr = row + dr
+    const nc = col + dc
+    if (nr < 0 || nr > 8 || nc < 0 || nc > 8) continue
+    const stone = board[nr][nc]
+    if (stone === color) score += 3
+    else if (stone === OPPONENT[color]) score += 1.5
+    else score += 0.4
   }
-  return pool[pool.length - 1]
+  const dist = Math.abs(row - 4) + Math.abs(col - 4)
+  if (dist <= 2) score += 0.5
+  return score
 }
 
-function policyPlayout(from: GoPosition, maxMoves = 100): number {
+function topPlays(position: GoPosition, color: number, limit: number): GoPlay[] {
+  const legal = generateLegalPlays(position)
+  if (legal.length <= limit) return legal
+  const scored = legal.map((p) => ({
+    p,
+    s: heuristicScore(position, p.row, p.col, color),
+  }))
+  scored.sort((a, b) => b.s - a.s)
+  return scored.slice(0, limit).map((x) => x.p)
+}
+
+function quickPickPlay(position: GoPosition, color: number): GoPlay | null {
+  const legal = generateLegalPlays(position)
+  if (legal.length === 0) return null
+  let bestScore = -Infinity
+  let picks: GoPlay[] = []
+  const board = position.board
+  for (const p of legal) {
+    const s = quickHeuristic(board, p.row, p.col, color)
+    if (s > bestScore) {
+      bestScore = s
+      picks = [p]
+    } else if (s === bestScore) {
+      picks.push(p)
+    }
+  }
+  return picks[Math.floor(Math.random() * picks.length)]
+}
+
+function policyPlayout(from: GoPosition, maxMoves = 55): number {
   let state = clonePosition(from)
   let passes = 0
-  const colorToMove = () => CHAR_COLOR[state.turn]
 
   for (let i = 0; i < maxMoves; i++) {
     if (gameOverByPasses(state)) break
     const legal = generateLegalPlays(state)
-    const lateGame = stoneCount(state) > 55
+    const lateGame = countStones(state.board) > 55
 
     if (legal.length === 0) {
       state = applyPassRaw(state)
@@ -126,14 +170,14 @@ function policyPlayout(from: GoPosition, maxMoves = 100): number {
       continue
     }
 
-    if (lateGame && passes === 0 && Math.random() < 0.12) {
+    if (lateGame && passes === 0 && Math.random() < 0.1) {
       state = applyPassRaw(state)
       passes++
       continue
     }
 
     passes = 0
-    const play = weightedPickPlay(state, colorToMove(), 6)
+    const play = quickPickPlay(state, CHAR_COLOR[state.turn])
     if (!play) break
     state = applyPlayRaw(state, play.row, play.col)
   }
@@ -170,29 +214,43 @@ class MCTSNode {
       exploration * Math.sqrt(Math.log(this.parent!.visits) / this.visits)
     )
   }
+
+  bestChild(): MCTSNode {
+    let best: MCTSNode | null = null
+    let bestScore = -Infinity
+    for (const child of this.children.values()) {
+      const score = child.uctScore(1.25)
+      if (score > bestScore) {
+        bestScore = score
+        best = child
+      }
+    }
+    return best!
+  }
 }
 
 function mctsBestPlay(
   position: GoPosition,
   aiColor: number,
-  simulations: number,
+  budgetMs: number,
+  maxSims: number,
 ): GoPlay | null {
   const rootPlays = generateLegalPlays(position)
   if (rootPlays.length === 0) return null
 
-  const orderedRoot = orderPlays(position, aiColor)
+  const orderedRoot = topPlays(position, aiColor, 22)
   const root = new MCTSNode(null, null, [...orderedRoot])
   root.visits = 1
+  const deadline = performance.now() + budgetMs
+  let sims = 0
 
-  for (let i = 0; i < simulations; i++) {
+  while (sims < maxSims && performance.now() < deadline) {
     let node = root
     let state = clonePosition(position)
     const path: MCTSNode[] = [root]
 
     while (node.untried.length === 0 && node.children.size > 0) {
-      node = [...node.children.values()].reduce((best, n) =>
-        n.uctScore(1.25) > best.uctScore(1.25) ? n : best,
-      )
+      node = node.bestChild()
       if (node.move) state = applyPlayRaw(state, node.move.row, node.move.col)
       path.push(node)
     }
@@ -201,7 +259,7 @@ function mctsBestPlay(
       const move = node.untried.shift()!
       state = applyPlayRaw(state, move.row, move.col)
       const nextColor = CHAR_COLOR[state.turn]
-      const child = new MCTSNode(move, node, orderPlays(state, nextColor))
+      const child = new MCTSNode(move, node, topPlays(state, nextColor, 14))
       node.children.set(move.coord, child)
       node = child
       path.push(node)
@@ -214,12 +272,15 @@ function mctsBestPlay(
       n.visits++
       n.value += result
     }
+    sims++
   }
 
   if (root.children.size === 0) return orderedRoot[0] ?? rootPlays[0]
-  return [...root.children.values()].reduce((best, n) =>
-    n.visits > best.visits ? n : best,
-  ).move
+  let best: MCTSNode | null = null
+  for (const child of root.children.values()) {
+    if (!best || child.visits > best.visits) best = child
+  }
+  return best!.move
 }
 
 export interface GoAiAction {
@@ -233,14 +294,14 @@ export function chooseGoMove(
   difficulty: GoAiDifficulty = 'medium',
 ): GoAiAction {
   const legal = generateLegalPlays(position)
-  const diff = difficulty in DIFFICULTY_SIMULATIONS ? difficulty : 'medium'
+  const diff = difficulty in DIFFICULTY_BUDGET_MS ? difficulty : 'medium'
   const colorInt = CHAR_COLOR[aiColor]
 
   if (diff === 'easy') {
     if (Math.random() < 0.35 && legal.length > 0) {
       return { type: 'play', coord: legal[Math.floor(Math.random() * legal.length)].coord }
     }
-    const ordered = orderPlays(position, colorInt)
+    const ordered = topPlays(position, colorInt, 12)
     if (ordered.length > 0) {
       const top = ordered.slice(0, Math.max(3, Math.floor(ordered.length / 4)))
       return { type: 'play', coord: top[Math.floor(Math.random() * top.length)].coord }
@@ -248,7 +309,12 @@ export function chooseGoMove(
     return { type: 'pass' }
   }
 
-  const play = mctsBestPlay(position, colorInt, DIFFICULTY_SIMULATIONS[diff])
+  const play = mctsBestPlay(
+    position,
+    colorInt,
+    DIFFICULTY_BUDGET_MS[diff],
+    DIFFICULTY_MAX_SIMS[diff],
+  )
   if (play) return { type: 'play', coord: play.coord }
   return { type: 'pass' }
 }

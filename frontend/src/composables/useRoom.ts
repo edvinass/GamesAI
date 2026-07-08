@@ -2,6 +2,25 @@ import { ref } from 'vue'
 import type { Room } from '@/types'
 
 const API = '/api'
+const REQUEST_TIMEOUT_MS = 20_000
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error('Request timed out — is the server running?')
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 export function useRoom() {
   const loading = ref(false)
@@ -11,7 +30,7 @@ export function useRoom() {
     loading.value = true
     error.value = null
     try {
-      const res = await fetch(`${API}/rooms`, {
+      const res = await fetchWithTimeout(`${API}/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ game_type: gameType, nickname }),
@@ -39,7 +58,7 @@ export function useRoom() {
     loading.value = true
     error.value = null
     try {
-      const res = await fetch(`${API}/rooms/${roomId}/join`, {
+      const res = await fetchWithTimeout(`${API}/rooms/${roomId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nickname }),
@@ -64,13 +83,13 @@ export function useRoom() {
   }
 
   async function fetchRoom(roomId: string): Promise<Room> {
-    const res = await fetch(`${API}/rooms/${roomId}`)
+    const res = await fetchWithTimeout(`${API}/rooms/${roomId}`)
     if (!res.ok) throw new Error('Room not found')
     return await res.json()
   }
 
   async function fetchGames() {
-    const res = await fetch(`${API}/rooms/games`)
+    const res = await fetchWithTimeout(`${API}/rooms/games`)
     if (!res.ok) {
       throw new Error(`Failed to load games (${res.status})`)
     }

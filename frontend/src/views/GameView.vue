@@ -95,6 +95,14 @@ const isFullscreenGame = computed(() =>
   Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value),
 )
 
+const loadingMessage = computed(() => {
+  if (!room.value) return 'Loading room...'
+  if (room.value.status === 'playing' && !gameState.value) {
+    return connected.value ? 'Waiting for game state...' : 'Connecting...'
+  }
+  return 'Loading game...'
+})
+
 onMounted(async () => {
   try {
     room.value = await fetchRoom(roomId.value)
@@ -129,7 +137,7 @@ watch(lastMessage, (msg) => {
       pokerReactions.value = pokerReactions.value.filter((entry) => entry.id !== reaction.id)
     }, 2400)
   }
-})
+}, { immediate: true })
 
 watch(error, (e) => {
   if (e) {
@@ -256,7 +264,7 @@ function backToLobby() {
 
     <div v-else class="container-wide loading">
       <div class="loading-spinner" />
-      <p>Loading game...</p>
+      <p>{{ loadingMessage }}</p>
     </div>
 
     <Transition name="toast">

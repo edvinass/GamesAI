@@ -102,7 +102,7 @@ def test_ai_mcts_does_not_crash():
 
     position = state["position"]
     for _ in range(5):
-        play = _mcts_best_play(position, go.WHITE, 40)
+        play = _mcts_best_play(position, go.WHITE, 0.05, 40)
         assert play is None or "coord" in play
 
 

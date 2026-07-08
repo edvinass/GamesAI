@@ -934,7 +934,7 @@ async def _process_chess_ai_turn(
         return False
 
     await asyncio.sleep(AI_CHESS_THINK_PAUSE_SEC)
-    action = choose_chess_move(state, str(actor_data["id"]))
+    action = await asyncio.to_thread(choose_chess_move, state, str(actor_data["id"]))
     try:
         room, state, events = await service.apply_game_action(
             room_id, actor.id, action, allow_ai=True
@@ -980,7 +980,7 @@ async def _process_go_ai_turn(
         return False
 
     await asyncio.sleep(AI_GO_THINK_PAUSE_SEC)
-    action = choose_go_move(state, str(actor_data["id"]))
+    action = await asyncio.to_thread(choose_go_move, state, str(actor_data["id"]))
     try:
         room, state, events = await service.apply_game_action(
             room_id, actor.id, action, allow_ai=True
@@ -1025,7 +1025,7 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                     elif room.game_type == "go":
                         go_settings = (room.game_state.state or {}).get("settings") or {}
                         if go_settings.get("solo_practice") and go_settings.get(
-                            "client_side_ai"
+                            "client_side_ai", True
                         ):
                             return
                         acted = await _process_go_ai_turn(service, room_id, room, broadcast_fn)
