@@ -1,4 +1,5 @@
 import type { GoGameState } from '@/types'
+import type { GoAiAction } from '../ai'
 import { DEFAULT_KOMI, FILES } from '../board'
 import type { BoardState, Move, Player } from './katagoTypes'
 
@@ -68,6 +69,17 @@ function boardAtHistoryIndex(moves: Move[], index: number): BoardState {
     board = applyMove(board, moves[i])
   }
   return board
+}
+
+export function legalizeMove(action: GoAiAction, state: GoGameState): GoAiAction {
+  const legal = state.legal_plays ?? []
+  if (legal.length === 0) return { type: 'pass' }
+  if (action.type === 'pass') return { type: 'pass' }
+  const coord = action.coord?.toLowerCase()
+  if (coord && legal.some((p) => p.coord === coord)) {
+    return { type: 'play', coord }
+  }
+  return { type: 'play', coord: legal[0].coord }
 }
 
 export function katagoPositionFromGameState(state: GoGameState, aiColor: 'B' | 'W') {

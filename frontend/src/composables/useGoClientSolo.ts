@@ -1,6 +1,7 @@
 import { computed, onUnmounted, watch, type Ref } from 'vue'
 import type { GoGameState } from '@/types'
 import { chooseGoMoveAsync, cancelPendingGoAiRequests, terminateGoAiWorker } from '@/games/go/goAiClient'
+import { legalizeMove } from '@/games/go/katago/positionBridge'
 import { preloadKataGo } from '@/games/go/katago/katagoGoClient'
 import {
   aiDifficultyFromSettings,
@@ -55,10 +56,12 @@ export function useGoClientSolo(
       chooseGoMoveAsync(position, aiColor, difficulty, state)
         .then((move) => {
           if (generation !== requestGeneration) return
-          sendAction({ type: 'client_ai_move', move })
+          const legal = legalizeMove(move, state)
+          sendAction({ type: 'client_ai_move', move: legal })
         })
-        .catch(() => {
+        .catch((err) => {
           if (generation !== requestGeneration) return
+          console.error('[go-ai] failed to produce AI move', err)
         })
     }, AI_THINK_MS)
   })

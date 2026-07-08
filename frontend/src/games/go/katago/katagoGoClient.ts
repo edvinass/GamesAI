@@ -8,12 +8,14 @@ import {
   KATAGO_HARD_MAX_TIME_MS,
   KATAGO_HARD_VISITS,
 } from './modelConfig'
-import { katagoPositionFromGameState } from './positionBridge'
+import { katagoPositionFromGameState, legalizeMove } from './positionBridge'
 
 const INIT_TIMEOUT_MS = 90_000
-const ANALYZE_TIMEOUT_MS = 45_000
+const ANALYZE_TIMEOUT_MS = KATAGO_HARD_MAX_TIME_MS + 20_000
 
 let initPromise: Promise<void> | null = null
+let katagoDisabled = false
+let consecutiveFailures = 0
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -24,7 +26,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   })
 }
 
+function resetKataGoWorker(): void {
+  try {
+    getKataGoEngineClient().abortAllPending()
+  } catch {
+    // Worker may not exist yet.
+  }
+  resetKataGoEngineClientForTests()
+  initPromise = null
+}
+
 function ensureKataGoReady(): Promise<void> {
+  if (katagoDisabled) {
+    return Promise.reject(new Error('KataGo disabled after repeated failures'))
+  }
   if (!initPromise) {
     const client = getKataGoEngineClient()
     initPromise = withTimeout(
@@ -45,41 +60,63 @@ function moveToAction(x: number, y: number): GoAiAction {
 }
 
 export async function chooseKataGoMove(state: GoGameState, aiColor: 'B' | 'W'): Promise<GoAiAction> {
+  if (katagoDisabled) {
+    throw new Error('KataGo disabled after repeated failures')
+  }
+
   await ensureKataGoReady()
   const client = getKataGoEngineClient()
   const position = katagoPositionFromGameState(state, aiColor)
+  const positionId = `go-${state.move_history.length}-${state.current_actor_id}`
 
-  const analysis = await withTimeout(
-    client.analyze({
-      modelUrl: KATAGO_9X9_MODEL_URL,
-      board: position.board,
-      previousBoard: position.previousBoard,
-      previousPreviousBoard: position.previousPreviousBoard,
-      currentPlayer: position.currentPlayer,
-      moveHistory: position.moveHistory,
-      komi: position.komi,
-      rules: position.rules,
-      maxTimeMs: KATAGO_HARD_MAX_TIME_MS,
-      visits: KATAGO_HARD_VISITS,
-      topK: 1,
-      conservativePass: true,
-    }),
-    ANALYZE_TIMEOUT_MS,
-    'KataGo analysis',
-  )
+  try {
+    const analysis = await withTimeout(
+      client.analyze({
+        analysisGroup: 'interactive',
+        positionId,
+        modelUrl: KATAGO_9X9_MODEL_URL,
+        board: position.board,
+        previousBoard: position.previousBoard,
+        previousPreviousBoard: position.previousPreviousBoard,
+        currentPlayer: position.currentPlayer,
+        moveHistory: position.moveHistory,
+        komi: position.komi,
+        rules: position.rules,
+        maxTimeMs: KATAGO_HARD_MAX_TIME_MS,
+        visits: KATAGO_HARD_VISITS,
+        topK: 5,
+        conservativePass: true,
+        reuseTree: false,
+        nnRandomize: false,
+      }),
+      ANALYZE_TIMEOUT_MS,
+      'KataGo analysis',
+    )
 
-  const best = analysis.moves.find((m) => m.order === 0) ?? analysis.moves[0]
-  if (!best) return { type: 'pass' }
-  return moveToAction(best.x, best.y)
+    consecutiveFailures = 0
+    const best = analysis.moves.find((m) => m.order === 0) ?? analysis.moves[0]
+    if (!best) return legalizeMove({ type: 'pass' }, state)
+    return legalizeMove(moveToAction(best.x, best.y), state)
+  } catch (err) {
+    consecutiveFailures++
+    console.warn('[go-ai] KataGo move failed', err)
+    resetKataGoWorker()
+    if (consecutiveFailures >= 2) {
+      katagoDisabled = true
+      console.warn('[go-ai] KataGo disabled for this session; using heuristic MCTS')
+    }
+    throw err
+  }
 }
 
 export function cancelKataGoRequests(): void {
-  // Worker queue drains between requests; next analyze replaces in-flight work.
+  resetKataGoWorker()
 }
 
 export function terminateKataGoClient(): void {
-  initPromise = null
-  resetKataGoEngineClientForTests()
+  katagoDisabled = false
+  consecutiveFailures = 0
+  resetKataGoWorker()
 }
 
 export function getKataGoModelLabel(): string {

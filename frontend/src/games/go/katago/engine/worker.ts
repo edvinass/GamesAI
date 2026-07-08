@@ -881,8 +881,21 @@ self.onmessage = (ev: MessageEvent<KataGoWorkerRequest>) => {
     if (analysisGroup === 'interactive') interactiveToken++;
     analyzeMeta.set(msg, { analysisGroup, interactiveToken });
   }
+  const run = () => {
+    if (msg.type !== 'katago:analyze') return handleMessage(msg);
+    const budget = Math.max(
+      25,
+      Math.min(msg.maxTimeMs ?? 800, ENGINE_MAX_TIME_MS),
+    ) + 12_000;
+    return Promise.race([
+      handleMessage(msg),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('KataGo analyze watchdog timeout')), budget);
+      }),
+    ]);
+  };
   queue = queue
-    .then(() => handleMessage(msg))
+    .then(run)
     .catch((err: unknown) => {
       if (msg.type === 'katago:init') {
         post({

@@ -5,7 +5,7 @@ import type { GoPosition } from './board'
 import type { GoAiWorkerRequest, GoAiWorkerResponse } from './goAi.worker'
 import { chooseKataGoMove, terminateKataGoClient } from './katago/katagoGoClient'
 
-const HEURISTIC_TIMEOUT_MS = 12_000
+const HEURISTIC_TIMEOUT_MS = 20_000
 
 let worker: Worker | null = null
 let nextId = 0

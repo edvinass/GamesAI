@@ -104,7 +104,27 @@ class KataGoEngineClient {
   }
 
   dispose(): void {
+    this.abortAllPending();
     this.worker.terminate();
+  }
+
+  abortAllPending(): void {
+    for (const [, entry] of this.pending) {
+      entry.reject(new KataGoCanceledError('Analysis aborted'));
+    }
+    this.pending.clear();
+    for (const [, entry] of this.pendingEval) {
+      entry.reject(new Error('Eval aborted'));
+    }
+    this.pendingEval.clear();
+    for (const [, entry] of this.pendingEvalBatch) {
+      entry.reject(new Error('Eval batch aborted'));
+    }
+    this.pendingEvalBatch.clear();
+    if (this.pendingInit) {
+      this.pendingInit.reject(new Error('Init aborted'));
+      this.pendingInit = null;
+    }
   }
 
   private postToWorker(message: KataGoWorkerRequest): void {
@@ -328,6 +348,7 @@ export function getKataGoEngineClient(): KataGoEngineClient {
 }
 
 export function resetKataGoEngineClientForTests(): void {
+  singleton?.abortAllPending();
   singleton?.dispose();
   singleton = null;
 }
