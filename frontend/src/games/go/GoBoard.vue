@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { GoGameState, Room } from '@/types'
 
 const props = defineProps<{
@@ -56,12 +56,14 @@ const boardPoints = computed(() => {
   return points
 })
 
-const legalCoords = computed(() => new Set(props.gameState.legal_plays.map((p) => p.coord)))
+const legalCoords = computed(
+  () => new Set(props.gameState.legal_plays.map((p) => p.coord.toLowerCase())),
+)
 
 const lastPlayCoord = computed(() => {
   const move = props.gameState.last_move
-  if (!move || move.type !== 'play') return null
-  return move.coord
+  if (!move || move.type !== 'play' || !move.coord) return null
+  return move.coord.toLowerCase()
 })
 
 const captured = computed(() => props.gameState.captured ?? { B: 0, W: 0 })
@@ -106,8 +108,8 @@ function coordOf(row: number, col: number): string {
 function intersectionPos(row: number, col: number): { left: string; top: string } {
   const visRow = flipBoard.value ? SIZE - 1 - row : row
   const visCol = flipBoard.value ? SIZE - 1 - col : col
-  const pct = (index: number) => `${(index / (SIZE - 1)) * 100}%`
-  return { left: pct(visCol), top: pct(visRow) }
+  const pos = (index: number) => `calc(var(--grid-inset) + ${index} * var(--step))`
+  return { left: pos(visCol), top: pos(visRow) }
 }
 
 function linePos(index: number): string {
@@ -118,9 +120,8 @@ function isStarPoint(row: number, col: number): boolean {
   return STAR_POINTS.some(([r, c]) => r === row && c === col)
 }
 
-function onIntersectionClick(row: number, col: number) {
+function onPlayClick(coord: string) {
   if (!isMyTurn.value) return
-  const coord = coordOf(row, col)
   if (!legalCoords.value.has(coord)) return
   emit('action', { type: 'play', coord })
 }
@@ -158,6 +159,50 @@ const historyRows = computed(() => {
   }
   return rows
 })
+
+const latestHistoryRow = computed(() =>
+  historyRows.value.length ? historyRows.value[historyRows.value.length - 1].n : null,
+)
+
+const animatingPlaced = ref<string | null>(null)
+const fadingStones = ref<Map<string, 'B' | 'W'>>(new Map())
+
+watch(lastPlayCoord, (coord) => {
+  if (!coord) return
+  animatingPlaced.value = coord
+  window.setTimeout(() => {
+    if (animatingPlaced.value === coord) animatingPlaced.value = null
+  }, 450)
+})
+
+watch(
+  () => props.gameState.board,
+  (newBoard, oldBoard) => {
+    if (!oldBoard) return
+    const fading = new Map<string, 'B' | 'W'>()
+    for (let row = 0; row < SIZE; row++) {
+      for (let col = 0; col < SIZE; col++) {
+        const prev = oldBoard[row]?.[col]
+        const next = newBoard[row]?.[col]
+        if (prev && !next && (prev === 'B' || prev === 'W')) {
+          fading.set(coordOf(row, col), prev)
+        }
+      }
+    }
+    if (fading.size === 0) return
+    fadingStones.value = fading
+    window.setTimeout(() => {
+      fadingStones.value = new Map()
+    }, 380)
+  },
+  { deep: true },
+)
+
+function isAiThinking(color: 'B' | 'W' | undefined): boolean {
+  if (!color || props.gameState.phase !== 'playing') return false
+  const player = props.gameState.players.find((p) => p.color === color)
+  return Boolean(player?.is_ai && props.gameState.current_color === color)
+}
 </script>
 
 <template>
@@ -169,6 +214,7 @@ const historyRows = computed(() => {
           :class="{
             active: isPlayerToMove(topPlayer?.color),
             ai: topPlayer?.is_ai,
+            thinking: isAiThinking(topPlayer?.color),
           }"
         >
           <span class="stone-badge" :class="topPlayer?.color === 'B' ? 'stone-b' : 'stone-w'" aria-hidden="true" />
@@ -189,55 +235,68 @@ const historyRows = computed(() => {
         </div>
 
         <div class="board-stage">
-          <div class="board-frame" :class="{ disabled: !isMyTurn }">
+          <div class="board-frame" :class="{ disabled: !isMyTurn && gameState.phase === 'playing' }">
             <div class="coord-left" aria-hidden="true">
               <span v-for="row in ranks" :key="`r-${row}`" class="coord-label">{{ row + 1 }}</span>
             </div>
 
             <div class="grid-area">
+              <div class="grid-surface" aria-hidden="true" />
               <div class="grid-lines" aria-hidden="true">
                 <div
                   v-for="i in gridLines"
                   :key="`h-${i}`"
                   class="hline"
+                  :class="{ edge: i === 0 || i === SIZE - 1 }"
                   :style="{ top: linePos(i) }"
                 />
                 <div
                   v-for="i in gridLines"
                   :key="`v-${i}`"
                   class="vline"
+                  :class="{ edge: i === 0 || i === SIZE - 1 }"
                   :style="{ left: linePos(i) }"
                 />
               </div>
 
-              <button
-                v-for="pt in boardPoints"
-                :key="pt.coord"
-                type="button"
-                class="intersection"
-                :class="{
-                  legal: isMyTurn && legalCoords.has(pt.coord),
-                  last: lastPlayCoord === pt.coord,
-                }"
-                :style="intersectionPos(pt.row, pt.col)"
-                :aria-label="`Play ${pt.coord}`"
-                @click="onIntersectionClick(pt.row, pt.col)"
-              >
-                <span
-                  v-if="stoneAt(pt.row, pt.col)"
-                  class="stone"
-                  :class="stoneAt(pt.row, pt.col) === 'B' ? 'stone-b' : 'stone-w'"
-                />
-                <span
-                  v-else-if="isStarPoint(pt.row, pt.col)"
-                  class="star-dot"
-                />
-                <span
-                  v-else-if="isMyTurn && legalCoords.has(pt.coord)"
-                  class="hint-dot"
-                />
-                <span v-if="lastPlayCoord === pt.coord" class="last-marker" aria-hidden="true" />
-              </button>
+              <div class="board-layer visuals-layer" aria-hidden="true">
+                <div
+                  v-for="pt in boardPoints"
+                  :key="`v-${pt.coord}`"
+                  class="board-node"
+                  :style="intersectionPos(pt.row, pt.col)"
+                >
+                  <span
+                    v-if="fadingStones.has(pt.coord)"
+                    class="stone fading"
+                    :class="fadingStones.get(pt.coord) === 'B' ? 'stone-b' : 'stone-w'"
+                  />
+                  <span
+                    v-if="stoneAt(pt.row, pt.col)"
+                    class="stone"
+                    :class="[
+                      stoneAt(pt.row, pt.col) === 'B' ? 'stone-b' : 'stone-w',
+                      { placed: animatingPlaced === pt.coord },
+                    ]"
+                  />
+                  <span v-else-if="isStarPoint(pt.row, pt.col)" class="star-dot" />
+                  <span v-if="lastPlayCoord === pt.coord" class="last-marker" />
+                </div>
+              </div>
+
+              <div v-if="isMyTurn" class="board-layer click-layer">
+                <button
+                  v-for="play in gameState.legal_plays"
+                  :key="play.coord"
+                  type="button"
+                  class="play-target"
+                  :style="intersectionPos(play.row, play.col)"
+                  :aria-label="`Play ${play.coord}`"
+                  @click="onPlayClick(play.coord.toLowerCase())"
+                >
+                  <span class="hint-dot" aria-hidden="true" />
+                </button>
+              </div>
             </div>
 
             <div class="coord-bottom" aria-hidden="true">
@@ -245,16 +304,18 @@ const historyRows = computed(() => {
             </div>
           </div>
 
-          <div v-if="gameState.phase === 'game_over'" class="game-over-overlay">
-            <div class="game-over-card">
-              <p class="game-over-title">{{ statusText }}</p>
-              <p v-if="gameState.score" class="game-over-score">
-                Black {{ gameState.score.black_score.toFixed(1) }} ·
-                White {{ gameState.score.white_score.toFixed(1) }}
-                <span class="komi">(komi {{ gameState.score.komi }})</span>
-              </p>
+          <Transition name="go-overlay">
+            <div v-if="gameState.phase === 'game_over'" class="game-over-overlay">
+              <div class="game-over-card">
+                <p class="game-over-title">{{ statusText }}</p>
+                <p v-if="gameState.score" class="game-over-score">
+                  Black {{ gameState.score.black_score.toFixed(1) }} ·
+                  White {{ gameState.score.white_score.toFixed(1) }}
+                  <span class="komi">(komi {{ gameState.score.komi }})</span>
+                </p>
+              </div>
             </div>
-          </div>
+          </Transition>
         </div>
 
         <div
@@ -263,6 +324,7 @@ const historyRows = computed(() => {
             active: isPlayerToMove(bottomPlayer?.color),
             ai: bottomPlayer?.is_ai,
             me: bottomPlayer?.id === playerId,
+            thinking: isAiThinking(bottomPlayer?.color),
           }"
         >
           <span class="stone-badge" :class="bottomPlayer?.color === 'B' ? 'stone-b' : 'stone-w'" aria-hidden="true" />
@@ -298,7 +360,12 @@ const historyRows = computed(() => {
             <span class="move-count">{{ gameState.move_history.length }}</span>
           </div>
           <div v-if="historyRows.length" class="move-table">
-            <div v-for="row in historyRows" :key="row.n" class="move-row">
+            <div
+              v-for="row in historyRows"
+              :key="row.n"
+              class="move-row"
+              :class="{ latest: row.n === latestHistoryRow }"
+            >
               <span class="move-n">{{ row.n }}.</span>
               <span class="move-coord">{{ row.black }}</span>
               <span class="move-coord">{{ row.white }}</span>
@@ -315,8 +382,11 @@ const historyRows = computed(() => {
 .go-board {
   --wood: #c4a574;
   --wood-light: #d4b896;
+  --wood-dark: #a08050;
   --wood-frame: #5c3d28;
-  --grid: rgba(0, 0, 0, 0.68);
+  --wood-grain: rgba(92, 61, 40, 0.06);
+  --grid: rgba(0, 0, 0, 0.72);
+  --grid-edge: rgba(0, 0, 0, 0.88);
   flex: 1;
   min-height: 0;
   width: 100%;
@@ -354,6 +424,10 @@ const historyRows = computed(() => {
   border: 1px solid var(--border);
   background: rgba(21, 28, 44, 0.72);
   flex-shrink: 0;
+  transition:
+    border-color 0.25s var(--ease-smooth),
+    box-shadow 0.25s var(--ease-smooth),
+    background 0.25s var(--ease-smooth);
 }
 
 .player-bar.active {
@@ -361,20 +435,40 @@ const historyRows = computed(() => {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+.player-bar.me {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.player-bar.thinking {
+  animation: aiThinking 1.8s ease-in-out infinite;
+}
+
+@keyframes aiThinking {
+  0%, 100% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, #c9a0ff 20%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, #c9a0ff 35%, transparent),
+      0 0 16px color-mix(in srgb, #c9a0ff 15%, transparent);
+  }
+}
+
 .stone-badge {
   width: 22px;
   height: 22px;
   border-radius: 50%;
   flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .stone-badge.stone-b {
-  background: radial-gradient(circle at 35% 35%, #444, #111);
+  background: radial-gradient(circle at 34% 30%, #4a4a4a, #0d0d0d);
 }
 
 .stone-badge.stone-w {
-  background: radial-gradient(circle at 35% 35%, #fff, #ddd);
-  border: 1px solid #aaa;
+  background: radial-gradient(circle at 34% 30%, #fff, #d8d8d0);
+  border: 1px solid rgba(0, 0, 0, 0.18);
 }
 
 .player-name {
@@ -432,13 +526,52 @@ const historyRows = computed(() => {
   grid-template-columns: 1.85rem 1fr;
   grid-template-rows: 1fr 1.85rem;
   gap: 0.25rem 0.4rem;
-  padding: 0.65rem;
-  background: linear-gradient(160deg, var(--wood-light) 0%, var(--wood) 45%, #a08050 100%);
+  padding: 0.8rem;
+  background:
+    linear-gradient(160deg, var(--wood-light) 0%, var(--wood) 45%, var(--wood-dark) 100%);
   border: 3px solid var(--wood-frame);
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow:
     0 16px 48px rgba(0, 0, 0, 0.45),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 2px 8px rgba(255, 255, 255, 0.06);
+  animation: boardEnter 0.5s var(--ease-smooth);
+  position: relative;
+  overflow: visible;
+}
+
+.board-frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      92deg,
+      transparent 0,
+      transparent 18px,
+      var(--wood-grain) 18px,
+      var(--wood-grain) 19px
+    ),
+    repeating-linear-gradient(
+      8deg,
+      transparent 0,
+      transparent 42px,
+      rgba(255, 255, 255, 0.03) 42px,
+      rgba(255, 255, 255, 0.03) 43px
+    );
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes boardEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @supports not (width: 1cqw) {
@@ -451,7 +584,11 @@ const historyRows = computed(() => {
 }
 
 .board-frame.disabled {
-  opacity: 0.94;
+  opacity: 0.96;
+}
+
+.board-frame.disabled .play-target {
+  cursor: default;
 }
 
 .coord-left {
@@ -462,6 +599,7 @@ const historyRows = computed(() => {
   justify-content: space-between;
   align-items: center;
   padding: 0;
+  z-index: 1;
 }
 
 .coord-bottom {
@@ -471,14 +609,17 @@ const historyRows = computed(() => {
   justify-content: space-between;
   align-items: center;
   padding: 0 0.05rem;
+  z-index: 1;
 }
 
 .coord-label {
   font-size: 1rem;
   font-weight: 700;
-  color: rgba(0, 0, 0, 0.62);
+  color: rgba(0, 0, 0, 0.55);
   line-height: 1;
   user-select: none;
+  font-family: 'Outfit', 'DM Sans', system-ui, sans-serif;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 .grid-area {
@@ -487,15 +628,79 @@ const historyRows = computed(() => {
   position: relative;
   min-width: 0;
   min-height: 0;
-  /* One grid step = distance between adjacent intersections */
-  --step: calc(100% / 8);
-  --hit-size: calc(var(--step) * 1.1);
-  --stone-size: calc(var(--step) * 3);
+  z-index: 1;
+  overflow: visible;
+  --cell: calc(100% / 8);
+  --grid-inset: calc(var(--cell) * 0.24);
+  --step: calc((100% - 2 * var(--grid-inset)) / 8);
+  --stone-size: calc(var(--step) * 0.658);
+  --hit-size: calc(var(--step) * 1.05);
+}
+
+.visuals-layer {
+  z-index: 2;
+}
+
+.board-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.click-layer {
+  z-index: 4;
+  pointer-events: none;
+}
+
+.board-node {
+  position: absolute;
+  width: var(--stone-size);
+  height: var(--stone-size);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.play-target {
+  position: absolute;
+  width: var(--hit-size);
+  height: var(--hit-size);
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  border-radius: 50%;
+  z-index: 1;
+}
+
+.play-target:active {
+  transform: translate(-50%, -50%) scale(0.98);
+}
+
+.play-target:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.play-target:hover .hint-dot {
+  background: color-mix(in srgb, var(--accent) 75%, #333);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.grid-surface {
+  position: absolute;
+  inset: var(--grid-inset);
+  border-radius: 3px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.04) 0%, transparent 50%, rgba(0, 0, 0, 0.04) 100%);
+  box-shadow:
+    inset 0 1px 4px rgba(0, 0, 0, 0.12),
+    inset 0 -1px 2px rgba(255, 255, 255, 0.08);
+  pointer-events: none;
 }
 
 .grid-lines {
   position: absolute;
-  inset: 0;
+  inset: var(--grid-inset);
   pointer-events: none;
 }
 
@@ -520,88 +725,159 @@ const historyRows = computed(() => {
   transform: translateX(-50%);
 }
 
-.intersection {
-  position: absolute;
-  width: var(--hit-size);
-  height: var(--hit-size);
-  padding: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  transform: translate(-50%, -50%);
-  z-index: 2;
+.hline {
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-50%);
 }
 
-.intersection.legal:hover .hint-dot {
-  transform: translate(-50%, -50%) scale(1.2);
-  background: color-mix(in srgb, var(--accent) 75%, #333);
+.hline.edge {
+  height: 1.5px;
+  background: var(--grid-edge);
+}
+
+.vline {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.vline.edge {
+  width: 1.5px;
+  background: var(--grid-edge);
 }
 
 .stone {
   position: absolute;
-  width: var(--stone-size);
-  height: var(--stone-size);
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
   border-radius: 50%;
   pointer-events: none;
 }
 
+.stone.placed {
+  animation: stonePlace 0.38s var(--ease-bounce);
+}
+
+.stone.fading {
+  animation: stoneCapture 0.36s var(--ease-smooth) forwards;
+  z-index: 4;
+}
+
+@keyframes stonePlace {
+  0% {
+    transform: scale(0);
+    opacity: 0.6;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes stoneCapture {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+
 .stone.stone-b {
-  background: radial-gradient(circle at 34% 30%, #4a4a4a, #0d0d0d);
+  background: radial-gradient(circle at 34% 28%, #555 0%, #222 35%, #0a0a0a 100%);
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.35),
-    inset 0 -1px 2px rgba(0, 0, 0, 0.25);
+    0 2px 4px rgba(0, 0, 0, 0.4),
+    inset 0 2px 3px rgba(255, 255, 255, 0.08),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.35);
 }
 
 .stone.stone-w {
-  background: radial-gradient(circle at 34% 30%, #fff, #d8d8d0);
-  border: 1px solid rgba(0, 0, 0, 0.22);
+  background: radial-gradient(circle at 34% 28%, #fff 0%, #eee 40%, #ccc 100%);
+  border: 1px solid rgba(0, 0, 0, 0.2);
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.18),
-    inset 0 1px 1px rgba(255, 255, 255, 0.8);
+    0 2px 4px rgba(0, 0, 0, 0.22),
+    inset 0 2px 4px rgba(255, 255, 255, 0.95),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.08);
 }
 
 .star-dot {
   position: absolute;
-  width: calc(var(--step) * 0.1);
-  height: calc(var(--step) * 0.1);
-  min-width: 3px;
-  min-height: 3px;
+  width: calc(var(--step) * 0.14);
+  height: calc(var(--step) * 0.14);
+  min-width: 4px;
+  min-height: 4px;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
   background: var(--grid);
   pointer-events: none;
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.15);
 }
 
 .hint-dot {
   position: absolute;
-  width: calc(var(--stone-size) * 0.28);
-  height: calc(var(--stone-size) * 0.28);
+  width: calc(var(--stone-size) * 0.32);
+  height: calc(var(--stone-size) * 0.32);
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.32);
+  background: rgba(0, 0, 0, 0.28);
   pointer-events: none;
-  transition: transform 0.12s ease, background 0.12s ease;
+  transition: background 0.15s var(--ease-smooth), box-shadow 0.15s var(--ease-smooth);
+  animation: hintPulse 2s ease-in-out infinite;
+}
+
+@keyframes hintPulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
 }
 
 .last-marker {
   position: absolute;
-  width: calc(var(--stone-size) + 4px);
-  height: calc(var(--stone-size) + 4px);
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  inset: -3px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 190, 40, 0.85);
+  border: 2px solid rgba(255, 190, 40, 0.9);
   pointer-events: none;
-  z-index: 3;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 0 6px rgba(255, 190, 40, 0.35);
+  animation: lastMovePulse 2s ease-in-out infinite;
+}
+
+@keyframes lastMovePulse {
+  0%, 100% {
+    border-color: rgba(255, 190, 40, 0.75);
+    box-shadow: 0 0 4px rgba(255, 190, 40, 0.25);
+  }
+  50% {
+    border-color: rgba(255, 210, 80, 1);
+    box-shadow: 0 0 10px rgba(255, 190, 40, 0.45);
+  }
+}
+
+.go-overlay-enter-active {
+  transition: opacity 0.35s var(--ease-smooth);
+}
+
+.go-overlay-leave-active {
+  transition: opacity 0.25s var(--ease-smooth);
+}
+
+.go-overlay-enter-from,
+.go-overlay-leave-to {
+  opacity: 0;
+}
+
+.go-overlay-enter-active .game-over-card {
+  animation: celebrate 0.45s var(--ease-bounce);
 }
 
 .game-over-overlay {
@@ -609,8 +885,9 @@ const historyRows = computed(() => {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.35);
-  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(2px);
+  border-radius: 10px;
   z-index: 10;
 }
 
@@ -621,6 +898,7 @@ const historyRows = computed(() => {
   padding: 1.25rem 1.5rem;
   text-align: center;
   max-width: 90%;
+  box-shadow: var(--shadow);
 }
 
 .game-over-title {
@@ -658,10 +936,21 @@ const historyRows = computed(() => {
   font-size: 0.85rem;
   color: var(--text);
   flex-shrink: 0;
+  transition: border-color 0.25s var(--ease-smooth);
 }
 
 .status-chip.active {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.status-chip.active .status-dot {
+  background: var(--accent);
+  animation: statusPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { box-shadow: 0 0 0 4px transparent; }
 }
 
 .status-dot {
@@ -736,6 +1025,24 @@ const historyRows = computed(() => {
   font-size: 0.8rem;
   font-family: ui-monospace, monospace;
   color: var(--text);
+  border-radius: 6px;
+  transition: background 0.2s var(--ease-smooth);
+}
+
+.move-row.latest {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  animation: moveRowIn 0.3s var(--ease-smooth);
+}
+
+@keyframes moveRowIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .move-n {
@@ -784,7 +1091,7 @@ const historyRows = computed(() => {
   }
 
   .board-frame {
-    padding: 0.45rem;
+    padding: 0.55rem;
     grid-template-columns: 1.55rem 1fr;
     grid-template-rows: 1fr 1.55rem;
   }
