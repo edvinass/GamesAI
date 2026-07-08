@@ -48,6 +48,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '🃏',
     lobbyHint: 'Need 2–6 players. Share the link or add AI to fill seats.',
   },
+  chess: {
+    name: 'Chess',
+    description: 'Classic chess — play a friend or challenge the AI.',
+    emoji: '♟️',
+    lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
+  },
 }
 
 export interface GameListItem {

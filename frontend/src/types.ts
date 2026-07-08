@@ -302,7 +302,46 @@ export interface PokerGameState {
   raise_increment: number
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState
+export interface ChessPlayerState {
+  id: string
+  nickname: string
+  is_ai: boolean
+  color: 'w' | 'b'
+}
+
+export interface ChessMove {
+  from: string
+  to: string
+  promotion?: string | null
+  capture?: boolean
+  player_id?: string
+  uci?: string
+}
+
+export interface ChessGameState {
+  phase: 'playing' | 'game_over'
+  fen: string
+  board: Array<Array<string | null>>
+  players: ChessPlayerState[]
+  white_player_id: string
+  black_player_id: string
+  current_color: 'w' | 'b'
+  current_actor_id: string | null
+  in_check: boolean
+  legal_moves: Array<{ from: string; to: string; promotion?: string | null }>
+  move_history: ChessMove[]
+  last_move: ChessMove | null
+  winner: string | null
+  winner_color: 'w' | 'b' | null
+  win_reason: string | null
+  draw_offer_from?: string | null
+  settings: Record<string, unknown>
+  host_id: string | null
+  viewer_id: string | null
+  viewer_color: 'w' | 'b' | null
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -330,6 +369,10 @@ export function isGravityMasterState(state: GameState): state is GravityMasterGa
 
 export function isPokerState(state: GameState): state is PokerGameState {
   return 'seat_order' in state && 'community_cards' in state && 'pot_total' in state
+}
+
+export function isChessState(state: GameState): state is ChessGameState {
+  return 'fen' in state && 'legal_moves' in state && 'white_player_id' in state
 }
 
 export interface WsMessage {

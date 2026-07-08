@@ -11,12 +11,13 @@ import DuelBoard from '@/games/duel/DuelBoard.vue'
 import TetrisBoard from '@/games/tetris/TetrisBoard.vue'
 import GravityMasterBoard from '@/games/gravity_master/GravityMasterBoard.vue'
 import PokerBoard from '@/games/poker/PokerBoard.vue'
+import ChessBoard from '@/games/chess/ChessBoard.vue'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
 import { pokerReactionSet } from '@/games/poker/reactions'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState, isPokerState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +44,7 @@ const gameTitle = computed(() => {
   if (type === 'tetris') return 'Multiplier Tetris'
   if (type === 'gravity_master') return 'Gravity Master'
   if (type === 'poker') return 'Poker'
+  if (type === 'chess') return 'Chess'
   return type ?? 'Game'
 })
 
@@ -74,9 +76,15 @@ const pokerState = computed(() =>
   gameState.value && isPokerState(gameState.value) ? gameState.value as PokerGameState : null,
 )
 
+const chessState = computed(() =>
+  gameState.value && isChessState(gameState.value) ? gameState.value as ChessGameState : null,
+)
+
 const isPoker = computed(() => room.value?.game_type === 'poker')
 
-const isFullscreenGame = computed(() => Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value))
+const isFullscreenGame = computed(() =>
+  Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value),
+)
 
 onMounted(async () => {
   try {
@@ -217,6 +225,14 @@ function backToLobby() {
       :reactions="pokerReactions"
       @action="sendAction"
       @reaction="sendReaction"
+    />
+
+    <ChessBoard
+      v-else-if="chessState && room"
+      :game-state="chessState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
     />
 
     <div v-else class="container-wide loading">

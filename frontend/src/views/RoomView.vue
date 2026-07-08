@@ -14,6 +14,7 @@ import DuelLobby from '@/games/duel/DuelLobby.vue'
 import TetrisLobby from '@/games/tetris/TetrisLobby.vue'
 import GravityMasterLobby from '@/games/gravity_master/GravityMasterLobby.vue'
 import PokerLobby from '@/games/poker/PokerLobby.vue'
+import ChessLobby from '@/games/chess/ChessLobby.vue'
 import { validateLobby as validateCodenamesLobby, teamOperatives, teamSpymaster } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
@@ -21,6 +22,7 @@ import { validateLobby as validateDuelLobby } from '@/games/duel/lobbyValidation
 import { validateLobby as validateTetrisLobby } from '@/games/tetris/lobbyValidation'
 import { validateLobby as validateGravityMasterLobby } from '@/games/gravity_master/lobbyValidation'
 import { validateLobby as validatePokerLobby } from '@/games/poker/lobbyValidation'
+import { validateLobby as validateChessLobby } from '@/games/chess/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
@@ -81,6 +83,7 @@ const isDuel = computed(() => room.value?.game_type === 'duel')
 const isTetris = computed(() => room.value?.game_type === 'tetris')
 const isGravityMaster = computed(() => room.value?.game_type === 'gravity_master')
 const isPoker = computed(() => room.value?.game_type === 'poker')
+const isChess = computed(() => room.value?.game_type === 'chess')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
@@ -93,6 +96,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'tetris') return validateTetrisLobby(room.value)
   if (room.value.game_type === 'gravity_master') return validateGravityMasterLobby(room.value)
   if (room.value.game_type === 'poker') return validatePokerLobby(room.value)
+  if (room.value.game_type === 'chess') return validateChessLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
@@ -129,6 +133,11 @@ const smallBlind = computed({
 const bigBlind = computed({
   get: () => Number(room.value?.settings?.big_blind ?? 10),
   set: (val: number) => updateSettings({ big_blind: val }),
+})
+
+const aiDifficulty = computed({
+  get: () => String(room.value?.settings?.ai_difficulty ?? 'medium'),
+  set: (val: string) => updateSettings({ ai_difficulty: val }),
 })
 
 const soloAiDifficulties = computed({
@@ -335,6 +344,21 @@ async function copyUrl() {
         v-model:starting-chips="startingChips"
         v-model:small-blind="smallBlind"
         v-model:big-blind="bigBlind"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+      />
+
+      <ChessLobby
+        v-else-if="isChess"
+        v-model:solo-practice="soloPractice"
+        v-model:ai-difficulty="aiDifficulty"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"
