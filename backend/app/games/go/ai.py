@@ -12,8 +12,8 @@ from app.games.go import board as go
 
 DIFFICULTY_BUDGET_SEC = {
     "easy": 0.0,
-    "medium": 4.0,
-    "hard": 8.0,
+    "medium": 8.0,
+    "hard": 16.0,
 }
 
 DIFFICULTY_MAX_SIMS = {
