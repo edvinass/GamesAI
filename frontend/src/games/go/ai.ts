@@ -22,8 +22,8 @@ export type GoAiDifficulty = 'easy' | 'medium' | 'hard'
 /** Wall-clock budget in the worker — keeps Hard responsive. */
 export const DIFFICULTY_BUDGET_MS: Record<GoAiDifficulty, number> = {
   easy: 0,
-  medium: 4000,
-  hard: 8000,
+  medium: 8000,
+  hard: 16000,
 }
 
 /** Safety cap so fast devices do not over-search. */
