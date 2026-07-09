@@ -19,7 +19,7 @@ DIFFICULTY_BUDGET_SEC = {
 DIFFICULTY_MAX_SIMS = {
     "easy": 0,
     "medium": 6400,
-    "hard": 10000,
+    "hard": 25000,
 }
 
 OPENING_POINTS = {
@@ -197,7 +197,7 @@ def _mcts_best_play(
     if not root_plays:
         return None
 
-    ordered_root = _top_plays(position, ai_color, 22)
+    ordered_root = _top_plays(position, ai_color, 30)
     root = _MCTSNode(None, None, list(ordered_root))
     root.visits = 1
     deadline = time.monotonic() + budget_sec
@@ -218,7 +218,7 @@ def _mcts_best_play(
             move = node.untried.pop(0)
             state = go.apply_play_raw(state, move["row"], move["col"])
             next_color = go.CHAR_COLOR[state["turn"]]
-            child = _MCTSNode(move, node, _top_plays(state, next_color, 14))
+            child = _MCTSNode(move, node, _top_plays(state, next_color, 20))
             node.children[move["coord"]] = child
             node = child
             path.append(node)
