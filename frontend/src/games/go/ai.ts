@@ -30,7 +30,7 @@ export const DIFFICULTY_BUDGET_MS: Record<GoAiDifficulty, number> = {
 export const DIFFICULTY_MAX_SIMS: Record<GoAiDifficulty, number> = {
   easy: 0,
   medium: 6400,
-  hard: 25000,
+  hard: 18000,
 }
 
 const OPENING_POINTS = new Set(['2,2', '2,6', '6,2', '6,6', '4,4'])

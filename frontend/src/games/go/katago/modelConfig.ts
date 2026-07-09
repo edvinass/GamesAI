@@ -8,4 +8,4 @@ export const KATAGO_9X9_MODEL_NAME = 'kata9x9-b18c384nbt'
 
 /** MCTS search budget for Hard solo play. */
 export const KATAGO_HARD_MAX_TIME_MS = 16000
-export const KATAGO_HARD_VISITS = 2000
+export const KATAGO_HARD_VISITS = 1200

@@ -19,7 +19,7 @@ DIFFICULTY_BUDGET_SEC = {
 DIFFICULTY_MAX_SIMS = {
     "easy": 0,
     "medium": 6400,
-    "hard": 25000,
+    "hard": 18000,
 }
 
 OPENING_POINTS = {
