@@ -88,6 +88,8 @@ export async function chooseKataGoMove(state: GoGameState, aiColor: 'B' | 'W'): 
         conservativePass: true,
         reuseTree: false,
         nnRandomize: false,
+        wideRootNoise: 0,
+        maxChildren: 120,
       }),
       ANALYZE_TIMEOUT_MS,
       'KataGo analysis',

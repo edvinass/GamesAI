@@ -30,7 +30,7 @@ export const DIFFICULTY_BUDGET_MS: Record<GoAiDifficulty, number> = {
 export const DIFFICULTY_MAX_SIMS: Record<GoAiDifficulty, number> = {
   easy: 0,
   medium: 6400,
-  hard: 10000,
+  hard: 25000,
 }
 
 const OPENING_POINTS = new Set(['2,2', '2,6', '6,2', '6,6', '4,4'])
@@ -238,7 +238,7 @@ function mctsBestPlay(
   const rootPlays = generateLegalPlays(position)
   if (rootPlays.length === 0) return null
 
-  const orderedRoot = topPlays(position, aiColor, 22)
+  const orderedRoot = topPlays(position, aiColor, 30)
   const root = new MCTSNode(null, null, [...orderedRoot])
   root.visits = 1
   const deadline = performance.now() + budgetMs
@@ -259,7 +259,7 @@ function mctsBestPlay(
       const move = node.untried.shift()!
       state = applyPlayRaw(state, move.row, move.col)
       const nextColor = CHAR_COLOR[state.turn]
-      const child = new MCTSNode(move, node, topPlays(state, nextColor, 14))
+      const child = new MCTSNode(move, node, topPlays(state, nextColor, 20))
       node.children.set(move.coord, child)
       node = child
       path.push(node)
