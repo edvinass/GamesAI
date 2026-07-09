@@ -7,6 +7,7 @@ import {
   KATAGO_9X9_MODEL_URL,
   KATAGO_HARD_MAX_TIME_MS,
   KATAGO_HARD_VISITS,
+  KATAGO_HARD_MAX_CHILDREN,
 } from './modelConfig'
 import { katagoPositionFromGameState, legalizeMove } from './positionBridge'
 
@@ -89,7 +90,7 @@ export async function chooseKataGoMove(state: GoGameState, aiColor: 'B' | 'W'): 
         reuseTree: false,
         nnRandomize: false,
         wideRootNoise: 0,
-        maxChildren: 120,
+        maxChildren: KATAGO_HARD_MAX_CHILDREN,
       }),
       ANALYZE_TIMEOUT_MS,
       'KataGo analysis',

@@ -19,19 +19,34 @@ import {
 
 export type GoAiDifficulty = 'easy' | 'medium' | 'hard'
 
-/** Wall-clock budget in the worker — keeps Hard responsive. */
-export const DIFFICULTY_BUDGET_MS: Record<GoAiDifficulty, number> = {
-  easy: 0,
-  medium: 8000,
-  hard: 16000,
+/** Detect if running on a mobile device (phones/tablets with touch). */
+function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent || ''
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ||
+    (navigator.maxTouchPoints > 0 && /Mobile|Tablet/i.test(ua))
 }
 
-/** Safety cap so fast devices do not over-search. */
+/** Cache mobile detection result. */
+const IS_MOBILE = isMobileDevice()
+
+/** Wall-clock budget in the worker — reduced on mobile to avoid browser warnings. */
+export const DIFFICULTY_BUDGET_MS: Record<GoAiDifficulty, number> = {
+  easy: 0,
+  medium: IS_MOBILE ? 4000 : 8000,
+  hard: IS_MOBILE ? 6000 : 16000,
+}
+
+/** Safety cap so fast devices do not over-search. Reduced on mobile for stability. */
 export const DIFFICULTY_MAX_SIMS: Record<GoAiDifficulty, number> = {
   easy: 0,
-  medium: 6400,
-  hard: 25000,
+  medium: IS_MOBILE ? 3200 : 6400,
+  hard: IS_MOBILE ? 8000 : 25000,
 }
+
+/** Number of root/child candidates for MCTS exploration. */
+const MCTS_ROOT_CANDIDATES = IS_MOBILE ? 22 : 30
+const MCTS_CHILD_CANDIDATES = IS_MOBILE ? 14 : 20
 
 const OPENING_POINTS = new Set(['2,2', '2,6', '6,2', '6,6', '4,4'])
 const NEIGHBOR_DELTAS: ReadonlyArray<readonly [number, number]> = [
@@ -238,7 +253,7 @@ function mctsBestPlay(
   const rootPlays = generateLegalPlays(position)
   if (rootPlays.length === 0) return null
 
-  const orderedRoot = topPlays(position, aiColor, 30)
+  const orderedRoot = topPlays(position, aiColor, MCTS_ROOT_CANDIDATES)
   const root = new MCTSNode(null, null, [...orderedRoot])
   root.visits = 1
   const deadline = performance.now() + budgetMs
@@ -259,7 +274,7 @@ function mctsBestPlay(
       const move = node.untried.shift()!
       state = applyPlayRaw(state, move.row, move.col)
       const nextColor = CHAR_COLOR[state.turn]
-      const child = new MCTSNode(move, node, topPlays(state, nextColor, 20))
+      const child = new MCTSNode(move, node, topPlays(state, nextColor, MCTS_CHILD_CANDIDATES))
       node.children.set(move.coord, child)
       node = child
       path.push(node)
