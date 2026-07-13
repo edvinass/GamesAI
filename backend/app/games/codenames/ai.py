@@ -233,6 +233,17 @@ def _format_clue_history(state: dict, team: str, *, include_current: bool = True
     return "\n".join(lines) if lines else "None yet."
 
 
+def _guesses_made_this_turn(state: dict, team: str) -> int:
+    history = state.get("clue_history", {}).get(team, [])
+    if history and not history[-1].get("completed"):
+        return len(history[-1].get("guesses") or [])
+    return 0
+
+
+def _has_unresolved_prior_clues(state: dict, team: str) -> bool:
+    return _summarize_unresolved_clues(state, team) != "None — focus on the current clue."
+
+
 def _summarize_unresolved_clues(state: dict, team: str) -> str:
     """Clues whose full target count was not found before the turn ended."""
     history = state.get("clue_history", {}).get(team, [])
@@ -339,6 +350,8 @@ def _build_operative_prompt(state: dict, team: str, max_guesses: int) -> str:
     clue_number = clue.get("number", 0)
     team_remaining, opponent_remaining, strategy = _game_situation(state, team)
     guesses_remaining = state.get("guesses_remaining", max_guesses)
+    guesses_made = _guesses_made_this_turn(state, team)
+    has_unresolved = _has_unresolved_prior_clues(state, team)
 
     unrevealed = []
     revealed = []
@@ -356,11 +369,34 @@ def _build_operative_prompt(state: dict, team: str, max_guesses: int) -> str:
     opponent_history = _format_clue_history(state, opponent, include_current=False)
     unresolved = _summarize_unresolved_clues(state, team)
 
+    if clue_number > 0 and guesses_made >= clue_number:
+        if has_unresolved:
+            bonus_guidance = (
+                "Your next guess is the bonus guess — use it to target a word likely related "
+                "to UNRESOLVED PRIOR CLUES above, not the current clue."
+            )
+        else:
+            bonus_guidance = (
+                "Your next guess is the bonus guess — only take it if very confident "
+                "(confidence >= 0.75) about an extra current-clue word."
+            )
+    elif has_unresolved:
+        bonus_guidance = (
+            f"After up to {clue_number} guesses for the current clue, you get one bonus guess. "
+            "Save the bonus for a word likely related to UNRESOLVED PRIOR CLUES above."
+        )
+    else:
+        bonus_guidance = (
+            f"You get up to {clue_number} guesses for the current clue plus one optional bonus "
+            "guess only when very confident (confidence >= 0.75)."
+        )
+
     return f"""You are a {team.upper()} operative in Codenames.
 
 GAME STATE:
 - Your team: {team_remaining} words left | Opponent: {opponent_remaining} words left
 - Guesses remaining this turn: {guesses_remaining} (includes 1 bonus guess beyond clue number)
+- Guesses already made this turn: {guesses_made}
 - Strategy: {strategy}
 
 CURRENT CLUE: "{clue_word}" for {clue_number} word(s)
@@ -383,9 +419,9 @@ Revealed cards (do not guess these):
 Use prior clues together with the current clue — earlier spymaster hints often still apply to
 unrevealed words. Cross-reference revealed guess outcomes (team/opponent/neutral) from past turns.
 
-Pick up to {limit} unrevealed card indices related to "{clue_word}", ordered by confidence.
-Stop early if unsure — guessing an opponent, neutral, or assassin word ends your turn.
-You may guess at most {clue_number} cards unless very confident about a bonus guess (confidence >= 0.75).
+Pick up to {limit} unrevealed card indices ordered by confidence.
+Stop early on current-clue guesses if unsure — guessing an opponent, neutral, or assassin word ends your turn.
+{bonus_guidance}
 
 Respond ONLY with compact JSON (no extra keys):
 {{"guesses": [{{"index": 0, "confidence": 0.9}}, ...]}}
@@ -414,6 +450,9 @@ def _parse_operative_guesses(
     team_remaining, opponent_remaining, _ = _game_situation(state, team)
     threshold = 0.45 if team_remaining < opponent_remaining else 0.55
     bonus_threshold = 0.75
+    has_unresolved = _has_unresolved_prior_clues(state, team)
+    guesses_made = _guesses_made_this_turn(state, team)
+    regular_slots_left = max(0, clue_number - guesses_made)
 
     raw = data.get("guesses", [])
     parsed: list[tuple[int, float]] = []
@@ -441,17 +480,34 @@ def _parse_operative_guesses(
             unique.append((idx, conf))
 
     result: list[int] = []
-    for i, (idx, conf) in enumerate(unique[:limit]):
-        if i < clue_number:
-            if conf >= threshold:
-                result.append(idx)
-            else:
-                break
-        elif conf >= bonus_threshold:
+    regular_filled = 0
+    for idx, conf in unique:
+        if regular_filled >= regular_slots_left or len(result) >= limit:
+            break
+        if conf >= threshold:
             result.append(idx)
+            regular_filled += 1
         else:
             break
-    return result
+
+    bonus_available = (
+        clue_number > 0
+        and guesses_made + len(result) < clue_number + 1
+        and len(result) < limit
+    )
+    if bonus_available:
+        used = set(result)
+        for idx, conf in unique:
+            if idx in used:
+                continue
+            if has_unresolved and conf >= threshold:
+                result.append(idx)
+                break
+            if not has_unresolved and conf >= bonus_threshold:
+                result.append(idx)
+                break
+
+    return result[:limit]
 
 
 async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
