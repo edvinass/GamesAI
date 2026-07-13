@@ -124,6 +124,36 @@ def _closest_legal_raise(legal_raises: list[int], target: int) -> int | None:
     return min(legal_raises, key=lambda amount: abs(amount - target))
 
 
+def _facing_raise(state: dict, to_call: int) -> bool:
+    bb = state["settings"]["big_blind"]
+    return to_call > 0 and state["current_bet"] > bb
+
+
+def _facing_3bet_plus(state: dict, to_call: int) -> bool:
+    bb = state["settings"]["big_blind"]
+    return to_call > 0 and state["current_bet"] > bb * 3
+
+
+def _re_raise_equity_threshold(
+    state: dict,
+    to_call: int,
+    cfg: dict[str, float | int],
+) -> float:
+    """Minimum equity required to re-raise rather than call."""
+    base = float(cfg["value_raise_threshold"])
+    if _facing_3bet_plus(state, to_call):
+        return base + 0.08
+    if _facing_raise(state, to_call):
+        return base
+    return float(cfg["raise_threshold"])
+
+
+def _raise_commitment_fraction(state: dict, player_id: str, raise_to: int) -> float:
+    p = state["players"][player_id]
+    cost = raise_to - p["bet_this_round"]
+    return cost / max(1, p["chips"])
+
+
 def _pick_raise_amount(
     state: dict,
     player_id: str,
@@ -144,7 +174,7 @@ def _pick_raise_amount(
     stack_bb = _stack_bb(state, player_id)
 
     if stack_bb <= 12:
-        if equity >= float(cfg["value_raise_threshold"]) or (is_bluff and position >= 0.6):
+        if equity >= float(cfg["value_raise_threshold"]) + 0.03:
             return legal_raises[-1]
         return None
 
@@ -158,17 +188,24 @@ def _pick_raise_amount(
             target = p["bet_this_round"] + int(pot * 0.7)
         else:
             target = p["bet_this_round"] + int(pot * 0.5)
+    elif state["phase"] == "preflop" and _facing_raise(state, to_call):
+        # Preflop re-raises: use multiples of the facing bet to avoid runaway pots.
+        multiplier = 3.0 if equity >= float(cfg["value_raise_threshold"]) else 2.5
+        target = p["bet_this_round"] + to_call + int(to_call * multiplier)
     else:
         if is_bluff:
-            target = p["bet_this_round"] + to_call + int((pot + to_call) * 0.75)
+            target = p["bet_this_round"] + to_call + int((pot + to_call) * 0.55)
         elif equity >= float(cfg["value_raise_threshold"]):
-            target = p["bet_this_round"] + to_call + int((pot + to_call) * 0.65)
+            target = p["bet_this_round"] + to_call + int((pot + to_call) * 0.55)
         else:
-            target = p["bet_this_round"] + to_call + int((pot + to_call) * 0.45)
+            return None
 
     chosen = _closest_legal_raise(legal_raises, target)
     if chosen is None or chosen <= p["bet_this_round"]:
         return None
+    if _raise_commitment_fraction(state, player_id, chosen) > 0.35:
+        if equity < float(cfg["value_raise_threshold"]) + 0.05:
+            return None
     return chosen
 
 
@@ -239,11 +276,13 @@ def choose_poker_action(
 
     stack_bb = _stack_bb(state, player_id)
     if stack_bb <= 10 and to_call > 0:
-        push_threshold = 0.52 - position * 0.05
+        push_threshold = float(cfg["value_raise_threshold"]) - position * 0.04
+        if _facing_3bet_plus(state, to_call):
+            push_threshold += 0.06
         if position_equity >= push_threshold:
-            if to_call >= p["chips"]:
-                return {"type": "all_in"}
             return {"type": "all_in"}
+        if to_call <= state["settings"]["big_blind"] and position_equity >= call_threshold:
+            return {"type": "call"}
         return {"type": "fold"}
 
     if to_call == 0:
@@ -277,15 +316,19 @@ def choose_poker_action(
                 return {"type": "fold"}
             return {"type": "fold"}
 
-    if position_equity >= float(cfg["raise_threshold"]) or (
-        is_bluff and opponents.get("fold_to_bet_rate", 0.45) > 0.5
-    ):
+    re_raise_threshold = _re_raise_equity_threshold(state, to_call, cfg)
+    can_bluff_raise = (
+        is_bluff
+        and opponents.get("fold_to_bet_rate", 0.45) > 0.5
+        and not _facing_3bet_plus(state, to_call)
+    )
+    if position_equity >= re_raise_threshold or can_bluff_raise:
         raise_amount = _pick_raise_amount(
             state,
             player_id,
             equity=position_equity,
             to_call=to_call,
-            is_bluff=is_bluff,
+            is_bluff=can_bluff_raise,
             position=position,
             cfg=cfg,
         )
