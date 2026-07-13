@@ -24,15 +24,15 @@ def _base_state(*, team: str = "red", clue_number: int = 3, guesses_made: int = 
     }
 
 
-def test_bonus_targets_unresolved_prior_clues_at_regular_threshold() -> None:
+def test_bonus_uses_explicit_bonus_guess_for_prior_clues() -> None:
     state = _base_state()
     data = {
-        "guesses": [
+        "current_guesses": [
             {"index": 1, "confidence": 0.9},
             {"index": 2, "confidence": 0.9},
             {"index": 3, "confidence": 0.9},
-            {"index": 4, "confidence": 0.5},
-        ]
+        ],
+        "bonus_guess": {"index": 4, "confidence": 0.5},
     }
 
     result = _parse_operative_guesses(data, state, limit=4, clue_number=3, team="red")
@@ -40,16 +40,32 @@ def test_bonus_targets_unresolved_prior_clues_at_regular_threshold() -> None:
     assert result == [1, 2, 3, 4]
 
 
+def test_bonus_not_taken_from_extra_current_guess_candidates() -> None:
+    state = _base_state(clue_number=2)
+    data = {
+        "current_guesses": [
+            {"index": 1, "confidence": 0.9},
+            {"index": 2, "confidence": 0.9},
+            {"index": 3, "confidence": 0.95},
+        ],
+        "bonus_guess": {"index": 4, "confidence": 0.5},
+    }
+
+    result = _parse_operative_guesses(data, state, limit=3, clue_number=2, team="red")
+
+    assert result == [1, 2, 4]
+
+
 def test_bonus_skipped_without_unresolved_prior_clues() -> None:
     state = _base_state()
     state["clue_history"]["red"] = [state["clue_history"]["red"][-1]]
     data = {
-        "guesses": [
+        "current_guesses": [
             {"index": 1, "confidence": 0.9},
             {"index": 2, "confidence": 0.9},
             {"index": 3, "confidence": 0.9},
-            {"index": 4, "confidence": 0.5},
-        ]
+        ],
+        "bonus_guess": {"index": 4, "confidence": 0.9},
     }
 
     result = _parse_operative_guesses(data, state, limit=4, clue_number=3, team="red")
@@ -57,54 +73,86 @@ def test_bonus_skipped_without_unresolved_prior_clues() -> None:
     assert result == [1, 2, 3]
 
 
-def test_bonus_taken_without_unresolved_when_very_confident() -> None:
+def test_bonus_not_used_for_current_clue_even_when_very_confident() -> None:
     state = _base_state()
     state["red_remaining"] = 5
     state["blue_remaining"] = 5
     state["clue_history"]["red"] = [state["clue_history"]["red"][-1]]
     data = {
-        "guesses": [
+        "current_guesses": [
             {"index": 1, "confidence": 0.9},
             {"index": 2, "confidence": 0.9},
             {"index": 3, "confidence": 0.9},
-            {"index": 4, "confidence": 0.8},
-        ]
+        ],
+        "bonus_guess": {"index": 4, "confidence": 0.95},
     }
 
     result = _parse_operative_guesses(data, state, limit=4, clue_number=3, team="red")
 
-    assert result == [1, 2, 3, 4]
+    assert result == [1, 2, 3]
 
 
-def test_low_confidence_regular_guess_does_not_block_bonus() -> None:
-    state = _base_state()
+def test_low_confidence_current_guess_does_not_block_bonus() -> None:
+    state = _base_state(clue_number=2)
     data = {
-        "guesses": [
+        "current_guesses": [
             {"index": 1, "confidence": 0.9},
-            {"index": 2, "confidence": 0.9},
-            {"index": 3, "confidence": 0.2},
-            {"index": 4, "confidence": 0.5},
-        ]
+            {"index": 2, "confidence": 0.2},
+        ],
+        "bonus_guess": {"index": 4, "confidence": 0.5},
     }
 
-    result = _parse_operative_guesses(data, state, limit=4, clue_number=3, team="red")
+    result = _parse_operative_guesses(data, state, limit=3, clue_number=2, team="red")
 
-    assert result == [1, 2, 4]
+    assert result == [1, 4]
 
 
-def test_mid_turn_bonus_uses_turn_slot_not_batch_index() -> None:
-    state = _base_state(guesses_made=3)
-    data = {"guesses": [{"index": 4, "confidence": 0.5}]}
+def test_mid_turn_bonus_only_uses_bonus_guess_field() -> None:
+    state = _base_state(guesses_made=2, clue_number=2)
+    data = {
+        "current_guesses": [{"index": 3, "confidence": 0.95}],
+        "bonus_guess": {"index": 4, "confidence": 0.5},
+    }
 
-    result = _parse_operative_guesses(data, state, limit=1, clue_number=3, team="red")
+    result = _parse_operative_guesses(data, state, limit=1, clue_number=2, team="red")
 
     assert result == [4]
 
 
 def test_mid_turn_regular_guess_when_slots_remain() -> None:
-    state = _base_state(guesses_made=2)
-    data = {"guesses": [{"index": 3, "confidence": 0.6}]}
+    state = _base_state(guesses_made=1, clue_number=2)
+    data = {
+        "current_guesses": [{"index": 3, "confidence": 0.6}],
+        "bonus_guess": {"index": 4, "confidence": 0.5},
+    }
 
-    result = _parse_operative_guesses(data, state, limit=2, clue_number=3, team="red")
+    result = _parse_operative_guesses(data, state, limit=1, clue_number=2, team="red")
 
     assert result == [3]
+
+
+def test_after_current_clue_filled_bonus_targets_prior_clues() -> None:
+    state = _base_state(guesses_made=1, clue_number=2)
+    data = {
+        "current_guesses": [{"index": 3, "confidence": 0.6}],
+        "bonus_guess": {"index": 4, "confidence": 0.5},
+    }
+
+    result = _parse_operative_guesses(data, state, limit=2, clue_number=2, team="red")
+
+    assert result == [3, 4]
+
+
+def test_legacy_guesses_array_still_parses_current_only() -> None:
+    state = _base_state(clue_number=2)
+    data = {
+        "guesses": [
+            {"index": 1, "confidence": 0.9},
+            {"index": 2, "confidence": 0.9},
+            {"index": 3, "confidence": 0.95},
+        ]
+    }
+
+    result = _parse_operative_guesses(data, state, limit=3, clue_number=2, team="red")
+
+    assert result == [1, 2]
