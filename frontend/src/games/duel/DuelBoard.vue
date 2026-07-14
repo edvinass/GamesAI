@@ -7,9 +7,7 @@ import {
   POWERUP_TIER_LABELS,
   canUseStoredPowerup,
   formatPowerupSeconds,
-  isInstantPowerup,
   listActivePowerupEffects,
-  powerupChannelTicks,
   powerupTier,
   powerupUseHint,
 } from './powerupMeta'
@@ -193,8 +191,6 @@ const playerRows = computed(() =>
 const heldMove = ref<'up' | 'down' | null>(null)
 const charging = ref(false)
 const chargeTicks = ref(0)
-const powerupHolding = ref(false)
-const powerupActivationTicks = ref(0)
 const shootOnCooldown = computed(() => {
   const tick = props.gameState.tick ?? 0
   const until = myFighter.value?.cooldown_until_tick ?? 0
@@ -243,15 +239,11 @@ const roundRecapRows = computed(() =>
 const chargeTier = computed(() =>
   chargeTierForTicks(chargeTicks.value, props.gameState.mutator === 'sniper'),
 )
-const powerupChannelRequired = computed(() => powerupChannelTicks(storedPowerup.value))
-const powerupChannelReady = computed(
-  () => powerupHolding.value && powerupActivationTicks.value >= powerupChannelRequired.value,
-)
 const powerupUseLabel = computed(() => {
   if (!storedPowerup.value) return 'Use'
   if (!canUsePowerup.value && storedPowerup.value === 'heal') return 'Full HP'
   const key = formatBindingLabel(keybinds.value.powerup)
-  return isInstantPowerup(storedPowerup.value) ? `Use [${key}]` : `Hold [${key}]`
+  return `Use [${key}]`
 })
 const draftBanSummary = computed(() => {
   const bans = props.gameState.powerup_bans ?? {}
@@ -619,7 +611,6 @@ function clearHeldInputs() {
     heldMove.value = null
   }
   if (charging.value) releaseCharge()
-  if (powerupHolding.value) releasePowerupHold()
 }
 
 function onVisibilityChange() {
@@ -672,47 +663,20 @@ function showPowerupNotice(text: string, tone: 'info' | 'success' | 'warn' = 'in
   }, 2800)
 }
 
-function activateStoredPowerupInstant() {
-  emit('action', { type: 'powerup_activate' })
-}
-
-function startPowerupHold() {
+function activateStoredPowerup() {
   if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value || !canUsePowerup.value) {
     if (storedPowerup.value === 'heal' && !canUsePowerup.value) {
       showPowerupNotice('Already at full health', 'warn')
     }
     return
   }
-  if (isInstantPowerup(storedPowerup.value)) {
-    activateStoredPowerupInstant()
-    return
-  }
-  if (powerupHolding.value) return
-  powerupHolding.value = true
-  powerupActivationTicks.value = 0
-  emit('action', { type: 'powerup_hold_start' })
-}
-
-function releasePowerupHold() {
-  if (!powerupHolding.value) return
-  powerupHolding.value = false
-  const serverTicks = myFighter.value?.powerup_activation_ticks ?? powerupActivationTicks.value
-  const ticks = Math.min(powerupChannelRequired.value, serverTicks + 1)
-  emit('action', { type: 'powerup_hold_release', powerup_activation_ticks: ticks })
-  powerupActivationTicks.value = 0
+  emit('action', { type: 'powerup_activate' })
 }
 
 function onPowerupButtonClick(e: MouseEvent | TouchEvent) {
   e.preventDefault()
   unlockAudio()
-  startPowerupHold()
-}
-
-function onPowerupButtonRelease(e: MouseEvent | TouchEvent) {
-  e.preventDefault()
-  if (storedPowerup.value && !isInstantPowerup(storedPowerup.value)) {
-    releasePowerupHold()
-  }
+  activateStoredPowerup()
 }
 
 watch(
@@ -731,24 +695,6 @@ watch(
   (serverTicks) => {
     if (!charging.value || typeof serverTicks !== 'number') return
     chargeTicks.value = Math.min(chargeMaxTicks.value, serverTicks)
-  },
-)
-
-watch(
-  () => myFighter.value?.powerup_activation_ticks,
-  (serverTicks) => {
-    if (!powerupHolding.value || typeof serverTicks !== 'number') return
-    powerupActivationTicks.value = Math.min(powerupChannelRequired.value, serverTicks)
-  },
-)
-
-watch(
-  () => myFighter.value?.activating_powerup,
-  (activating) => {
-    if (!activating && powerupHolding.value) {
-      powerupHolding.value = false
-      powerupActivationTicks.value = 0
-    }
   },
 )
 
@@ -849,8 +795,6 @@ watch(
       }
     } else if (type === 'powerup_blocked' && action.reason === 'max_hp') {
       showPowerupNotice('Heal saved — you are already at full health', 'warn')
-    } else if (type === 'powerup_hold_release' && action.activated === false) {
-      showPowerupNotice('Hold longer to channel this power-up', 'warn')
     } else if (type === 'action_rejected') {
       const reason = action.reason as string | undefined
       const attempted = action.attempted as string | undefined
@@ -986,7 +930,8 @@ function onKeyDown(e: KeyboardEvent) {
     powerupsEnabled.value
   ) {
     e.preventDefault()
-    startPowerupHold()
+    if (e.repeat) return
+    activateStoredPowerup()
     return
   }
 }
@@ -1009,15 +954,6 @@ function onKeyUp(e: KeyboardEvent) {
   if (matchesBinding(e.code, keybinds.value.fire)) {
     e.preventDefault()
     if (charging.value) releaseCharge()
-    return
-  }
-
-  if (
-    matchesBinding(e.code, keybinds.value.powerup) &&
-    powerupHolding.value
-  ) {
-    e.preventDefault()
-    releasePowerupHold()
     return
   }
 }
@@ -1219,13 +1155,9 @@ onUnmounted(() => {
 
       <div
         v-if="canControl && storedPowerup && powerupsEnabled"
-        class="powerup-slot"
+        class="powerup-slot side-left"
         :class="[
           `tier-${storedPowerupTier}`,
-          {
-            instant: isInstantPowerup(storedPowerup),
-            activating: powerupHolding,
-          },
         ]"
         :style="{
           borderColor: POWERUP_COLORS[storedPowerup] ?? '#a855f7',
@@ -1254,36 +1186,17 @@ onUnmounted(() => {
           class="powerup-use-btn"
           :class="{ disabled: !canUsePowerup }"
           :disabled="!canUsePowerup"
-          @mousedown.prevent="onPowerupButtonClick"
-          @mouseup.prevent="onPowerupButtonRelease"
-          @mouseleave.prevent="onPowerupButtonRelease"
-          @touchstart.prevent="onPowerupButtonClick"
-          @touchend.prevent="onPowerupButtonRelease"
-          @touchcancel.prevent="onPowerupButtonRelease"
+          @click.prevent="onPowerupButtonClick"
         >
           {{ powerupUseLabel }}
         </button>
       </div>
 
-      <div v-if="powerupHolding && canControl" class="powerup-channel-bar">
-        <div
-          class="powerup-channel-fill"
-          :class="{ ready: powerupChannelReady }"
-          :style="{
-            width: `${(powerupActivationTicks / powerupChannelRequired) * 100}%`,
-            background: POWERUP_COLORS[storedPowerup ?? ''] ?? '#a855f7',
-          }"
-        />
-        <span class="powerup-channel-label">
-          {{
-            powerupChannelReady
-              ? 'RELEASE!'
-              : `Channeling ${POWERUP_LABELS[storedPowerup ?? ''] ?? 'power-up'}…`
-          }}
-        </span>
-      </div>
-
-      <div v-if="canControl && activeBuffs.length" class="active-buffs">
+      <div
+        v-if="canControl && activeBuffs.length"
+        class="active-buffs side-left"
+        :class="{ 'below-slot': Boolean(storedPowerup && powerupsEnabled) }"
+      >
         <div
           v-for="buff in activeBuffs"
           :key="buff.id"
@@ -1470,7 +1383,7 @@ onUnmounted(() => {
             <span v-if="row.isWinner" class="podium-crown" aria-hidden="true">👑</span>
             <span
               class="ship-avatar podium-avatar"
-              :class="{ left: row.fighter?.side === 'left', right: row.fighter?.side === 'right' }"
+              :class="{ left: row.isMe, right: !row.isMe }"
               :style="{ '--ship-color': row.fighter?.color ?? '#666' }"
               aria-hidden="true"
             />
@@ -1591,14 +1504,9 @@ onUnmounted(() => {
           v-if="storedPowerup && powerupsEnabled"
           type="button"
           class="touch-btn touch-powerup"
-          :aria-label="isInstantPowerup(storedPowerup) ? 'Use power-up' : 'Hold to channel power-up'"
+          aria-label="Use power-up"
           :disabled="!canUsePowerup"
-          @touchstart.prevent="onPowerupButtonClick"
-          @touchend.prevent="onPowerupButtonRelease"
-          @touchcancel.prevent="onPowerupButtonRelease"
-          @mousedown.prevent="onPowerupButtonClick"
-          @mouseup.prevent="onPowerupButtonRelease"
-          @mouseleave.prevent="onPowerupButtonRelease"
+          @click.prevent="onPowerupButtonClick"
         >
           {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
         </button>
@@ -1620,7 +1528,7 @@ onUnmounted(() => {
         >
           <span
             class="ship-avatar"
-            :class="{ left: row.fighter?.side === 'left', right: row.fighter?.side === 'right' }"
+            :class="{ left: row.id === playerId, right: row.id !== playerId }"
             :style="{ '--ship-color': row.fighter?.color ?? '#666' }"
             aria-hidden="true"
           />
@@ -1667,8 +1575,7 @@ onUnmounted(() => {
       <div class="controls-hint">
         <p v-if="showTouchControls && canControl && storedPowerup && powerupsEnabled">
           <strong>Touch:</strong> Arrows move · ⚡ {{ chargeEnabled ? 'hold to charge' : 'fire' }} ·
-          {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
-          {{ isInstantPowerup(storedPowerup) ? 'tap power-up' : 'hold power-up' }}
+          {{ POWERUP_ICONS[storedPowerup] ?? '★' }} tap to use power-up
         </p>
         <p v-else-if="showTouchControls && canControl && chargeEnabled">
           <strong>Touch:</strong> Use on-screen arrows to move · Hold ⚡ to charge and release to fire
@@ -1914,10 +1821,11 @@ onUnmounted(() => {
   left: 50%;
   transform: translateX(-50%);
   z-index: 4;
-  max-width: min(92%, 460px);
-  padding: 0.5rem 0.9rem;
-  border-radius: 10px;
-  font-size: 0.78rem;
+  max-width: min(92%, 520px);
+  padding: 0.7rem 1.15rem;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  line-height: 1.45;
   font-weight: 600;
   text-align: center;
   color: #dbeafe;
@@ -2382,7 +2290,6 @@ onUnmounted(() => {
 .powerup-slot {
   position: absolute;
   top: 0.75rem;
-  left: 0.75rem;
   z-index: 3;
   display: flex;
   align-items: center;
@@ -2394,6 +2301,16 @@ onUnmounted(() => {
   background: rgba(8, 12, 20, 0.82);
   backdrop-filter: blur(8px);
   animation: slotGlow 2.4s ease-in-out infinite;
+}
+
+.powerup-slot.side-left {
+  left: 0.75rem;
+  right: auto;
+}
+
+.powerup-slot.side-right {
+  right: 0.75rem;
+  left: auto;
 }
 
 .powerup-slot.tier-rare {
@@ -2453,31 +2370,45 @@ onUnmounted(() => {
 .active-buffs {
   position: absolute;
   top: 0.75rem;
-  right: 0.75rem;
   z-index: 3;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  max-width: min(52%, 240px);
+  gap: 0.45rem;
+  max-width: min(52%, 280px);
+}
+
+.active-buffs.side-left {
+  left: 0.75rem;
+  right: auto;
+  justify-content: flex-start;
+}
+
+.active-buffs.side-right {
+  right: 0.75rem;
+  left: auto;
   justify-content: flex-end;
+}
+
+.active-buffs.below-slot {
+  top: 5.5rem;
 }
 
 .active-buff {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.28rem 0.45rem 0.28rem 0.35rem;
+  gap: 0.4rem;
+  padding: 0.38rem 0.55rem 0.38rem 0.42rem;
   border-radius: 999px;
   background: rgba(8, 12, 20, 0.78);
   border: 1px solid color-mix(in srgb, var(--buff-color) 45%, transparent);
   backdrop-filter: blur(6px);
-  font-size: 0.68rem;
+  font-size: 0.82rem;
   color: #e2e8f0;
 }
 
 .active-buff-icon {
   color: var(--buff-color);
-  font-size: 0.85rem;
+  font-size: 1rem;
 }
 
 .active-buff-label {
@@ -2485,8 +2416,8 @@ onUnmounted(() => {
 }
 
 .active-buff-ring {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
 }
 
 .active-buff-ring svg {
@@ -2618,18 +2549,20 @@ onUnmounted(() => {
 .powerup-slot-copy {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: 0.15rem;
   min-width: 0;
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   color: var(--text-muted);
 }
 
 .powerup-slot-copy strong {
-  font-size: 0.82rem;
+  font-size: 0.95rem;
   color: #f8fafc;
 }
 
 .powerup-slot-hint {
+  font-size: 0.88rem;
+  line-height: 1.35;
   color: #c084fc;
 }
 
@@ -2656,11 +2589,12 @@ onUnmounted(() => {
 }
 
 .active-buff-time {
-  font-size: 0.62rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  color: #94a3b8;
-  min-width: 1.8rem;
+  color: #cbd5e1;
+  min-width: 2rem;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .callout-dot {
@@ -2717,10 +2651,10 @@ onUnmounted(() => {
 
 .charge-label {
   position: absolute;
-  top: -1.4rem;
+  top: -1.55rem;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 0.72rem;
+  font-size: 0.88rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: #fbbf24;
@@ -2754,10 +2688,10 @@ onUnmounted(() => {
 
 .powerup-channel-label {
   position: absolute;
-  top: -1.4rem;
+  top: -1.55rem;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 0.72rem;
+  font-size: 0.88rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: #c084fc;
@@ -3207,7 +3141,8 @@ onUnmounted(() => {
 
 .controls-hint {
   flex-shrink: 0;
-  font-size: 0.85rem;
+  font-size: 0.98rem;
+  line-height: 1.5;
   color: var(--text-muted);
   text-align: right;
 }

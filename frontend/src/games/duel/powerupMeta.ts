@@ -144,18 +144,13 @@ export function formatPowerupSeconds(ticks: number, tickMs: number): string {
 
 export function powerupUseHint(
   type: string | null | undefined,
-  tickMs = 75,
+  _tickMs = 75,
   charges?: number | null,
 ): string {
   if (type === 'bomb' && charges != null && charges > 0) {
-    return `Tap or hold to fire (${charges} left)`
+    return `Press to fire (${charges} left)`
   }
-  if (isInstantPowerup(type)) {
-    return 'Tap or press to activate instantly'
-  }
-  const ticks = powerupChannelTicks(type)
-  const sec = Math.round((ticks * tickMs) / 100) / 10
-  return `Hold ${sec}s to channel, release to activate`
+  return 'Press to activate'
 }
 
 export function listActivePowerupEffects(

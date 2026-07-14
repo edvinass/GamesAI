@@ -161,6 +161,35 @@ export class DuelRenderer {
   private hazardPulseUntil = 0
   private arenaBoundsInitialized = false
   private theme: ArenaTheme = resolveTheme('classic')
+  private flipView = false
+  private viewGridWidth = 0
+
+  /** Mirror the arena horizontally so the local player always appears on the left. */
+  private syncViewFlip(state: DuelGameState, viewerId: string) {
+    const viewer = state.fighters[viewerId]
+    this.flipView = viewer?.side === 'right'
+    this.viewGridWidth = state.grid_width
+  }
+
+  private viewGridX(x: number): number {
+    return this.flipView ? this.viewGridWidth - 1 - x : x
+  }
+
+  private boardX(offsetX: number, cell: number, gridX: number): number {
+    return offsetX + this.viewGridX(gridX) * cell
+  }
+
+  private viewGridRectLeft(x: number, width: number): number {
+    return this.flipView ? this.viewGridWidth - x - width : x
+  }
+
+  private facingRight(side: string): boolean {
+    return this.flipView ? side === 'right' : side === 'left'
+  }
+
+  private screenShotDir(side: string): number {
+    return this.facingRight(side) ? 1 : -1
+  }
 
   reset() {
     this.particles = []
@@ -217,7 +246,7 @@ export class DuelRenderer {
     const pose = this.fighterPoses.get(hit.player_id)
     const displayY = pose?.y ?? fighter.display_y ?? fighter.y
     const barCount = state.fighter_height ?? 3
-    const cx = offsetX + fighter.x * cell + cell / 2
+    const cx = this.boardX(offsetX, cell, fighter.x) + cell / 2
     const hitRow = hit.y ?? displayY + Math.floor(barCount / 2)
     const cy = offsetY + hitRow * cell + cell / 2
 
@@ -362,7 +391,7 @@ export class DuelRenderer {
       const py = Number(action.y ?? 0)
       const ptype = String(action.powerup_type ?? '')
       const color = POWERUP_COLORS[ptype] ?? '#fbbf24'
-      const cx = offsetX + px * cell + cell / 2
+      const cx = this.boardX(offsetX, cell, px) + cell / 2
       const cy = offsetY + py * cell + cell / 2
       this.spawnPowerupBurst(cx, cy, color, false)
       return
@@ -376,7 +405,7 @@ export class DuelRenderer {
       const color = POWERUP_COLORS[ptype] ?? '#fbbf24'
       const pose = playerId ? this.fighterPoses.get(playerId) : null
       const displayY = pose?.y ?? fighter?.display_y ?? fighter?.y ?? 0
-      const cx = offsetX + (fighter?.x ?? 0) * cell + cell / 2
+      const cx = this.boardX(offsetX, cell, fighter?.x ?? 0) + cell / 2
       const cy = offsetY + displayY * cell + (cell * (state.fighter_height ?? 3)) / 2
       this.spawnPowerupBurst(cx, cy, color, true)
       return
@@ -389,9 +418,11 @@ export class DuelRenderer {
       const displayY = pose?.y ?? fighter?.display_y ?? fighter?.y ?? 0
       const barCount = state.fighter_height ?? 3
       const aimRow = displayY + Math.floor(barCount / 2)
-      const cx = offsetX + (fighter?.x ?? 0) * cell + cell / 2
+      const cx = this.boardX(offsetX, cell, fighter?.x ?? 0) + cell / 2
       const cy = offsetY + aimRow * cell + cell / 2
-      const boardEndX = fighter?.side === 'left' ? offsetX + state.grid_width * cell : offsetX
+      const boardEndX = this.facingRight(fighter!.side)
+        ? offsetX + state.grid_width * cell
+        : offsetX
 
       if (ptype === 'laser') {
         this.spawnBeamFlash(cx, cy, boardEndX, cy, color, 3, 180)
@@ -400,7 +431,7 @@ export class DuelRenderer {
       } else if (ptype === 'heal') {
         this.spawnHealRise(cx, cy)
       } else if (ptype === 'bomb' || ptype === 'cluster' || ptype === 'burst') {
-        const muzzleX = offsetX + (fighter?.x ?? 0) * cell + (fighter?.side === 'left' ? cell : 0)
+        const muzzleX = this.boardX(offsetX, cell, fighter?.x ?? 0) + (this.facingRight(fighter!.side) ? cell : 0)
         this.muzzleFlashes.push({ x: muzzleX, y: cy, color, until: Date.now() + 160 })
         this.spawnPowerupBurst(muzzleX, cy, color, false)
       } else {
@@ -413,7 +444,7 @@ export class DuelRenderer {
       const bx = Number(action.x ?? 0)
       const by = Number(action.y ?? 0)
       const wallHit = Boolean(action.wall_hit)
-      const cx = offsetX + bx * cell + cell / 2
+      const cx = this.boardX(offsetX, cell, bx) + cell / 2
       const cy = offsetY + by * cell + cell / 2
       this.spawnHitBurst(cx, cy, '#f59e0b', true, false)
       if (wallHit) {
@@ -443,12 +474,12 @@ export class DuelRenderer {
     const pose = this.fighterPoses.get(playerId!)
     const displayY = pose?.y ?? fighter!.display_y ?? fighter!.y
     const aimRow = displayY + Math.floor((state.fighter_height ?? 3) / 2)
-    const cx = offsetX + fighter!.x * cell + (fighter!.side === 'left' ? cell : 0)
+    const cx = this.boardX(offsetX, cell, fighter!.x) + (this.facingRight(fighter!.side) ? cell : 0)
     const cy = offsetY + aimRow * cell + cell / 2
 
     this.muzzleFlashes.push({ x: cx, y: cy, color: fighter!.color, until: Date.now() + 120 })
 
-    const dir = fighter!.side === 'left' ? 1 : -1
+    const dir = this.screenShotDir(fighter!.side)
     for (let i = 0; i < 6; i++) {
       this.particles.push({
         x: cx,
@@ -556,7 +587,7 @@ export class DuelRenderer {
     const elapsed = Math.max(0, now - this.stateSnapshotAt)
     const progress = Math.min(0.95, elapsed / this.tickMs)
     return {
-      x: bullet.x + bullet.vx * progress,
+      x: this.viewGridX(bullet.x + bullet.vx * progress),
       y: bullet.y + (bullet.vy ?? 0) * progress,
     }
   }
@@ -595,6 +626,7 @@ export class DuelRenderer {
     } = state
     const barCount = fighter_height ?? 3
 
+    this.syncViewFlip(state, viewerId)
     this.ensureStars(displayW, displayH)
     this.syncStateSnapshot(state, now)
     this.syncArenaShrink(state, now)
@@ -696,9 +728,10 @@ export class DuelRenderer {
     ctx.strokeStyle = this.theme.grid
     ctx.lineWidth = 1
     for (let x = 0; x <= gridW; x++) {
+      const sx = this.boardX(offsetX, cell, x)
       ctx.beginPath()
-      ctx.moveTo(offsetX + x * cell, offsetY)
-      ctx.lineTo(offsetX + x * cell, offsetY + boardH)
+      ctx.moveTo(sx, offsetY)
+      ctx.lineTo(sx, offsetY + boardH)
       ctx.stroke()
     }
     for (let y = 0; y <= gridH; y++) {
@@ -775,17 +808,31 @@ export class DuelRenderer {
     now: number,
   ) {
     const pulse = 0.5 + Math.sin(now * 0.004) * 0.2
-    const leftGrad = ctx.createLinearGradient(offsetX, offsetY, offsetX + cell * 2.5, offsetY)
-    leftGrad.addColorStop(0, `rgba(59,130,246,${0.22 * pulse})`)
-    leftGrad.addColorStop(1, 'rgba(59,130,246,0)')
-    ctx.fillStyle = leftGrad
-    ctx.fillRect(offsetX, offsetY, cell * 2.5, boardH)
+    const blueGrad = (fromX: number, toX: number) => {
+      const grad = ctx.createLinearGradient(fromX, offsetY, toX, offsetY)
+      grad.addColorStop(0, `rgba(59,130,246,${0.22 * pulse})`)
+      grad.addColorStop(1, 'rgba(59,130,246,0)')
+      return grad
+    }
+    const redGrad = (fromX: number, toX: number) => {
+      const grad = ctx.createLinearGradient(fromX, offsetY, toX, offsetY)
+      grad.addColorStop(0, `rgba(239,68,68,${0.22 * pulse})`)
+      grad.addColorStop(1, 'rgba(239,68,68,0)')
+      return grad
+    }
 
-    const rightGrad = ctx.createLinearGradient(offsetX + boardW, offsetY, offsetX + boardW - cell * 2.5, offsetY)
-    rightGrad.addColorStop(0, `rgba(239,68,68,${0.22 * pulse})`)
-    rightGrad.addColorStop(1, 'rgba(239,68,68,0)')
-    ctx.fillStyle = rightGrad
-    ctx.fillRect(offsetX + boardW - cell * 2.5, offsetY, cell * 2.5, boardH)
+    const blueOnLeft = !this.flipView
+    if (blueOnLeft) {
+      ctx.fillStyle = blueGrad(offsetX, offsetX + cell * 2.5)
+      ctx.fillRect(offsetX, offsetY, cell * 2.5, boardH)
+      ctx.fillStyle = redGrad(offsetX + boardW, offsetX + boardW - cell * 2.5)
+      ctx.fillRect(offsetX + boardW - cell * 2.5, offsetY, cell * 2.5, boardH)
+    } else {
+      ctx.fillStyle = redGrad(offsetX, offsetX + cell * 2.5)
+      ctx.fillRect(offsetX, offsetY, cell * 2.5, boardH)
+      ctx.fillStyle = blueGrad(offsetX + boardW, offsetX + boardW - cell * 2.5)
+      ctx.fillRect(offsetX + boardW - cell * 2.5, offsetY, cell * 2.5, boardH)
+    }
   }
 
   private drawObstacles(
@@ -797,7 +844,7 @@ export class DuelRenderer {
     now: number,
   ) {
     for (const obstacle of obstacles) {
-      const x = offsetX + obstacle.x * cell
+      const x = offsetX + this.viewGridRectLeft(obstacle.x, obstacle.w) * cell
       const y = offsetY + obstacle.y * cell
       const w = obstacle.w * cell
       const h = obstacle.h * cell
@@ -831,7 +878,7 @@ export class DuelRenderer {
   ) {
     if (!powerup) return
     const color = POWERUP_COLORS[powerup.type] ?? '#fbbf24'
-    const cx = offsetX + powerup.x * cell + cell / 2
+    const cx = this.boardX(offsetX, cell, powerup.x) + cell / 2
     const cy = offsetY + powerup.y * cell + cell / 2
     let pulse = 0.82 + Math.sin(now * 0.006) * 0.18
     if (powerup.despawn_at_tick != null && tick > 0) {
@@ -976,6 +1023,7 @@ export class DuelRenderer {
   ) {
     const effects = fighter.effects
     if (!effects) return
+    const facingRight = this.facingRight(fighter.side)
 
     if (effects.rapid_fire_active) {
       const flicker = 0.25 + Math.sin(now * 0.02) * 0.15
@@ -986,7 +1034,7 @@ export class DuelRenderer {
     if (effects.machine_gun_active) {
       ctx.fillStyle = rgba('#eab308', 0.35 + Math.sin(now * 0.035) * 0.2)
       ctx.beginPath()
-      ctx.arc(fx + (fighter.side === 'left' ? fw : 0), top + height / 2, cell * 0.12, 0, Math.PI * 2)
+      ctx.arc(fx + (facingRight ? fw : 0), top + height / 2, cell * 0.12, 0, Math.PI * 2)
       ctx.fill()
     }
 
@@ -1009,7 +1057,7 @@ export class DuelRenderer {
         const ry = top + height / 2 + row * cell * 0.35
         ctx.fillStyle = rgba('#a855f7', 0.25 + Math.sin(now * 0.02 + row) * 0.15)
         ctx.beginPath()
-        ctx.arc(fx + fw + (fighter.side === 'left' ? cell * 0.08 : -cell * 0.08), ry, cell * 0.08, 0, Math.PI * 2)
+        ctx.arc(fx + fw + (facingRight ? cell * 0.08 : -cell * 0.08), ry, cell * 0.08, 0, Math.PI * 2)
         ctx.fill()
       }
     }
@@ -1048,7 +1096,7 @@ export class DuelRenderer {
   ) {
     for (const bullet of bullets) {
       const pos = this.bulletDisplayPos(bullet, now)
-      const cx = offsetX + pos.x * cell + cell / 2
+      const cx = this.boardX(offsetX, cell, pos.x) + cell / 2
       const cy = offsetY + pos.y * cell + cell / 2
       const isBomb = bullet.kind === 'bomb'
       const charged = !isBomb && (bullet.damage ?? 1) >= 2
@@ -1067,7 +1115,7 @@ export class DuelRenderer {
             : colorblind
               ? '#fde047'
               : '#fbbf24'
-      const dir = bullet.vx >= 0 ? 1 : -1
+      const dir = (this.flipView ? -bullet.vx : bullet.vx) >= 0 ? 1 : -1
       const speed = Math.abs(bullet.vx) || 1
 
       if (isBomb) {
@@ -1246,7 +1294,7 @@ export class DuelRenderer {
     pid?: string,
   ) {
     const color = fighter.color
-    const facingRight = fighter.side === 'left'
+    const facingRight = this.facingRight(fighter.side)
     const cx = fx + fw / 2
     const cy = shipTop + shipHeight / 2
 
@@ -1400,10 +1448,8 @@ export class DuelRenderer {
     now: number,
   ) {
     for (const decoy of decoys) {
-      const x =
-        decoy.side === 'right'
-          ? offsetX + (gridWidth - 2) * cell
-          : offsetX + cell
+      const spawnX = decoy.side === 'right' ? gridWidth - 2 : 1
+      const x = this.boardX(offsetX, cell, spawnX)
       const top = offsetY + decoy.y * cell
       const height = cell * barCount
       const pulse = 0.25 + Math.sin(now * 0.01) * 0.15
@@ -1444,10 +1490,12 @@ export class DuelRenderer {
       ctx.globalAlpha = alpha
 
       const inset = Math.max(1, cell * 0.1)
-      const fx = offsetX + fighter.x * cell + inset
+      const fx = this.boardX(offsetX, cell, fighter.x) + inset
       const fw = cell - inset * 2
       const shipTop = offsetY + displayY * cell
       const shipHeight = cell * barCount
+      const facingRight = this.facingRight(fighter.side)
+      const fighterColX = this.boardX(offsetX, cell, fighter.x)
 
       this.drawFighterEffectAura(ctx, fx, shipTop, fw, shipHeight, cell, fighter, now)
 
@@ -1476,7 +1524,7 @@ export class DuelRenderer {
         ctx.strokeStyle = rgba('#38bdf8', 0.35 + Math.sin(shimmer) * 0.2)
         ctx.lineWidth = Math.max(2, cell * 0.12)
         ctx.beginPath()
-        ctx.roundRect(offsetX + fighter.x * cell - 2, top - 2, cell + 4, height + 4, cell * 0.2)
+        ctx.roundRect(fighterColX - 2, top - 2, cell + 4, height + 4, cell * 0.2)
         ctx.stroke()
 
         ctx.strokeStyle = rgba('#7dd3fc', 0.5)
@@ -1487,7 +1535,7 @@ export class DuelRenderer {
         ctx.setLineDash([])
 
         ctx.fillStyle = rgba('#38bdf8', 0.08 + Math.sin(shimmer * 2) * 0.05)
-        ctx.fillRect(offsetX + fighter.x * cell - 1, top, cell + 2, height)
+        ctx.fillRect(fighterColX - 1, top, cell + 2, height)
       }
 
       if (fighter.effects?.mirror_active) {
@@ -1497,7 +1545,7 @@ export class DuelRenderer {
         ctx.strokeStyle = rgba('#e879f9', pulse)
         ctx.lineWidth = Math.max(2, cell * 0.1)
         ctx.beginPath()
-        ctx.roundRect(offsetX + fighter.x * cell - 3, top - 3, cell + 6, height + 6, cell * 0.25)
+        ctx.roundRect(fighterColX - 3, top - 3, cell + 6, height + 6, cell * 0.25)
         ctx.stroke()
       }
 
@@ -1505,21 +1553,21 @@ export class DuelRenderer {
         const top = offsetY + displayY * cell
         const height = cell * barCount
         ctx.fillStyle = rgba('#67e8f9', 0.18 + Math.sin(now * 0.006) * 0.08)
-        ctx.fillRect(offsetX + fighter.x * cell - 1, top, cell + 2, height)
+        ctx.fillRect(fighterColX - 1, top, cell + 2, height)
       }
 
       if (isMe && fighter.alive) {
         ctx.strokeStyle = 'rgba(255,255,255,0.85)'
         ctx.lineWidth = Math.max(1.5, cell * 0.08)
         ctx.beginPath()
-        this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, fighter.side === 'left')
+        this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, facingRight)
         ctx.stroke()
 
         const aimRow = displayY + Math.floor(barCount / 2)
         const ay = offsetY + aimRow * cell + cell / 2
         const sweep = (Math.sin(now * 0.008) + 1) * 0.5
-        const aimEndX = fighter.side === 'left' ? offsetX + boardW : offsetX
-        const muzzleX = fighter.side === 'left' ? fx + fw + cell * 0.08 : fx - cell * 0.08
+        const aimEndX = facingRight ? offsetX + boardW : offsetX
+        const muzzleX = facingRight ? fx + fw + cell * 0.08 : fx - cell * 0.08
         ctx.strokeStyle = `rgba(255,255,255,${0.12 + sweep * 0.12})`
         ctx.lineWidth = 1
         ctx.setLineDash([cell * 0.35, cell * 0.3])
@@ -1543,7 +1591,7 @@ export class DuelRenderer {
         ctx.stroke()
         ctx.strokeStyle = rgba(fighter.color, 0.2)
         ctx.beginPath()
-        this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, fighter.side === 'left')
+        this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, facingRight)
         ctx.stroke()
       }
 
