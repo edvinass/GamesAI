@@ -165,8 +165,20 @@ function backToLobby() {
 </script>
 
 <template>
-  <div class="game-page" :class="{ 'game-page--snake': isFullscreenGame }">
-    <header class="game-header" :class="{ 'game-header--snake': isFullscreenGame }">
+  <div
+    class="game-page"
+    :class="{
+      'game-page--snake': isFullscreenGame,
+      'game-page--poker': isPoker,
+    }"
+  >
+    <header
+      class="game-header"
+      :class="{
+        'game-header--snake': isFullscreenGame,
+        'game-header--poker': isPoker,
+      }"
+    >
       <div class="header-left">
         <h1>{{ gameTitle }}</h1>
         <div class="header-meta">
@@ -180,8 +192,9 @@ function backToLobby() {
       </div>
       <div class="header-actions">
         <button type="button" class="btn-secondary" @click="backToLobby">Lobby</button>
-        <button v-if="isPoker" type="button" class="btn-secondary" @click="showPokerHands = true">
-          Hand rankings
+        <button v-if="isPoker" type="button" class="btn-secondary header-btn--compact" @click="showPokerHands = true">
+          <span class="header-btn__full">Hand rankings</span>
+          <span class="header-btn__short" aria-hidden="true">Hands</span>
         </button>
         <button type="button" class="btn-secondary" @click="showRules = true">Rules</button>
       </div>
@@ -413,7 +426,67 @@ function backToLobby() {
   animation: toastIn 0.4s var(--ease-bounce);
 }
 
-.toast-leave-active {
-  animation: toastIn 0.25s reverse;
+.game-page--poker {
+  padding-bottom: 0;
+}
+
+.game-header--poker {
+  max-width: 1440px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.header-btn__short {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .game-page--poker {
+    padding-bottom: 0;
+  }
+
+  .game-header--poker {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    padding-top: 0.65rem;
+    padding-bottom: 0.55rem;
+    padding-inline: 0.75rem;
+    gap: 0.55rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .game-header--poker h1 {
+    font-size: 1.1rem;
+  }
+
+  .game-header--poker .header-meta {
+    gap: 0.45rem;
+  }
+
+  .game-header--poker .av-hint {
+    display: none;
+  }
+
+  .game-header--poker .header-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .game-header--poker .header-actions .btn-secondary {
+    flex: 1;
+    min-width: 0;
+    padding: 0.45rem 0.5rem;
+    font-size: 0.82rem;
+    touch-action: manipulation;
+  }
+
+  .game-header--poker .header-btn__full {
+    display: none;
+  }
+
+  .game-header--poker .header-btn__short {
+    display: inline;
+  }
 }
 </style>

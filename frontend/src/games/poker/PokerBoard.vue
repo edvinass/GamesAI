@@ -361,10 +361,6 @@ const showNextHandControl = computed(
     props.gameState.phase === 'hand_complete' && isHost.value && !props.gameState.winner,
 )
 
-const showControlsDock = computed(
-  () => isWaitingForTurn.value || canAct.value || showNextHandControl.value,
-)
-
 watch(canAct, (active) => {
   if (!active) raisePanelOpen.value = false
 })
@@ -826,7 +822,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="poker-board" :class="{ 'poker-board--docked': showControlsDock }">
+  <div
+    class="poker-board"
+    :class="{ 'poker-board--acting': canAct, 'poker-board--waiting': isWaitingForTurn }"
+  >
     <div class="status-bar card">
       <div class="status-pills">
         <span class="status-pill status-pill--hand">Hand #{{ gameState.hand_number }}</span>
@@ -996,134 +995,151 @@ onUnmounted(() => {
       </div>
 
       <aside class="poker-sidebar">
-        <p
-          v-if="lastActionText"
-          class="last-action last-action--sidebar"
-          :class="{ 'last-action--pop': actionHoldActive }"
-        >
-          {{ lastActionText }}
-        </p>
-
-        <div
-          v-if="winnerCallout"
-          class="winners card winners--reveal"
-          :class="{
-            'winners--you': iWonHand,
-            'winners--game': winnerCallout.type === 'game',
-          }"
-        >
-          <p class="winners__eyebrow">{{ winnerCallout.eyebrow }}</p>
-          <h3 class="winners__title">{{ winnerCallout.title }}</h3>
-          <ul v-if="winnerCallout.entries.length" class="winners__list">
-            <li v-for="entry in winnerCallout.entries" :key="entry.playerId">
-              <span class="winners__name">{{ entry.name }}</span>
-              <span class="winners__amount">+{{ entry.amount }}</span>
-              <span v-if="entry.hand" class="winners__hand">{{ entry.hand }}</span>
-            </li>
-          </ul>
-          <p v-if="iWonHand && winnerCallout.type === 'hand'" class="winners__you">Nice hand!</p>
-        </div>
-
-        <div v-else-if="gameState.phase === 'game_over'" class="game-over card game-over--reveal">
-          <h2>
-            {{ gameState.players.find((p) => p.id === gameState.winner)?.nickname }} wins the game!
-          </h2>
-        </div>
-
-        <div v-if="canAct" class="action-bar card action-bar--your-turn">
-          <p class="turn-hint">
-            <span class="turn-hint__dot" aria-hidden="true" />
-            Your turn
-            <span v-if="gameState.bet_to_call > 0" class="turn-hint__call">
-              — call {{ gameState.bet_to_call }}
-            </span>
+        <div class="sidebar-scroll">
+          <p
+            v-if="lastActionText"
+            class="last-action last-action--sidebar"
+            :class="{ 'last-action--pop': actionHoldActive }"
+          >
+            {{ lastActionText }}
           </p>
-          <div class="action-buttons">
-            <button type="button" class="btn-action btn-action--fold" @click="fold">Fold</button>
-            <button
-              v-if="gameState.can_check"
-              type="button"
-              class="btn-action btn-action--check"
-              @click="check"
-            >
-              Check
-            </button>
-            <button
-              v-if="gameState.bet_to_call > 0"
-              type="button"
-              class="btn-action btn-action--call"
-              @click="call"
-            >
-              Call {{ gameState.bet_to_call }}
-            </button>
-            <button type="button" class="btn-action btn-action--all-in" @click="allIn">All-in</button>
+
+          <div
+            v-if="winnerCallout"
+            class="winners card winners--reveal winners--sidebar"
+            :class="{
+              'winners--you': iWonHand,
+              'winners--game': winnerCallout.type === 'game',
+            }"
+          >
+            <p class="winners__eyebrow">{{ winnerCallout.eyebrow }}</p>
+            <h3 class="winners__title">{{ winnerCallout.title }}</h3>
+            <ul v-if="winnerCallout.entries.length" class="winners__list">
+              <li v-for="entry in winnerCallout.entries" :key="entry.playerId">
+                <span class="winners__name">{{ entry.name }}</span>
+                <span class="winners__amount">+{{ entry.amount }}</span>
+                <span v-if="entry.hand" class="winners__hand">{{ entry.hand }}</span>
+              </li>
+            </ul>
+            <p v-if="iWonHand && winnerCallout.type === 'hand'" class="winners__you">Nice hand!</p>
           </div>
-          <div v-if="raiseOptions.length" class="raise-row">
-            <p class="raise-hint">
-              Raise in {{ gameState.raise_increment }} chip increments
+
+          <div v-else-if="gameState.phase === 'game_over'" class="game-over card game-over--reveal">
+            <h2>
+              {{ gameState.players.find((p) => p.id === gameState.winner)?.nickname }} wins the game!
+            </h2>
+          </div>
+        </div>
+
+        <div class="controls-dock">
+          <div v-if="canAct" class="action-bar card action-bar--your-turn">
+            <p class="turn-hint">
+              <span class="turn-hint__dot" aria-hidden="true" />
+              Your turn
+              <span v-if="gameState.bet_to_call > 0" class="turn-hint__call">
+                — call {{ gameState.bet_to_call }}
+              </span>
             </p>
-            <div class="raise-presets">
+            <div class="action-buttons">
+              <button type="button" class="btn-action btn-action--fold" @click="fold">Fold</button>
               <button
-                v-for="preset in raisePresets"
-                :key="preset.label"
+                v-if="gameState.can_check"
                 type="button"
-                class="btn-secondary"
-                :class="{ 'raise-preset--active': raiseAmount === preset.amount }"
-                @click="selectRaise(preset.amount)"
+                class="btn-action btn-action--check"
+                @click="check"
               >
-                {{ preset.label }} ({{ preset.amount }})
+                Check
               </button>
+              <button
+                v-if="gameState.bet_to_call > 0"
+                type="button"
+                class="btn-action btn-action--call"
+                @click="call"
+              >
+                Call {{ gameState.bet_to_call }}
+              </button>
+              <button type="button" class="btn-action btn-action--all-in" @click="allIn">All-in</button>
             </div>
-            <div class="raise-select-row">
-              <label>
-                Raise to
-                <select v-model.number="raiseAmount" @focus="syncRaiseDefault">
-                  <option v-for="amount in raiseOptions" :key="amount" :value="amount">
-                    {{ amount }}
-                  </option>
-                </select>
-              </label>
-              <button type="button" class="btn-action btn-action--raise" @click="raise">
-                Raise to {{ raiseAmount }}
+            <div v-if="raiseOptions.length" class="raise-row">
+              <p class="raise-hint raise-hint--desktop">
+                Raise in {{ gameState.raise_increment }} chip increments
+              </p>
+              <button
+                type="button"
+                class="raise-toggle"
+                :aria-expanded="raisePanelOpen"
+                @click="raisePanelOpen = !raisePanelOpen"
+              >
+                <span>Custom raise</span>
+                <span class="raise-toggle__chevron" :class="{ 'raise-toggle__chevron--open': raisePanelOpen }">
+                  ▾
+                </span>
               </button>
+              <div class="raise-panel" :class="{ 'raise-panel--open': raisePanelOpen }">
+                <div class="raise-presets">
+                  <button
+                    v-for="preset in raisePresets"
+                    :key="preset.label"
+                    type="button"
+                    class="btn-secondary raise-preset-btn"
+                    :class="{ 'raise-preset--active': raiseAmount === preset.amount }"
+                    @click="selectRaise(preset.amount)"
+                  >
+                    {{ preset.label }} ({{ preset.amount }})
+                  </button>
+                </div>
+                <div class="raise-select-row">
+                  <label>
+                    Raise to
+                    <select v-model.number="raiseAmount" @focus="syncRaiseDefault">
+                      <option v-for="amount in raiseOptions" :key="amount" :value="amount">
+                        {{ amount }}
+                      </option>
+                    </select>
+                  </label>
+                  <button type="button" class="btn-action btn-action--raise" @click="raise">
+                    Raise to {{ raiseAmount }}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div
-          v-else-if="!canAct && ['preflop', 'flop', 'turn', 'river'].includes(gameState.phase)"
-          class="waiting card"
-        >
-          <p v-if="dealInProgress">Dealing hole cards…</p>
-          <p v-else-if="!bettingRoundReady">Cards dealt — betting begins…</p>
-          <p v-else-if="streetTransitionPending">Dealing the {{ phaseLabel.toLowerCase() }}…</p>
-          <p v-else-if="actionHoldActive">{{ lastActionText }}</p>
-          <p v-else>
-            Waiting for
-            {{ gameState.players.find((p) => p.id === (effectiveCurrentActorId ?? gameState.current_actor_id))?.nickname }}…
-          </p>
-        </div>
-
-        <div v-if="gameState.phase === 'hand_complete' && isHost && !gameState.winner" class="next-hand card">
-          <button type="button" class="btn-primary" @click="nextHand">Deal next hand</button>
-        </div>
-
-        <section class="reactions card" aria-label="Emoji reactions">
-          <span class="reactions-label">React</span>
-          <div class="reaction-buttons" role="toolbar" aria-label="Send reaction">
-            <button
-              v-for="emoji in pokerReactionEmojis"
-              :key="emoji"
-              type="button"
-              class="reaction-btn"
-              :disabled="reactionCooldown"
-              :aria-label="`React with ${emoji}`"
-              @click="sendReaction(emoji)"
-            >
-              {{ emoji }}
-            </button>
+          <div
+            v-else-if="isWaitingForTurn"
+            class="waiting card waiting--dock"
+          >
+            <p v-if="dealInProgress">Dealing hole cards…</p>
+            <p v-else-if="!bettingRoundReady">Cards dealt — betting begins…</p>
+            <p v-else-if="streetTransitionPending">Dealing the {{ phaseLabel.toLowerCase() }}…</p>
+            <p v-else-if="actionHoldActive">{{ lastActionText }}</p>
+            <p v-else>
+              Waiting for
+              {{ gameState.players.find((p) => p.id === (effectiveCurrentActorId ?? gameState.current_actor_id))?.nickname }}…
+            </p>
           </div>
-        </section>
+
+          <div v-if="showNextHandControl" class="next-hand card next-hand--dock">
+            <button type="button" class="btn-primary" @click="nextHand">Deal next hand</button>
+          </div>
+
+          <section class="reactions card" aria-label="Emoji reactions">
+            <span class="reactions-label">React</span>
+            <div class="reaction-buttons" role="toolbar" aria-label="Send reaction">
+              <button
+                v-for="emoji in pokerReactionEmojis"
+                :key="emoji"
+                type="button"
+                class="reaction-btn"
+                :disabled="reactionCooldown"
+                :aria-label="`React with ${emoji}`"
+                @click="sendReaction(emoji)"
+              >
+                {{ emoji }}
+              </button>
+            </div>
+          </section>
+        </div>
       </aside>
     </div>
   </div>
@@ -1164,6 +1180,14 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-width: 0;
+}
+
+.sidebar-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
 }
 
 .status-bar {
@@ -1741,8 +1765,22 @@ onUnmounted(() => {
   position: absolute;
   transform: translate(-50%, -50%);
   text-align: center;
-  min-width: clamp(112px, 11vw, 158px);
+  min-width: clamp(96px, 10vw, 158px);
+  max-width: min(42vw, 158px);
   transition: filter 0.35s ease, opacity 0.5s ease, transform 0.5s ease;
+}
+
+.seat--players-6 {
+  min-width: clamp(84px, 8.5vw, 132px);
+  max-width: min(36vw, 132px);
+}
+
+.seat--players-6 .seat-info {
+  padding: 0.4rem 0.55rem;
+}
+
+.seat--players-6 .hole-cards {
+  gap: 0.2rem;
 }
 
 .seat.acted .seat-info {
@@ -2042,6 +2080,20 @@ onUnmounted(() => {
   margin-top: auto;
 }
 
+.controls-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.controls-dock .action-bar,
+.controls-dock .waiting,
+.controls-dock .next-hand,
+.controls-dock .reactions {
+  margin-top: 0;
+}
+
 .reactions-label {
   display: block;
   font-size: 0.7rem;
@@ -2224,6 +2276,17 @@ onUnmounted(() => {
   width: 100%;
 }
 
+.raise-toggle {
+  display: none;
+}
+
+.raise-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  width: 100%;
+}
+
 .next-hand button {
   width: 100%;
 }
@@ -2246,8 +2309,16 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0;
   width: 100%;
+}
+
+.raise-preset-btn {
+  flex: 1 1 calc(50% - 0.25rem);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .raise-preset--active {
@@ -2438,21 +2509,395 @@ onUnmounted(() => {
     max-height: calc(100vh - 6rem);
     overflow-y: auto;
   }
+
+  .sidebar-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .controls-dock {
+    flex-shrink: 0;
+  }
+
+  .action-bar .action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .action-bar .action-buttons button {
+    width: auto;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1023px) {
+  .poker-board {
+    padding-bottom: calc(5.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .poker-board--waiting {
+    padding-bottom: calc(8.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .poker-board--acting {
+    padding-bottom: calc(17.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .winners--sidebar {
+    display: none;
+  }
+
+  .controls-dock {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    gap: 0.45rem;
+    padding:
+      0.55rem 0.75rem
+      max(0.65rem, env(safe-area-inset-bottom, 0px));
+    background:
+      linear-gradient(180deg, rgba(12, 16, 26, 0) 0%, rgba(12, 16, 26, 0.88) 18%, rgba(10, 14, 22, 0.98) 100%);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+  }
+
+  .controls-dock .action-bar,
+  .controls-dock .waiting,
+  .controls-dock .next-hand,
+  .controls-dock .reactions {
+    padding: 0.65rem 0.75rem;
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+  }
+
+  .controls-dock .reactions {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .controls-dock .reactions-label {
+    margin-bottom: 0.4rem;
+  }
+
+  .controls-dock .reaction-buttons {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 0.3rem;
+    padding-bottom: 0.1rem;
+  }
+
+  .controls-dock .reaction-buttons::-webkit-scrollbar {
+    display: none;
+  }
+
+  .controls-dock .reaction-btn {
+    flex: 0 0 auto;
+    width: 2.5rem;
+    height: 2.5rem;
+    touch-action: manipulation;
+  }
+
+  .action-bar .action-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+    margin: 0.55rem 0 0;
+  }
+
+  .action-bar .action-buttons button {
+    min-height: 2.75rem;
+    touch-action: manipulation;
+  }
+
+  .raise-hint--desktop {
+    display: none;
+  }
+
+  .raise-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 0.35rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .raise-toggle__chevron {
+    display: inline-block;
+    transition: transform 0.2s ease;
+  }
+
+  .raise-toggle__chevron--open {
+    transform: rotate(180deg);
+  }
+
+  .raise-panel {
+    display: none;
+    gap: 0.5rem;
+  }
+
+  .raise-panel--open {
+    display: flex;
+  }
+
+  .raise-presets {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 0.4rem;
+    padding-bottom: 0.15rem;
+  }
+
+  .raise-presets::-webkit-scrollbar {
+    display: none;
+  }
+
+  .raise-preset-btn {
+    flex: 0 0 auto;
+    min-width: max-content;
+    padding-inline: 0.75rem;
+  }
+
+  .raise-select-row {
+    gap: 0.5rem;
+  }
+
+  .raise-select-row label {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.85rem;
+  }
+
+  .raise-select-row select {
+    flex: 1;
+    min-width: 0;
+    min-height: 2.5rem;
+  }
+
+  .waiting--dock p,
+  .next-hand--dock {
+    margin: 0;
+  }
+
+  .waiting--dock {
+    text-align: center;
+    font-size: 0.92rem;
+  }
+
+  .pot-center {
+    display: none;
+  }
+
+  .table-wrap {
+    min-height: min(50vh, 400px);
+    padding: 0.85rem;
+  }
+
+  .table-felt {
+    inset: 0.85rem;
+  }
+
+  .community-zone {
+    padding: 0.45rem 0.55rem;
+  }
+
+  .community {
+    gap: clamp(0.15rem, 1.2vw, 0.35rem);
+  }
+
+  .community :deep(.playing-card--small) {
+    width: clamp(42px, 13.5vw, 68px);
+    height: clamp(60px, 19vw, 96px);
+    font-size: clamp(0.95rem, 3.2vw, 1.15rem);
+  }
+
+  .community :deep(.corner__rank) {
+    font-size: clamp(0.78rem, 2.8vw, 0.95rem);
+  }
+
+  .community :deep(.corner__suit) {
+    font-size: clamp(0.7rem, 2.4vw, 0.85rem);
+  }
+
+  .community :deep(.suit--center) {
+    font-size: clamp(1.45rem, 5vw, 2rem);
+  }
+
+  .table-felt :deep(.playing-card--small) {
+    width: clamp(44px, 10vw, 72px);
+    height: clamp(62px, 14vw, 102px);
+  }
+
+  .seat.me .hole-cards :deep(.playing-card--small) {
+    width: clamp(48px, 12vw, 80px);
+    height: clamp(68px, 17vw, 114px);
+  }
+
+  .phase-banner {
+    font-size: clamp(1rem, 4.5vw, 1.45rem);
+    padding: 0.65rem 1.15rem;
+  }
+
+  .winner-banner {
+    padding: 1rem 1.15rem;
+  }
 }
 
 @media (max-width: 640px) {
   .poker-board {
-    padding: 0 0.75rem 0.75rem;
+    padding: 0 0.65rem 0.65rem;
     min-height: auto;
   }
 
-  .table-wrap {
-    min-height: min(52vh, 440px);
+  .status-bar {
+    gap: 0.55rem;
+    padding: 0.55rem 0.75rem;
   }
 
-  .status-bar {
-    gap: 0.75rem;
-    font-size: 0.9rem;
+  .status-pill {
+    font-size: 0.72rem;
+    padding: 0.25rem 0.55rem;
+  }
+
+  .status-pill--dealer {
+    display: none;
+  }
+
+  .status-pot__amount {
+    font-size: 1.15rem;
+  }
+
+  .last-action--table {
+    font-size: 0.85rem;
+  }
+
+  .table-wrap {
+    min-height: min(46vh, 360px);
+    padding: 0.65rem;
+    border-radius: 20px;
+  }
+
+  .table-felt {
+    inset: 0.65rem;
+  }
+
+  .seat {
+    min-width: clamp(78px, 22vw, 112px);
+    max-width: min(40vw, 112px);
+  }
+
+  .seat--players-6 {
+    min-width: clamp(70px, 19vw, 98px);
+    max-width: min(34vw, 98px);
+  }
+
+  .seat-info {
+    padding: 0.4rem 0.5rem;
+    font-size: 0.78rem;
+  }
+
+  .seat-name {
+    font-size: 0.82rem;
+  }
+
+  .seat-chips {
+    font-size: 0.72rem;
+  }
+
+  .hand-desc {
+    font-size: 0.58rem;
+  }
+
+  .poker-board--waiting {
+    padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .poker-board--acting {
+    padding-bottom: calc(16rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 1023px) and (orientation: landscape) {
+  .table-wrap {
+    min-height: min(72vh, 280px);
+  }
+
+  .poker-board {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .poker-board--waiting {
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .poker-board--acting {
+    padding-bottom: calc(10.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .controls-dock {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 0.45rem 0.65rem;
+  }
+
+  .controls-dock .reactions {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+
+  .controls-dock .action-bar,
+  .controls-dock .waiting,
+  .controls-dock .next-hand {
+    margin: 0;
+  }
+
+  .action-bar .action-buttons {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 0.35rem;
+  }
+
+  .raise-panel--open {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phase-banner,
+  .winner-banner,
+  .seat.active .seat-info,
+  .seat.winner .seat-info,
+  .pot-center--pulse .pot-center__amount,
+  .last-action--pop,
+  .seat-reaction,
+  .turn-hint__dot {
+    animation: none !important;
+  }
+
+  .seat,
+  .last-action,
+  .pot-center,
+  .btn-action,
+  .reaction-btn {
+    transition: none !important;
   }
 }
 </style>
