@@ -5,7 +5,10 @@ import { DuelRenderer, POWERUP_COLORS, POWERUP_ICONS, POWERUP_LABELS } from './d
 import {
   POWERUP_ACTIVATION_TICKS,
   POWERUP_HINTS,
+  POWERUP_TIER_LABELS,
   isInstantPowerup,
+  listActivePowerupEffects,
+  powerupTier,
   powerupUseHint,
 } from './powerupMeta'
 
@@ -99,7 +102,16 @@ const storedPowerupDescription = computed(() =>
   storedPowerup.value ? POWERUP_HINTS[storedPowerup.value] ?? '' : '',
 )
 const isInstantStored = computed(() => isInstantPowerup(storedPowerup.value))
+const storedPowerupTier = computed(() => powerupTier(storedPowerup.value))
 const arenaPowerup = computed(() => props.gameState.powerup)
+const arenaPowerupTier = computed(() => powerupTier(arenaPowerup.value?.type))
+const activeBuffs = computed(() =>
+  listActivePowerupEffects(
+    myFighter.value?.effects as Record<string, unknown> | undefined,
+    props.gameState.tick,
+    props.gameState.effect_duration_ticks ?? 80,
+  ),
+)
 
 const MUTATOR_LABELS: Record<string, string> = {
   classic: 'Classic',
@@ -468,13 +480,20 @@ onUnmounted(() => {
       <div
         v-if="canControl && storedPowerup && powerupsEnabled"
         class="powerup-slot"
-        :style="{ borderColor: POWERUP_COLORS[storedPowerup] ?? '#a855f7' }"
+        :class="[`tier-${storedPowerupTier}`, { instant: isInstantStored, activating: activatingPowerup }]"
+        :style="{
+          borderColor: POWERUP_COLORS[storedPowerup] ?? '#a855f7',
+          boxShadow: `0 8px 28px rgba(0,0,0,0.35), 0 0 24px ${POWERUP_COLORS[storedPowerup] ?? '#a855f7'}33`,
+        }"
       >
         <span class="powerup-slot-icon" :style="{ color: POWERUP_COLORS[storedPowerup] }">
           {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
         </span>
         <div class="powerup-slot-copy">
-          <strong>{{ POWERUP_LABELS[storedPowerup] ?? storedPowerup }}</strong>
+          <div class="powerup-slot-title">
+            <strong>{{ POWERUP_LABELS[storedPowerup] ?? storedPowerup }}</strong>
+            <span class="powerup-tier">{{ POWERUP_TIER_LABELS[storedPowerupTier] }}</span>
+          </div>
           <span>{{ storedPowerupDescription }}</span>
           <span class="powerup-slot-hint">{{ storedPowerupHint }}</span>
         </div>
@@ -483,9 +502,37 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <div v-if="canControl && activeBuffs.length" class="active-buffs">
+        <div
+          v-for="buff in activeBuffs"
+          :key="buff.id"
+          class="active-buff"
+          :style="{ '--buff-color': POWERUP_COLORS[buff.id] ?? '#a855f7' }"
+        >
+          <span class="active-buff-icon">{{ POWERUP_ICONS[buff.id] ?? '★' }}</span>
+          <span class="active-buff-label">{{ buff.label }}</span>
+          <span class="active-buff-ring">
+            <svg viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="15" class="ring-bg" />
+              <circle
+                cx="18"
+                cy="18"
+                r="15"
+                class="ring-fill"
+                :style="{ strokeDashoffset: `${94 * (1 - buff.progress)}` }"
+              />
+            </svg>
+          </span>
+        </div>
+      </div>
+
       <div v-if="canControl && powerupsEnabled && arenaPowerup && !storedPowerup" class="powerup-callout">
         <span class="callout-dot" :style="{ background: POWERUP_COLORS[arenaPowerup.type] }" />
-        {{ POWERUP_LABELS[arenaPowerup.type] ?? arenaPowerup.type }} in arena
+        <span class="callout-icon">{{ POWERUP_ICONS[arenaPowerup.type] ?? '★' }}</span>
+        <span class="callout-copy">
+          <strong>{{ POWERUP_LABELS[arenaPowerup.type] ?? arenaPowerup.type }}</strong>
+          <span class="callout-tier">{{ POWERUP_TIER_LABELS[arenaPowerupTier] }} · in arena</span>
+        </span>
       </div>
 
       <div v-if="charging && canControl" class="charge-bar">
@@ -500,10 +547,10 @@ onUnmounted(() => {
       <div v-if="activatingPowerup && canControl && storedPowerup" class="charge-bar powerup-bar">
         <div
           class="charge-fill powerup-fill"
-          :class="{ 'charge-full': powerupReady }"
+          :class="{ 'charge-full': powerupReady, 'powerup-charging': !powerupReady }"
           :style="{
             width: `${(powerupActivationTicks / POWERUP_ACTIVATION_TICKS) * 100}%`,
-            background: POWERUP_COLORS[storedPowerup] ?? '#a855f7',
+            background: `linear-gradient(90deg, ${POWERUP_COLORS[storedPowerup] ?? '#a855f7'}, #fff)`,
           }"
         />
         <span class="charge-label powerup-label">
@@ -590,7 +637,7 @@ onUnmounted(() => {
       <div class="controls-hint">
         <p v-if="canControl && chargeEnabled && storedPowerup">
           <strong>Controls:</strong> W/S move · Space charge & fire ·
-          {{ isInstantStored ? 'E to use power-up' : 'Hold E to activate power-up' }}
+          {{ isInstantStored ? 'E to use power-up' : `Hold E ~${Math.round((POWERUP_ACTIVATION_TICKS * tickMs) / 1000 * 10) / 10}s to activate` }}
         </p>
         <p v-else-if="canControl && chargeEnabled && powerupsEnabled && arenaPowerup">
           <strong>Controls:</strong> W/S move · Space charge & fire · Collect the {{ POWERUP_LABELS[arenaPowerup.type] ?? 'power-up' }} (shoot or touch it)
@@ -716,7 +763,210 @@ onUnmounted(() => {
   border: 1px solid rgba(168, 85, 247, 0.45);
   background: rgba(8, 12, 20, 0.82);
   backdrop-filter: blur(8px);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  animation: slotGlow 2.4s ease-in-out infinite;
+}
+
+.powerup-slot.tier-rare {
+  border-color: rgba(192, 132, 252, 0.55);
+}
+
+.powerup-slot.tier-epic {
+  border-color: rgba(252, 211, 77, 0.65);
+  animation: slotGlowEpic 1.8s ease-in-out infinite;
+}
+
+.powerup-slot.instant {
+  animation: slotPulse 1.6s ease-in-out infinite;
+}
+
+.powerup-slot.activating {
+  animation: slotActivate 0.8s ease-in-out infinite;
+}
+
+.powerup-slot-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.powerup-tier {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+}
+
+.tier-rare .powerup-tier {
+  color: #e9d5ff;
+  background: rgba(192, 132, 252, 0.18);
+}
+
+.tier-epic .powerup-tier {
+  color: #fde68a;
+  background: rgba(252, 211, 77, 0.18);
+}
+
+.active-buffs {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: min(52%, 240px);
+  justify-content: flex-end;
+}
+
+.active-buff {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.45rem 0.28rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(8, 12, 20, 0.78);
+  border: 1px solid color-mix(in srgb, var(--buff-color) 45%, transparent);
+  backdrop-filter: blur(6px);
+  font-size: 0.68rem;
+  color: #e2e8f0;
+}
+
+.active-buff-icon {
+  color: var(--buff-color);
+  font-size: 0.85rem;
+}
+
+.active-buff-label {
+  font-weight: 600;
+}
+
+.active-buff-ring {
+  width: 18px;
+  height: 18px;
+}
+
+.active-buff-ring svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.active-buff-ring .ring-bg {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 3;
+}
+
+.active-buff-ring .ring-fill {
+  fill: none;
+  stroke: var(--buff-color);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 94;
+  transition: stroke-dashoffset 80ms linear;
+}
+
+.powerup-callout {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(8, 12, 20, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  font-size: 0.78rem;
+  color: #e2e8f0;
+  animation: calloutBounce 2s ease-in-out infinite;
+}
+
+.callout-icon {
+  font-size: 1rem;
+}
+
+.callout-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  line-height: 1.15;
+}
+
+.callout-tier {
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+.powerup-fill.powerup-charging {
+  animation: powerupChargePulse 0.9s ease-in-out infinite;
+}
+
+@keyframes slotGlow {
+  0%,
+  100% {
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  }
+  50% {
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 0 18px rgba(168, 85, 247, 0.25);
+  }
+}
+
+@keyframes slotGlowEpic {
+  0%,
+  100% {
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 0 12px rgba(252, 211, 77, 0.2);
+  }
+  50% {
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 0 26px rgba(252, 211, 77, 0.45);
+  }
+}
+
+@keyframes slotPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+@keyframes slotActivate {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.15);
+  }
+}
+
+@keyframes calloutBounce {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-3px);
+  }
+}
+
+@keyframes powerupChargePulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .powerup-slot-icon {
@@ -757,23 +1007,6 @@ onUnmounted(() => {
 
 .powerup-use-btn:hover {
   background: rgba(168, 85, 247, 0.3);
-}
-
-.powerup-callout {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.65rem;
-  border-radius: 999px;
-  background: rgba(8, 12, 20, 0.78);
-  border: 1px solid rgba(251, 191, 36, 0.3);
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #fde68a;
 }
 
 .callout-dot {

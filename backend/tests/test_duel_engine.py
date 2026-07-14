@@ -92,6 +92,7 @@ def test_shoot_spawns_bullet(engine: DuelEngine, state: dict) -> None:
     assert len(state["bullets"]) == 1
     assert state["bullets"][0]["vx"] == 2
     assert state["bullets"][0]["owner_id"] == "p0"
+    assert state["bullets"][0]["x"] == left["x"] + 1 + state["bullets"][0]["vx"]
 
 
 def test_full_charge_spawns_three_fast_bullets(engine: DuelEngine, state: dict) -> None:
@@ -104,6 +105,35 @@ def test_full_charge_spawns_three_fast_bullets(engine: DuelEngine, state: dict) 
     assert len(state["bullets"]) == 3
     assert all(bullet["vx"] == 6 for bullet in state["bullets"])
     assert all(bullet["damage"] == 2 for bullet in state["bullets"])
+    assert all(bullet.get("pierce_obstacles") for bullet in state["bullets"])
+    assert all(bullet["x"] == left["x"] + 1 + bullet["vx"] for bullet in state["bullets"])
+
+
+def test_full_charge_hits_all_rows_through_lane_cover(engine: DuelEngine, state: dict) -> None:
+    right = state["fighters"]["p1"]
+    right["hp"] = 20
+    enemy_x = right["x"]
+    right_rows = [right["y"], right["y"] + 1, right["y"] + 2]
+    state["obstacles"] = [
+        {"x": enemy_x, "y": right_rows[0], "w": 1, "h": 1},
+        {"x": enemy_x, "y": right_rows[2], "w": 1, "h": 1},
+    ]
+
+    left = state["fighters"]["p0"]
+    left["pending_shoot"] = True
+    left["charge_ticks"] = 12
+    left["cooldown_until_tick"] = 0
+
+    state, _ = engine.tick(state)
+    hits = 0
+    for _ in range(12):
+        state, events = engine.tick(state)
+        hits += sum(1 for event in events if event.get("type") == "player_hit")
+        if not state["bullets"]:
+            break
+
+    assert hits == 3
+    assert right["hp"] == 20 - (2 + 3 + 2)
 
 
 def test_fighter_is_three_bars_tall(engine: DuelEngine) -> None:

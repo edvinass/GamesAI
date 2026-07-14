@@ -193,6 +193,7 @@ export interface DuelLastHit {
   damage: number
   crit: boolean
   blocked?: boolean
+  y?: number
 }
 
 export interface DuelGameState {
@@ -206,6 +207,7 @@ export interface DuelGameState {
   match_format: string
   mutator: string
   powerups_enabled: boolean
+  effect_duration_ticks?: number
   bullet_speed: number
   tick_ms: number
   charge_max_ticks: number
@@ -223,6 +225,7 @@ export interface DuelGameState {
   win_reason: string | null
   last_action: Record<string, unknown> | null
   last_hit: DuelLastHit | null
+  tick_hits?: DuelLastHit[]
   viewer_id: string | null
 }
 

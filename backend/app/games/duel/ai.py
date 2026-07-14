@@ -2,10 +2,18 @@ import random
 from typing import Any
 
 POWERUP_ACTIVATION_TICKS = 8
+FULL_CHARGE_TICKS = 11
+MID_CHARGE_TICKS = 8
 
 INSTANT_POWERUP_TYPES = frozenset(
     {"heal", "laser", "railgun", "bomb", "cluster", "burst"}
 )
+
+OFFENSIVE_BUFF_TYPES = frozenset(
+    {"rapid_fire", "machine_gun", "homing", "overdrive", "pierce", "wide_shot"}
+)
+
+DEFENSIVE_BUFF_TYPES = frozenset({"shield", "ghost", "mirror"})
 
 MOVE_OPTIONS = ("up", "down", "stop")
 
@@ -31,6 +39,18 @@ def _enemy_fighter(state: dict, player_id: str) -> dict[str, Any] | None:
         if pid != player_id and fighter.get("alive"):
             return fighter
     return None
+
+
+def _effect_active(fighter: dict[str, Any], tick: int, until_key: str) -> bool:
+    return tick < fighter.get("effects", {}).get(until_key, 0)
+
+
+def _has_offensive_buff(fighter: dict[str, Any], tick: int) -> bool:
+    effects = fighter.get("effects", {})
+    return any(
+        tick < effects.get(f"{name}_until", 0)
+        for name in OFFENSIVE_BUFF_TYPES
+    )
 
 
 def _incoming_bullets(state: dict, player_id: str, fighter: dict[str, Any]) -> list[dict]:
@@ -114,6 +134,13 @@ def _shot_aligns_with_enemy(shoot_row: int, enemy_top: int, height: int) -> bool
     return shoot_row in _fighter_rows(enemy_top, height)
 
 
+def _row_gap_to_enemy(shoot_row: int, enemy_top: int, height: int) -> int:
+    enemy_rows = _fighter_rows(enemy_top, height)
+    if shoot_row in enemy_rows:
+        return 0
+    return min(abs(shoot_row - row) for row in enemy_rows)
+
+
 def _enemy_aim_centers(
     enemy: dict[str, Any],
     fighter: dict[str, Any],
@@ -175,6 +202,47 @@ def _move_is_safe_from_bullets(
     return True
 
 
+def _immediate_bullet_threat(
+    fighter: dict[str, Any],
+    height: int,
+    bullets: list[dict],
+    max_ticks: int = 10,
+) -> bool:
+    rows = _fighter_rows(fighter["y"], height)
+    for bullet in bullets:
+        if not _bullet_heading_toward(bullet, fighter["x"], fighter["side"]):
+            continue
+        if bullet["y"] in rows and _ticks_until_column(bullet, fighter["x"]) <= max_ticks:
+            return True
+    return False
+
+
+def _count_incoming_bullets(fighter: dict[str, Any], height: int, bullets: list[dict]) -> int:
+    count = 0
+    center = _fighter_center(fighter["y"], height)
+    for bullet in bullets:
+        if not _bullet_heading_toward(bullet, fighter["x"], fighter["side"]):
+            continue
+        if _ticks_until_column(bullet, fighter["x"]) <= 18:
+            if bullet["y"] in _fighter_rows(fighter["y"], height) or abs(bullet["y"] - center) <= height + 1:
+                count += 1
+    return count
+
+
+def _powerup_urgency(state: dict, powerup: dict | None) -> float:
+    if not powerup:
+        return 0.0
+    despawn = powerup.get("despawn_at_tick")
+    if despawn is None:
+        return 0.2
+    remaining = int(despawn) - state["tick"]
+    if remaining <= 20:
+        return 1.0
+    if remaining <= 40:
+        return 0.65
+    return 0.25
+
+
 def _score_move(
     direction: str,
     fighter: dict[str, Any],
@@ -187,6 +255,7 @@ def _score_move(
     obstacles: list[dict],
     powerup: dict | None,
     speed: int,
+    state: dict,
 ) -> float:
     y = fighter["y"]
     new_top = _top_after_move(y, direction, min_y, max_y)
@@ -264,15 +333,25 @@ def _score_move(
         if y == max_y and direction == "up":
             score += 90.0
 
-    if powerup and not fighter.get("stored_powerup") and not immediate_danger:
+    if powerup and not fighter.get("stored_powerup"):
+        urgency = _powerup_urgency(state, powerup)
         center_row = _fighter_center(new_top, height)
         dist = abs(center_row - powerup["y"])
+        pickup_weight = 280.0 + urgency * 220.0
         if dist == 0:
-            score += 280.0
+            score += pickup_weight
         elif dist <= 1:
-            score += 180.0
+            score += pickup_weight * 0.72
         elif dist <= 2:
-            score += 90.0
+            score += pickup_weight * 0.42
+        elif dist <= 3 and urgency >= 0.6:
+            score += pickup_weight * 0.25
+
+        if not immediate_danger and dist <= 2:
+            if center_row < powerup["y"] and direction == "down":
+                score += 40.0
+            elif center_row > powerup["y"] and direction == "up":
+                score += 40.0
 
     return score
 
@@ -303,6 +382,7 @@ def _choose_move(
             obstacles,
             powerup,
             speed,
+            state,
         )
         scored.append((direction, score))
 
@@ -323,6 +403,9 @@ def _choose_move(
         else:
             pursuit_target = _arena_center_row(state["grid_height"], height)
 
+        if powerup and not fighter.get("stored_powerup"):
+            pursuit_target = powerup["y"]
+
         best_direction = safe_moves[0]
         best_score = float("-inf")
         best_target_dist = float("inf")
@@ -341,6 +424,29 @@ def _choose_move(
     return max(scored, key=lambda item: item[1])[0]
 
 
+def _aim_row_after_move(
+    fighter: dict[str, Any],
+    height: int,
+    move_direction: str,
+    state: dict,
+) -> int:
+    min_y, max_y = _playable_bounds(state, height)
+    shoot_top = _top_after_move(fighter["y"], move_direction, min_y, max_y)
+    return _fighter_center(shoot_top, height)
+
+
+def _predicted_enemy_top(
+    state: dict,
+    fighter: dict[str, Any],
+    enemy: dict[str, Any],
+    height: int,
+) -> int:
+    min_y, max_y = _playable_bounds(state, height)
+    speed = int(state["settings"].get("bullet_speed", 1))
+    travel = _travel_ticks_to_enemy(fighter, enemy, speed)
+    return _predict_enemy_top(enemy, height, state["grid_height"], travel, min_y, max_y)
+
+
 def _should_shoot(
     state: dict,
     fighter: dict[str, Any],
@@ -352,10 +458,22 @@ def _should_shoot(
     if tick < fighter.get("cooldown_until_tick", 0):
         return False
 
+    shoot_row = _aim_row_after_move(fighter, height, move_direction, state)
     min_y, max_y = _playable_bounds(state, height)
     speed = int(state["settings"].get("bullet_speed", 1))
-    shoot_top = _top_after_move(fighter["y"], move_direction, min_y, max_y)
-    shoot_row = _fighter_center(shoot_top, height)
+
+    if _effect_active(fighter, tick, "machine_gun_until"):
+        return True
+
+    if _effect_active(fighter, tick, "homing_until"):
+        gap = _row_gap_to_enemy(shoot_row, enemy["y"], height)
+        if gap <= height + 1:
+            return True
+
+    if _effect_active(fighter, tick, "rapid_fire_until"):
+        gap = _row_gap_to_enemy(shoot_row, _predicted_enemy_top(state, fighter, enemy, height), height)
+        if gap <= 1:
+            return True
 
     travel = _travel_ticks_to_enemy(fighter, enemy, speed)
     predicted_top = _predict_enemy_top(
@@ -364,8 +482,7 @@ def _should_shoot(
     if _shot_aligns_with_enemy(shoot_row, predicted_top, height):
         return True
 
-    current_top = enemy["y"]
-    if _shot_aligns_with_enemy(shoot_row, current_top, height):
+    if _shot_aligns_with_enemy(shoot_row, enemy["y"], height):
         return True
 
     direction = enemy.get("move_direction", "stop")
@@ -375,21 +492,21 @@ def _should_shoot(
             return True
 
     if travel <= 20:
-        predicted_top = _predict_enemy_top(
-            enemy, height, state["grid_height"], travel, min_y, max_y
-        )
         if _shot_aligns_with_enemy(shoot_row, predicted_top, height):
             return True
 
-    enemy_center = _fighter_center(current_top, height)
-    if abs(shoot_row - enemy_center) <= 1:
+    gap = _row_gap_to_enemy(shoot_row, enemy["y"], height)
+    if gap <= 1:
+        return True
+
+    if _has_offensive_buff(fighter, tick) and gap <= 2:
         return True
 
     powerup = state.get("powerup")
     if powerup and not fighter.get("stored_powerup"):
         if abs(shoot_row - powerup["y"]) <= 2:
             return True
-        if abs(shoot_row - powerup["y"]) <= 4 and random.random() < 0.65:
+        if abs(shoot_row - powerup["y"]) <= 4 and random.random() < 0.75:
             return True
 
     return False
@@ -401,24 +518,58 @@ def _should_charge(
     enemy: dict[str, Any],
     height: int,
     move_direction: str,
+    bullets: list[dict],
 ) -> tuple[bool, int]:
     if not state["settings"].get("charge_shot_enabled"):
         return False, 0
     tick = state["tick"]
     if tick < fighter.get("cooldown_until_tick", 0):
         return False, 0
+    if fighter.get("stored_powerup"):
+        return False, 0
+    if _effect_active(fighter, tick, "machine_gun_until"):
+        return False, 0
+    if _immediate_bullet_threat(fighter, height, bullets, max_ticks=12):
+        return False, 0
 
-    min_y, max_y = _playable_bounds(state, height)
-    speed = int(state["settings"].get("bullet_speed", 1))
-    shoot_top = _top_after_move(fighter["y"], move_direction, min_y, max_y)
-    shoot_row = _fighter_center(shoot_top, height)
-    enemy_center = _fighter_center(enemy["y"], height)
+    shoot_row = _aim_row_after_move(fighter, height, move_direction, state)
+    predicted_top = _predicted_enemy_top(state, fighter, enemy, height)
+    gap = _row_gap_to_enemy(shoot_row, predicted_top, height)
 
-    if abs(shoot_row - enemy_center) <= 1:
-        return True, 12
-    if _should_shoot(state, fighter, enemy, height, move_direction):
-        return True, 8
+    if gap == 0:
+        return True, FULL_CHARGE_TICKS
+    if gap <= 1:
+        return True, MID_CHARGE_TICKS
+    if _should_shoot(state, fighter, enemy, height, move_direction) and gap <= 2:
+        return True, MID_CHARGE_TICKS
     return False, 0
+
+
+def _charge_release_ticks(
+    state: dict,
+    fighter: dict[str, Any],
+    enemy: dict[str, Any],
+    height: int,
+    move_direction: str,
+    charge_ticks: int,
+    bullets: list[dict],
+) -> int:
+    if _immediate_bullet_threat(fighter, height, bullets, max_ticks=8):
+        return max(charge_ticks, 1)
+
+    shoot_row = _aim_row_after_move(fighter, height, move_direction, state)
+    predicted_top = _predicted_enemy_top(state, fighter, enemy, height)
+    gap = _row_gap_to_enemy(shoot_row, predicted_top, height)
+
+    if gap == 0 and charge_ticks >= FULL_CHARGE_TICKS:
+        return charge_ticks
+    if gap <= 1 and charge_ticks >= MID_CHARGE_TICKS:
+        return charge_ticks
+    if _should_shoot(state, fighter, enemy, height, move_direction) and charge_ticks >= MID_CHARGE_TICKS:
+        return charge_ticks
+    if charge_ticks >= FULL_CHARGE_TICKS + 2:
+        return FULL_CHARGE_TICKS
+    return 0
 
 
 def _should_activate_powerup(
@@ -426,6 +577,7 @@ def _should_activate_powerup(
     fighter: dict[str, Any],
     enemy: dict[str, Any] | None,
     height: int,
+    bullets: list[dict],
 ) -> tuple[bool, bool]:
     """Returns powerup_hold_start, powerup_hold_release."""
     if not state["settings"].get("powerups_enabled"):
@@ -440,22 +592,40 @@ def _should_activate_powerup(
             return False, True
         return False, False
 
+    tick = state["tick"]
+    incoming = _count_incoming_bullets(fighter, height, bullets)
+    shoot_row = _fighter_center(fighter["y"], height)
+
     if stored == "shield":
         if fighter.get("hp", 1) <= 2:
             return True, False
-        if random.random() < 0.35:
+        if incoming >= 2:
+            return True, False
+        if fighter.get("hp", 1) < fighter.get("max_hp", 3) and incoming >= 1:
             return True, False
     elif stored == "freeze" and enemy is not None:
-        if random.random() < 0.55:
+        travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
+        if travel <= 35:
             return True, False
-    elif stored in ("rapid_fire", "machine_gun", "homing", "overdrive", "pierce", "wide_shot", "ghost", "mirror"):
+    elif stored == "ghost":
+        if incoming >= 2:
+            return True, False
+        if incoming >= 1 and random.random() < 0.5:
+            return True, False
+    elif stored == "mirror":
+        if incoming >= 1:
+            return True, False
+    elif stored in OFFENSIVE_BUFF_TYPES:
         if enemy is not None:
-            shoot_row = _fighter_center(fighter["y"], height)
             enemy_center = _fighter_center(enemy["y"], height)
             if abs(shoot_row - enemy_center) <= 2:
                 return True, False
-        if random.random() < 0.4:
+            travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
+            if travel <= 25:
+                return True, False
+        if random.random() < 0.25:
             return True, False
+
     return False, False
 
 
@@ -470,18 +640,31 @@ def _should_use_instant_powerup(
     stored = fighter.get("stored_powerup")
     if not stored or stored not in INSTANT_POWERUP_TYPES:
         return False
+
+    hp = fighter.get("hp", 1)
+    max_hp = fighter.get("max_hp", 3)
+
     if stored == "heal":
-        return fighter.get("hp", 1) < fighter.get("max_hp", 3)
+        return hp < max_hp
+
     if enemy is None:
-        return stored in ("heal",)
+        return False
+
     shoot_row = _fighter_center(fighter["y"], height)
-    enemy_center = _fighter_center(enemy["y"], height)
-    aligned = abs(shoot_row - enemy_center) <= 2
-    if stored in ("laser", "railgun", "bomb", "cluster"):
-        return aligned or random.random() < 0.35
+    predicted_top = _predicted_enemy_top(state, fighter, enemy, height)
+    gap = _row_gap_to_enemy(shoot_row, predicted_top, height)
+    travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
+
+    if stored in ("laser", "railgun"):
+        return gap <= 1
+
+    if stored in ("bomb", "cluster"):
+        return gap <= 1 or (gap <= 2 and travel <= 18)
+
     if stored == "burst":
-        return aligned or random.random() < 0.5
-    return random.random() < 0.25
+        return gap <= 2 or (gap <= 3 and travel <= 22)
+
+    return False
 
 
 def choose_ai_actions(
@@ -507,23 +690,30 @@ def choose_ai_actions(
     if _should_use_instant_powerup(state, fighter, enemy, height):
         return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, True
 
-    pu_start, pu_release = _should_activate_powerup(state, fighter, enemy, height)
+    pu_start, pu_release = _should_activate_powerup(state, fighter, enemy, height, bullets)
     if pu_start or pu_release:
         return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant
 
     if enemy is not None:
+        tick = state["tick"]
         if fighter.get("charging"):
             charge_ticks = fighter.get("charge_ticks", 0) + 1
-            if charge_ticks >= 8 or _should_shoot(state, fighter, enemy, height, move):
+            release_ticks = _charge_release_ticks(
+                state, fighter, enemy, height, move, charge_ticks, bullets
+            )
+            if release_ticks:
                 charge_release = True
+                charge_ticks = release_ticks
             else:
                 charge_start = True
         else:
-            want_charge, ticks = _should_charge(state, fighter, enemy, height, move)
-            if want_charge and random.random() < 0.55 and not fighter.get("stored_powerup"):
+            want_charge, ticks = _should_charge(state, fighter, enemy, height, move, bullets)
+            if want_charge:
                 charge_start = True
                 charge_ticks = ticks
             elif _should_shoot(state, fighter, enemy, height, move):
+                shoot = True
+            elif _effect_active(fighter, tick, "machine_gun_until"):
                 shoot = True
 
     return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant

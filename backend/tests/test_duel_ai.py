@@ -240,3 +240,95 @@ def test_ai_channel_not_reset_mid_activation() -> None:
     state, _ = engine.tick(state)
     assert ai["activating_powerup"] is True
     assert ai["powerup_activation_ticks"] >= 5
+
+
+def test_ai_uses_heal_when_damaged() -> None:
+    state = make_state()
+    state["settings"]["powerups_enabled"] = True
+    ai = state["fighters"]["ai"]
+    ai["hp"] = 2
+    ai["max_hp"] = 3
+    ai["stored_powerup"] = "heal"
+
+    *_, pu_instant = choose_ai_actions(state, "ai", ai)
+    assert pu_instant is True
+
+
+def test_ai_machine_gun_spams_shots() -> None:
+    state = make_state()
+    state["settings"]["charge_shot_enabled"] = False
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["y"] = 5
+    human["y"] = 12
+    ai["cooldown_until_tick"] = 0
+    ai["effects"]["machine_gun_until"] = state["tick"] + 80
+
+    _, shoot, *_ = choose_ai_actions(state, "ai", ai)
+    assert shoot is True
+
+
+def test_ai_activates_freeze_in_range() -> None:
+    state = make_state()
+    state["settings"]["powerups_enabled"] = True
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["stored_powerup"] = "freeze"
+    ai["x"] = 40
+    human["x"] = 10
+
+    *_, pu_start, pu_release, pu_instant = choose_ai_actions(state, "ai", ai)[-4:]
+    assert pu_start is True
+    assert pu_release is False
+    assert pu_instant is False
+
+
+def test_ai_moves_toward_powerup() -> None:
+    state = make_state()
+    state["settings"]["powerups_enabled"] = True
+    ai = state["fighters"]["ai"]
+    ai["side"] = "right"
+    ai["x"] = 46
+    ai["y"] = 5
+    state["bullets"] = []
+    state["powerup"] = {
+        "x": 24,
+        "y": 12,
+        "type": "shield",
+        "despawn_at_tick": state["tick"] + 15,
+    }
+
+    move, *_ = choose_ai_actions(state, "ai", ai)
+    assert move == "down"
+
+
+def test_ai_starts_offensive_buff_when_engaging() -> None:
+    state = make_state()
+    state["settings"]["powerups_enabled"] = True
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["y"] = 10
+    human["y"] = 10
+    ai["stored_powerup"] = "overdrive"
+
+    *_, pu_start, pu_release, pu_instant = choose_ai_actions(state, "ai", ai)[-4:]
+    assert pu_start is True
+    assert pu_release is False
+    assert pu_instant is False
+
+
+def test_ai_charges_when_aligned_and_safe() -> None:
+    state = make_state()
+    state["settings"]["charge_shot_enabled"] = True
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["y"] = 10
+    human["y"] = 10
+    ai["cooldown_until_tick"] = 0
+    state["bullets"] = []
+
+    _, shoot, charge_start, charge_release, charge_ticks, *_ = choose_ai_actions(state, "ai", ai)
+    assert shoot is False
+    assert charge_start is True
+    assert charge_release is False
+    assert charge_ticks >= 8
