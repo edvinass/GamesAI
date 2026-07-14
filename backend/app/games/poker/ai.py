@@ -8,6 +8,8 @@ from typing import Any
 from app.games.poker.equity import estimate_equity_from_state
 from app.games.poker.ev_solver import choose_ev_action
 from app.games.poker.opponent_model import aggregate_opponent_profile
+from app.games.poker.preflop_strategy import should_open_preflop, should_three_bet_preflop
+from app.games.poker.ranges import preflop_hand_strength
 
 AI_DIFFICULTIES = ("easy", "medium", "hard")
 
@@ -16,21 +18,21 @@ DIFFICULTY_CONFIG: dict[str, dict[str, float | int | str]] = {
         "strategy": "heuristic",
         "mc_iterations": 200,
         "call_margin": -0.05,
-        "raise_threshold": 0.62,
-        "value_raise_threshold": 0.72,
-        "bluff_rate": 0.18,
+        "raise_threshold": 0.65,
+        "value_raise_threshold": 0.74,
+        "bluff_rate": 0.08,
         "mistake_rate": 0.22,
-        "open_equity": 0.42,
+        "open_equity": 0.48,
     },
     "medium": {
         "strategy": "heuristic",
         "mc_iterations": 700,
         "call_margin": 0.06,
-        "raise_threshold": 0.55,
-        "value_raise_threshold": 0.64,
-        "bluff_rate": 0.06,
+        "raise_threshold": 0.62,
+        "value_raise_threshold": 0.72,
+        "bluff_rate": 0.03,
         "mistake_rate": 0.02,
-        "open_equity": 0.52,
+        "open_equity": 0.56,
     },
     "hard": {
         "strategy": "ev",
@@ -173,7 +175,7 @@ def _pick_raise_amount(
     stack_bb = _stack_bb(state, player_id)
 
     if stack_bb <= 12:
-        if equity >= float(cfg["value_raise_threshold"]) + 0.03:
+        if equity >= float(cfg["value_raise_threshold"]) + 0.08:
             return legal_raises[-1]
         return None
 
@@ -202,7 +204,10 @@ def _pick_raise_amount(
     if chosen is None or chosen <= p["bet_this_round"]:
         return None
     if _raise_commitment_fraction(state, player_id, chosen) > 0.35:
-        if equity < float(cfg["value_raise_threshold"]) + 0.05:
+        if equity < float(cfg["value_raise_threshold"]) + 0.10:
+            return None
+    if chosen >= p["bet_this_round"] + p["chips"]:
+        if equity < float(cfg["value_raise_threshold"]):
             return None
     return chosen
 
@@ -218,20 +223,24 @@ def _should_bluff(
 ) -> bool:
     if to_call > 0:
         return False
-    if equity > 0.35:
+    if equity > 0.28:
+        return False
+    if position < 0.5:
         return False
     if opponents.get("is_station"):
         return False
 
     bluff_rate = float(cfg["bluff_rate"])
-    if opponents.get("fold_to_bet_rate", 0.45) > 0.55:
-        bluff_rate += 0.08
+    if opponents.get("fold_to_bet_rate", 0.45) > 0.58:
+        bluff_rate += 0.04
     if opponents.get("is_nit"):
-        bluff_rate += 0.05
+        bluff_rate += 0.03
     if position >= 0.7:
-        bluff_rate += 0.06
+        bluff_rate += 0.03
     if state["phase"] == "river":
-        bluff_rate *= 0.7
+        bluff_rate *= 0.5
+    if state["phase"] == "preflop":
+        bluff_rate *= 0.6
 
     return random.random() < bluff_rate
 
@@ -256,9 +265,11 @@ def _choose_heuristic_action(
         state,
         player_id,
         iterations=int(cfg["mc_iterations"]),
+        use_ranges=True,
+        opponents=opponents,
     )
 
-    position_equity = min(1.0, equity + position * 0.04)
+    position_equity = min(1.0, equity + position * 0.02)
     call_threshold = pot_odds + float(cfg["call_margin"])
     is_bluff = _should_bluff(state, player_id, equity, to_call, position, cfg, opponents)
 
@@ -271,9 +282,13 @@ def _choose_heuristic_action(
 
     stack_bb = _stack_bb(state, player_id)
     if stack_bb <= 10 and to_call > 0:
-        push_threshold = float(cfg["value_raise_threshold"]) - position * 0.04
+        push_threshold = float(cfg["value_raise_threshold"]) + 0.04
         if _facing_3bet_plus(state, to_call):
-            push_threshold += 0.06
+            push_threshold += 0.08
+        if state["phase"] == "preflop":
+            strength = preflop_hand_strength(p["hole_cards"])
+            if strength < 0.70 and position_equity < push_threshold + 0.05:
+                push_threshold += 0.06
         if position_equity >= push_threshold:
             return {"type": "all_in"}
         if to_call <= state["settings"]["big_blind"] and position_equity >= call_threshold:
@@ -287,7 +302,17 @@ def _choose_heuristic_action(
         if opponents.get("is_station"):
             open_equity += 0.05
 
-        if position_equity >= open_equity or is_bluff:
+        wants_raise = position_equity >= open_equity or is_bluff
+        if wants_raise and state["phase"] == "preflop" and not is_bluff:
+            if not should_open_preflop(
+                p["hole_cards"],
+                position,
+                stack_bb=stack_bb,
+                opponents=opponents,
+            ):
+                wants_raise = position_equity >= float(cfg["value_raise_threshold"])
+
+        if wants_raise:
             raise_amount = _pick_raise_amount(
                 state,
                 player_id,
@@ -299,7 +324,9 @@ def _choose_heuristic_action(
             )
             if raise_amount is not None:
                 if raise_amount >= p["bet_this_round"] + p["chips"]:
-                    return {"type": "all_in"}
+                    if position_equity >= float(cfg["value_raise_threshold"]):
+                        return {"type": "all_in"}
+                    return {"type": "check"}
                 return {"type": "raise", "amount": raise_amount}
         return {"type": "check"}
 
@@ -312,24 +339,30 @@ def _choose_heuristic_action(
             return {"type": "fold"}
 
     re_raise_threshold = _re_raise_equity_threshold(state, to_call, cfg)
-    can_bluff_raise = (
-        is_bluff
-        and opponents.get("fold_to_bet_rate", 0.45) > 0.5
-        and not _facing_3bet_plus(state, to_call)
-    )
-    if position_equity >= re_raise_threshold or can_bluff_raise:
+    wants_reraise = position_equity >= re_raise_threshold
+    if wants_reraise and state["phase"] == "preflop" and _facing_raise(state, to_call):
+        if not should_three_bet_preflop(
+            p["hole_cards"],
+            position,
+            facing_3bet=_facing_3bet_plus(state, to_call),
+        ):
+            wants_reraise = position_equity >= re_raise_threshold + 0.06
+
+    if wants_reraise:
         raise_amount = _pick_raise_amount(
             state,
             player_id,
             equity=position_equity,
             to_call=to_call,
-            is_bluff=can_bluff_raise,
+            is_bluff=False,
             position=position,
             cfg=cfg,
         )
         if raise_amount is not None:
             if raise_amount >= p["bet_this_round"] + p["chips"]:
-                return {"type": "all_in"}
+                if position_equity >= float(cfg["value_raise_threshold"]):
+                    return {"type": "all_in"}
+                return {"type": "call"}
             return {"type": "raise", "amount": raise_amount}
 
     if to_call >= p["chips"]:

@@ -106,3 +106,77 @@ def test_hard_folds_weak_river_hand() -> None:
     state["players"]["p1"].update(villain)
     action = choose_poker_action(state, "p0", difficulty="hard")
     assert action["type"] == "fold"
+
+
+def test_medium_checks_trash_preflop_utg() -> None:
+    engine = PokerEngine()
+    players = [
+        {"id": "p0", "nickname": "AI", "is_ai": True, "team": None, "role": None, "is_connected": True},
+        {"id": "p1", "nickname": "Villain", "is_ai": False, "team": None, "role": None, "is_connected": True},
+        {"id": "p2", "nickname": "Villain2", "is_ai": False, "team": None, "role": None, "is_connected": True},
+    ]
+    state = engine.create_initial_state(players, {"host_id": "p0", "big_blind": 10, "ai_difficulty": "medium"})
+    state.update(
+        {
+            "phase": "preflop",
+            "current_bet": 10,
+            "current_actor_id": "p0",
+            "dealer_index": 2,
+            "seat_order": ["p0", "p1", "p2"],
+        }
+    )
+    state["players"]["p0"].update(
+        {
+            "hole_cards": [make_card("7", "clubs"), make_card("2", "diamonds")],
+            "status": "active",
+            "bet_this_round": 0,
+            "chips": 1000,
+            "total_bet_hand": 0,
+        }
+    )
+    state["players"]["p1"].update({"status": "active", "bet_this_round": 5, "total_bet_hand": 5})
+    state["players"]["p2"].update({"status": "active", "bet_this_round": 10, "total_bet_hand": 10})
+
+    action = choose_poker_action(state, "p0", difficulty="medium")
+    assert action["type"] in ("check", "fold")
+    assert action["type"] != "all_in"
+
+
+def test_medium_folds_weak_river_bet() -> None:
+    engine = PokerEngine()
+    players = [
+        {"id": "p0", "nickname": "AI", "is_ai": True, "team": None, "role": None, "is_connected": True},
+        {"id": "p1", "nickname": "Villain", "is_ai": False, "team": None, "role": None, "is_connected": True},
+    ]
+    base = {
+        "phase": "river",
+        "community_cards": [
+            make_card("A", "hearts"),
+            make_card("K", "diamonds"),
+            make_card("Q", "spades"),
+            make_card("J", "clubs"),
+            make_card("2", "hearts"),
+        ],
+        "current_bet": 80,
+        "current_actor_id": "p0",
+    }
+    hero = {
+        "hole_cards": [make_card("7", "clubs"), make_card("3", "diamonds")],
+        "status": "active",
+        "bet_this_round": 0,
+        "chips": 500,
+        "total_bet_hand": 0,
+    }
+    villain = {
+        "hole_cards": [make_card("8", "spades"), make_card("8", "clubs")],
+        "status": "active",
+        "bet_this_round": 80,
+        "chips": 420,
+        "total_bet_hand": 80,
+    }
+    state = engine.create_initial_state(players, {"host_id": "p0", "big_blind": 10})
+    state.update(base)
+    state["players"]["p0"].update(hero)
+    state["players"]["p1"].update(villain)
+    action = choose_poker_action(state, "p0", difficulty="medium")
+    assert action["type"] == "fold"

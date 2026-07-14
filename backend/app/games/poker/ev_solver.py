@@ -216,7 +216,7 @@ def _candidate_actions(
         candidates.append({"type": "call"})
 
     # Facing a bet with very weak equity: no bluff-raises.
-    can_raise = to_call == 0 or equity >= 0.32
+    can_raise = to_call == 0 or equity >= 0.45
     raise_targets: set[int] = set()
 
     if can_raise and state["phase"] == "preflop":
@@ -233,13 +233,13 @@ def _candidate_actions(
                 facing_3bet=_facing_3bet_plus(state, to_call),
                 value_threshold=0.72,
             )
-            if mult > 0 and strength >= 0.58:
+            if mult > 0 and strength >= 0.65:
                 target = p["bet_this_round"] + to_call + int(to_call * mult)
                 chosen = _closest_legal_raise(legal_raises, target)
                 if chosen:
                     raise_targets.add(chosen)
     elif can_raise:
-        is_bluff = equity < 0.38 and to_call == 0 and opponents.get("fold_to_bet_rate", 0.45) > 0.48
+        is_bluff = equity < 0.30 and to_call == 0 and opponents.get("fold_to_bet_rate", 0.45) > 0.52
         fractions = candidate_pot_fractions(
             equity=equity,
             texture=texture,
@@ -256,14 +256,14 @@ def _candidate_actions(
             if chosen and chosen > p["bet_this_round"]:
                 raise_targets.add(chosen)
 
-    if stack_bb <= 12 and equity >= 0.68:
+    if stack_bb <= 12 and equity >= 0.75:
         max_raise = p["bet_this_round"] + p["chips"]
         if legal_raises:
             raise_targets.add(legal_raises[-1])
         elif max_raise > state["current_bet"]:
             raise_targets.add(max_raise)
 
-    if spr(state, player_id) <= 1.5 and equity >= 0.55:
+    if spr(state, player_id) <= 1.5 and equity >= 0.65:
         max_raise = p["bet_this_round"] + p["chips"]
         if legal_raises:
             raise_targets.add(legal_raises[-1])
@@ -314,7 +314,7 @@ def choose_ev_action(
 
     if stack_bb <= 8 and to_call > 0:
         strength = preflop_hand_strength(p["hole_cards"]) if state["phase"] == "preflop" else position_equity
-        if strength >= 0.72 or position_equity >= 0.62:
+        if strength >= 0.78 or position_equity >= 0.70:
             return {"type": "all_in"}
         if to_call <= state["settings"]["big_blind"] and position_equity >= pot_odds:
             return {"type": "call"}
@@ -369,7 +369,7 @@ def choose_ev_action(
 
     if best_action["type"] == "check" and to_call == 0:
         strength = preflop_hand_strength(p["hole_cards"])
-        if state["phase"] == "preflop" and strength >= 0.55 and position >= 0.5:
+        if state["phase"] == "preflop" and strength >= 0.62 and position >= 0.6:
             legal = _legal_raise_targets(state, player_id)
             if legal:
                 bb = state["settings"]["big_blind"]
