@@ -103,29 +103,30 @@ export interface SnakeGameState {
 }
 
 export interface DuelFighterEffects {
-  rapid_fire_until: number
   machine_gun_until?: number
   shield_until?: number
   wide_shot_until?: number
   pierce_until?: number
-  ghost_until: number
+  ghost_until?: number
   homing_until?: number
-  mirror_until?: number
-  overdrive_until?: number
-  freeze_until?: number
-  phase_shift_until?: number
+  jam_until?: number
+  ricochet_until?: number
+  afterburner_until?: number
+  exposed_until?: number
+  jam_cast_until?: number
+  expose_cast_until?: number
   ghost_active?: boolean
-  freeze_active?: boolean
-  mirror_active?: boolean
+  jam_active?: boolean
+  exposed_active?: boolean
   homing_active?: boolean
-  rapid_fire_active?: boolean
   machine_gun_active?: boolean
   shield_active?: boolean
   wide_shot_active?: boolean
   pierce_active?: boolean
-  overdrive_active?: boolean
-  phase_shift_active?: boolean
-  freeze_cast_active?: boolean
+  ricochet_active?: boolean
+  afterburner_active?: boolean
+  jam_cast_active?: boolean
+  expose_cast_active?: boolean
 }
 
 export interface DuelFighter {
@@ -174,32 +175,24 @@ export interface DuelPowerup {
   x: number
   y: number
   type:
-    | 'rapid_fire'
     | 'machine_gun'
     | 'shield'
     | 'wide_shot'
     | 'pierce'
     | 'ghost'
-    | 'freeze'
-    | 'laser'
+    | 'jam'
+    | 'snipe'
     | 'railgun'
     | 'homing'
     | 'heal'
-    | 'mirror'
-    | 'overdrive'
+    | 'ricochet'
     | 'bomb'
     | 'cluster'
     | 'burst'
-    | 'phase_shift'
-    | 'decoy'
+    | 'afterburner'
+    | 'expose'
+    | 'shockwave'
   despawn_at_tick?: number
-}
-
-export interface DuelDecoy {
-  player_id: string
-  y: number
-  until_tick?: number
-  side?: 'left' | 'right'
 }
 
 export interface DuelEventLogEntry {
@@ -264,7 +257,6 @@ export interface DuelGameState {
   fighters: Record<string, DuelFighter>
   bullets: DuelBullet[]
   powerup: DuelPowerup | null
-  decoys?: DuelDecoy[]
   event_log?: DuelEventLogEntry[]
   round_stats?: Record<string, DuelStatBlock>
   match_stats?: Record<string, DuelStatBlock>

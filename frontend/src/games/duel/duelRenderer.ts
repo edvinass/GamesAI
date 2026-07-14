@@ -54,66 +54,63 @@ interface Star {
 }
 
 export const POWERUP_COLORS: Record<string, string> = {
-  rapid_fire: '#f97316',
   machine_gun: '#eab308',
   shield: '#38bdf8',
   wide_shot: '#a855f7',
   pierce: '#14b8a6',
   ghost: '#94a3b8',
-  freeze: '#67e8f9',
-  laser: '#f43f5e',
+  jam: '#f43f5e',
+  snipe: '#fb7185',
   railgun: '#dc2626',
   homing: '#22c55e',
   heal: '#4ade80',
-  mirror: '#e879f9',
-  overdrive: '#fb923c',
+  ricochet: '#38bdf8',
+  afterburner: '#f97316',
+  expose: '#fbbf24',
   bomb: '#f59e0b',
   cluster: '#ef4444',
   burst: '#60a5fa',
-  phase_shift: '#818cf8',
-  decoy: '#cbd5e1',
+  shockwave: '#a78bfa',
 }
 
 export const POWERUP_ICONS: Record<string, string> = {
-  rapid_fire: '⚡',
   machine_gun: '🔫',
   shield: '◆',
   wide_shot: '▣',
   pierce: '➤',
   ghost: '◎',
-  freeze: '❄',
-  laser: '═',
+  jam: '⊘',
+  snipe: '⊹',
   railgun: '▬',
   homing: '↯',
   heal: '+',
-  mirror: '⟲',
-  overdrive: '✦',
+  ricochet: '↺',
+  afterburner: '»',
+  expose: '◉',
   bomb: '💣',
   cluster: '✸',
   burst: '⋯',
-  phase_shift: '◇',
-  decoy: '◌',
+  shockwave: '≋',
 }
 
 export const POWERUP_LABELS: Record<string, string> = {
-  rapid_fire: 'Rapid Fire',
   machine_gun: 'Machine Gun',
   shield: 'Shield',
   wide_shot: 'Wide Shot',
   pierce: 'Pierce',
   ghost: 'Ghost',
-  freeze: 'Freeze',
-  laser: 'Laser',
+  jam: 'Jam',
+  snipe: 'Snipe',
   railgun: 'Railgun',
   homing: 'Homing',
   heal: 'Heal',
-  mirror: 'Mirror',
-  overdrive: 'Overdrive',
+  ricochet: 'Ricochet',
+  afterburner: 'Afterburner',
+  expose: 'Expose',
   bomb: 'Bomb',
   cluster: 'Cluster',
   burst: 'Burst',
-  phase_shift: 'Phase Shift',
-  decoy: 'Decoy',
+  shockwave: 'Shockwave',
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -424,12 +421,16 @@ export class DuelRenderer {
         ? offsetX + state.grid_width * cell
         : offsetX
 
-      if (ptype === 'laser') {
-        this.spawnBeamFlash(cx, cy, boardEndX, cy, color, 3, 180)
+      if (ptype === 'snipe') {
+        this.spawnBeamFlash(cx, cy, boardEndX, cy, color, 4, 140)
       } else if (ptype === 'railgun') {
         this.spawnBeamFlash(cx, cy, boardEndX, cy, '#dc2626', 6, 260)
       } else if (ptype === 'heal') {
         this.spawnHealRise(cx, cy)
+      } else if (ptype === 'shockwave') {
+        this.spawnPowerupBurst(cx, cy, color, true)
+        this.shakeUntil = Date.now() + 180
+        this.shakeIntensity = 6
       } else if (ptype === 'bomb' || ptype === 'cluster' || ptype === 'burst') {
         const muzzleX = this.boardX(offsetX, cell, fighter?.x ?? 0) + (this.facingRight(fighter!.side) ? cell : 0)
         this.muzzleFlashes.push({ x: muzzleX, y: cy, color, until: Date.now() + 160 })
@@ -653,7 +654,6 @@ export class DuelRenderer {
     this.drawArena(ctx, offsetX, offsetY, boardW, boardH, grid_width, grid_height, cell, playable_y_min, playable_y_max, now)
     this.drawSpawnZones(ctx, offsetX, offsetY, boardW, boardH, cell, now)
     this.drawObstacles(ctx, offsetX, offsetY, cell, obstacles, now)
-    this.drawDecoys(ctx, offsetX, offsetY, cell, grid_width, state.decoys ?? [], barCount, now)
     this.drawPowerup(
       ctx,
       offsetX,
@@ -892,15 +892,17 @@ export class DuelRenderer {
     const drawY = cy + bob
 
     const tierRing =
-      powerup.type === 'laser' || powerup.type === 'railgun' || powerup.type === 'cluster'
+      powerup.type === 'snipe' || powerup.type === 'railgun' || powerup.type === 'cluster'
         ? '#fcd34d'
         : powerup.type === 'pierce' ||
             powerup.type === 'ghost' ||
-            powerup.type === 'freeze' ||
-            powerup.type === 'mirror' ||
-            powerup.type === 'overdrive' ||
+            powerup.type === 'jam' ||
+            powerup.type === 'ricochet' ||
+            powerup.type === 'afterburner' ||
+            powerup.type === 'expose' ||
             powerup.type === 'bomb' ||
-            powerup.type === 'burst'
+            powerup.type === 'burst' ||
+            powerup.type === 'shockwave'
           ? '#c084fc'
           : '#94a3b8'
 
@@ -1025,12 +1027,6 @@ export class DuelRenderer {
     if (!effects) return
     const facingRight = this.facingRight(fighter.side)
 
-    if (effects.rapid_fire_active) {
-      const flicker = 0.25 + Math.sin(now * 0.02) * 0.15
-      ctx.fillStyle = rgba('#f97316', flicker)
-      ctx.fillRect(fx - cell * 0.15, top + height * 0.35, cell * 0.2, height * 0.3)
-    }
-
     if (effects.machine_gun_active) {
       ctx.fillStyle = rgba('#eab308', 0.35 + Math.sin(now * 0.035) * 0.2)
       ctx.beginPath()
@@ -1038,10 +1034,19 @@ export class DuelRenderer {
       ctx.fill()
     }
 
-    if (effects.overdrive_active) {
-      const flame = 0.3 + Math.sin(now * 0.025) * 0.2
-      ctx.fillStyle = rgba('#fb923c', flame)
-      ctx.fillRect(fx - cell * 0.25, top + height * 0.2, cell * 0.18, height * 0.6)
+    if (effects.ricochet_active) {
+      ctx.strokeStyle = rgba('#38bdf8', 0.45 + Math.sin(now * 0.02) * 0.2)
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([3, 3])
+      ctx.strokeRect(fx - cell * 0.1, top - cell * 0.1, fw + cell * 0.2, height + cell * 0.2)
+      ctx.setLineDash([])
+    }
+
+    if (effects.afterburner_active) {
+      const flame = 0.35 + Math.sin(now * 0.03) * 0.2
+      ctx.fillStyle = rgba('#f97316', flame)
+      const trailX = facingRight ? fx - cell * 0.2 : fx + fw
+      ctx.fillRect(trailX, top + height * 0.25, cell * 0.22, height * 0.5)
     }
 
     if (effects.homing_active) {
@@ -1437,32 +1442,6 @@ export class DuelRenderer {
     }
   }
 
-  private drawDecoys(
-    ctx: CanvasRenderingContext2D,
-    offsetX: number,
-    offsetY: number,
-    cell: number,
-    gridWidth: number,
-    decoys: Array<{ player_id: string; y: number; side?: string }>,
-    barCount: number,
-    now: number,
-  ) {
-    for (const decoy of decoys) {
-      const spawnX = decoy.side === 'right' ? gridWidth - 2 : 1
-      const x = this.boardX(offsetX, cell, spawnX)
-      const top = offsetY + decoy.y * cell
-      const height = cell * barCount
-      const pulse = 0.25 + Math.sin(now * 0.01) * 0.15
-      ctx.globalAlpha = pulse
-      ctx.strokeStyle = rgba('#cbd5e1', 0.8)
-      ctx.lineWidth = Math.max(1, cell * 0.08)
-      ctx.setLineDash([5, 4])
-      ctx.strokeRect(x, top, cell, height)
-      ctx.setLineDash([])
-      ctx.globalAlpha = 1
-    }
-  }
-
   private drawFighters(
     ctx: CanvasRenderingContext2D,
     offsetX: number,
@@ -1538,22 +1517,21 @@ export class DuelRenderer {
         ctx.fillRect(fighterColX - 1, top, cell + 2, height)
       }
 
-      if (fighter.effects?.mirror_active) {
+      if (fighter.effects?.jam_active) {
         const top = offsetY + displayY * cell
         const height = cell * barCount
-        const pulse = 0.4 + Math.sin(now * 0.008) * 0.25
-        ctx.strokeStyle = rgba('#e879f9', pulse)
-        ctx.lineWidth = Math.max(2, cell * 0.1)
-        ctx.beginPath()
-        ctx.roundRect(fighterColX - 3, top - 3, cell + 6, height + 6, cell * 0.25)
-        ctx.stroke()
+        ctx.fillStyle = rgba('#f43f5e', 0.16 + Math.sin(now * 0.008) * 0.08)
+        ctx.fillRect(fighterColX - 1, top, cell + 2, height)
       }
 
-      if (fighter.effects?.freeze_active) {
+      if (fighter.effects?.exposed_active) {
         const top = offsetY + displayY * cell
         const height = cell * barCount
-        ctx.fillStyle = rgba('#67e8f9', 0.18 + Math.sin(now * 0.006) * 0.08)
-        ctx.fillRect(fighterColX - 1, top, cell + 2, height)
+        ctx.strokeStyle = rgba('#fbbf24', 0.55 + Math.sin(now * 0.012) * 0.25)
+        ctx.lineWidth = Math.max(2, cell * 0.1)
+        ctx.beginPath()
+        ctx.roundRect(fighterColX - 4, top - 4, cell + 8, height + 8, cell * 0.25)
+        ctx.stroke()
       }
 
       if (isMe && fighter.alive) {

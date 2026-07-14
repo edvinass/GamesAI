@@ -807,6 +807,7 @@ watch(
         already_banned: 'You already banned a power-up',
         invalid_powerup: 'Invalid power-up choice',
         on_cooldown: 'Wait for reload before charging',
+        jammed: 'You are jammed — cannot shoot or charge',
       }
       showPowerupNotice(messages[reason ?? ''] ?? 'Action rejected', 'warn')
     }

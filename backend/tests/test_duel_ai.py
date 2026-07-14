@@ -250,12 +250,12 @@ def test_ai_machine_gun_spams_shots() -> None:
     assert shoot is True
 
 
-def test_ai_activates_freeze_in_range() -> None:
+def test_ai_activates_jam_in_range() -> None:
     state = make_state()
     state["settings"]["powerups_enabled"] = True
     ai = state["fighters"]["ai"]
     human = state["fighters"]["human"]
-    ai["stored_powerup"] = "freeze"
+    ai["stored_powerup"] = "jam"
     ai["x"] = 40
     human["x"] = 10
 
@@ -289,7 +289,7 @@ def test_ai_starts_offensive_buff_when_engaging() -> None:
     human = state["fighters"]["human"]
     ai["y"] = 10
     human["y"] = 10
-    ai["stored_powerup"] = "overdrive"
+    ai["stored_powerup"] = "afterburner"
 
     *_, pu_use = choose_ai_actions(state, "ai", ai)[-1:]
     assert pu_use is True
@@ -390,7 +390,7 @@ def test_ai_settings_override_move_and_reaction_intervals() -> None:
     assert cfg["reaction_interval"] == 3
 
 
-def test_ai_considers_phase_shift_offensive_buff() -> None:
+def test_ai_considers_afterburner_offensive_buff() -> None:
     from app.games.duel.ai import OFFENSIVE_BUFF_TYPES
 
-    assert "phase_shift" in OFFENSIVE_BUFF_TYPES
+    assert "afterburner" in OFFENSIVE_BUFF_TYPES

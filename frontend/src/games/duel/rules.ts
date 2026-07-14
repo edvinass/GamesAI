@@ -25,7 +25,7 @@ export const duelRules: GameRules = {
     },
     {
       heading: 'Power-ups',
-      body: 'Shoot orbs to collect, then press E to activate. Machine Gun and Rapid Fire spray fast bullets. Bomb and Cluster launch explosives. Burst fires a 6-round salvo. Laser and Railgun are instant beams — Railgun pierces cover. Pierce shots ignore obstacles. Phase Shift lets you pass through cover briefly. Decoy projects a fake ship to bait homing fire. Shield, Ghost, Mirror, Homing, Wide Shot, Overdrive, Freeze, and Heal round out the arsenal.',
+      body: 'Shoot orbs to collect, then press E to activate. Machine Gun sprays fast bullets. Jam silences enemy guns and movement. Afterburner doubles strafe speed. Ricochet adds wall bounces to your shots. Expose reveals enemies in Fog and counters Ghost. Shockwave pushes enemies off your aim line. Bomb and Cluster launch explosives. Burst fires a 6-round salvo. Snipe is a fast cover-piercing shot; Railgun is a full piercing beam. Pierce ignores obstacles. Shield, Ghost, Homing, Wide Shot, and Heal round out the arsenal.',
     },
     {
       heading: 'Match formats',

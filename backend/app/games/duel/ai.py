@@ -5,14 +5,14 @@ FULL_CHARGE_TICKS = 11
 MID_CHARGE_TICKS = 8
 
 INSTANT_POWERUP_TYPES = frozenset(
-    {"heal", "laser", "railgun", "bomb", "cluster", "burst", "decoy"}
+    {"heal", "snipe", "railgun", "bomb", "cluster", "burst", "shockwave"}
 )
 
 OFFENSIVE_BUFF_TYPES = frozenset(
-    {"rapid_fire", "machine_gun", "homing", "overdrive", "pierce", "wide_shot", "phase_shift"}
+    {"machine_gun", "homing", "pierce", "wide_shot", "afterburner", "ricochet", "expose"}
 )
 
-DEFENSIVE_BUFF_TYPES = frozenset({"shield", "ghost", "mirror"})
+DEFENSIVE_BUFF_TYPES = frozenset({"shield", "ghost"})
 
 MOVE_OPTIONS = ("up", "down", "stop")
 
@@ -102,6 +102,10 @@ def _enemy_fighter(state: dict, player_id: str) -> dict[str, Any] | None:
         if pid != player_id and fighter.get("alive"):
             return fighter
     return None
+
+
+def _is_jammed(fighter: dict[str, Any], tick: int) -> bool:
+    return tick < fighter.get("effects", {}).get("jam_until", 0)
 
 
 def _effect_active(fighter: dict[str, Any], tick: int, until_key: str) -> bool:
@@ -532,6 +536,8 @@ def _should_shoot(
     offense_bias = float(ai_cfg.get("offense_bias", 0.5))
     difficulty = normalize_ai_difficulty(state["settings"].get("ai_difficulty"))
     tick = state["tick"]
+    if _is_jammed(fighter, tick):
+        return False
     if tick < fighter.get("cooldown_until_tick", 0):
         return False
 
@@ -545,11 +551,6 @@ def _should_shoot(
     if _effect_active(fighter, tick, "homing_until"):
         gap = _row_gap_to_enemy(shoot_row, enemy["y"], height)
         if gap <= height + 1:
-            return True
-
-    if _effect_active(fighter, tick, "rapid_fire_until"):
-        gap = _row_gap_to_enemy(shoot_row, _predicted_enemy_top(state, fighter, enemy, height), height)
-        if gap <= 1:
             return True
 
     travel = _travel_ticks_to_enemy(fighter, enemy, speed)
@@ -613,6 +614,8 @@ def _should_charge(
     if not state["settings"].get("charge_shot_enabled"):
         return False, 0
     tick = state["tick"]
+    if _is_jammed(fighter, tick):
+        return False, 0
     if tick < fighter.get("cooldown_until_tick", 0):
         return False, 0
     if fighter.get("stored_powerup"):
@@ -704,18 +707,18 @@ def _should_use_powerup(
         gap = _row_gap_to_enemy(shoot_row, predicted_top, height)
         travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
 
-        if stored in ("laser", "railgun"):
+        if stored in ("snipe", "railgun"):
             return gap <= 1
 
         if stored in ("bomb", "cluster"):
             if stored == "bomb" and enemy is not None:
                 enemy_effects = enemy.get("effects", {})
-                if state["tick"] < enemy_effects.get("freeze_until", 0):
+                if state["tick"] < enemy_effects.get("jam_until", 0):
                     return True
             return gap <= 1 or (gap <= 2 and travel <= 18)
 
-        if stored == "decoy":
-            return random.random() < 0.45
+        if stored == "shockwave":
+            return gap <= 3
 
         if stored == "burst":
             return gap <= 2 or (gap <= 3 and travel <= 22)
@@ -733,7 +736,7 @@ def _should_use_powerup(
             return True
         if fighter.get("hp", 1) < fighter.get("max_hp", 3) and incoming >= 1:
             return True
-    elif stored == "freeze" and enemy is not None:
+    elif stored == "jam" and enemy is not None:
         travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
         if travel <= 35:
             return True
@@ -741,9 +744,6 @@ def _should_use_powerup(
         if incoming >= 2:
             return True
         if incoming >= 1 and random.random() < 0.5:
-            return True
-    elif stored == "mirror":
-        if incoming >= 1:
             return True
     elif stored in OFFENSIVE_BUFF_TYPES:
         offense_bias = float(
@@ -756,7 +756,7 @@ def _should_use_powerup(
             travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
             if travel <= 25:
                 return True
-        if stored == "phase_shift" and incoming >= 1:
+        if stored == "afterburner" and incoming >= 1:
             return True
         if random.random() < 0.15 + offense_bias * 0.2:
             return True

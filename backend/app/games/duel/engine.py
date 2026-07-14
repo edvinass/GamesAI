@@ -16,97 +16,96 @@ BOMB_WALL_VERTICAL_RADIUS = 4
 HOMING_LOCK_ON_TICKS = 5
 HOMING_MAX_TURN_RATE = 1
 HOMING_LEAD_FACTOR = 0.55
-HOMING_DECOY_DIST_PENALTY = 3
-
 BOMB_CHARGES = 3
+
+RICOCHET_BONUS_BOUNCES = 3
+AFTERBURNER_MOVE_STEPS = 2
+SHOCKWAVE_PUSH_ROWS = 2
+SNIPE_DAMAGE = 3
+SNIPE_SPEED_MULTIPLIER = 2
 
 MOVE_DIRECTIONS = {"up", "down", "stop"}
 
 POWERUP_TYPES = (
-    "rapid_fire",
     "machine_gun",
     "shield",
     "wide_shot",
     "pierce",
     "ghost",
-    "freeze",
-    "laser",
+    "jam",
+    "snipe",
     "railgun",
     "homing",
     "heal",
-    "mirror",
-    "overdrive",
+    "ricochet",
     "bomb",
     "cluster",
     "burst",
-    "phase_shift",
-    "decoy",
+    "afterburner",
+    "expose",
+    "shockwave",
 )
 
 POWERUP_ACTIVATION_TICKS = 8
 
 # Per-power-up effect length (ticks) and channel time before release (ticks).
 POWERUP_EFFECT_DURATIONS: dict[str, int] = {
-    "rapid_fire": 140,
     "machine_gun": 180,
     "shield": 200,
     "wide_shot": 150,
     "pierce": 140,
     "ghost": 170,
-    "freeze": 110,
+    "jam": 100,
     "homing": 160,
-    "mirror": 150,
-    "overdrive": 130,
-    "phase_shift": 120,
-    "decoy": 140,
+    "ricochet": 140,
+    "afterburner": 110,
+    "expose": 130,
 }
 
 POWERUP_CHANNEL_TICKS: dict[str, int] = {
-    "rapid_fire": 6,
     "machine_gun": 6,
     "shield": 8,
     "wide_shot": 6,
     "homing": 7,
     "pierce": 7,
     "ghost": 7,
-    "freeze": 8,
-    "mirror": 8,
-    "overdrive": 7,
-    "phase_shift": 7,
+    "jam": 8,
+    "ricochet": 7,
+    "afterburner": 6,
+    "expose": 7,
 }
 
 INSTANT_POWERUP_TYPES = frozenset(
     {
         "heal",
-        "laser",
+        "snipe",
         "railgun",
         "bomb",
         "cluster",
         "burst",
-        "decoy",
+        "shockwave",
     }
 )
 
 # Weighted spawn — rarer power-ups appear less often
 POWERUP_SPAWN_WEIGHTS: dict[str, int] = {
-    "rapid_fire": 12,
-    "machine_gun": 10,
+    "machine_gun": 11,
     "shield": 11,
     "wide_shot": 10,
     "homing": 10,
     "heal": 9,
     "pierce": 7,
     "ghost": 7,
-    "freeze": 7,
-    "mirror": 6,
-    "overdrive": 6,
+    "jam": 7,
+    "ricochet": 6,
     "bomb": 7,
     "burst": 6,
-    "laser": 4,
+    "afterburner": 6,
+    "expose": 6,
+    "shockwave": 8,
+    "snipe": 4,
     "railgun": 3,
     "cluster": 4,
-    "phase_shift": 4,
-    "decoy": 5,
 }
 
 STACKABLE_SECONDARY_MUTATORS = frozenset({"fog", "chaos"})
@@ -574,16 +573,16 @@ class DuelEngine(GamePlugin):
                 "activating_powerup": False,
                 "powerup_activation_ticks": 0,
                 "effects": {
-                    "rapid_fire_until": 0,
                     "machine_gun_until": 0,
                     "shield_until": 0,
                     "wide_shot_until": 0,
                     "pierce_until": 0,
                     "ghost_until": 0,
                     "homing_until": 0,
-                    "mirror_until": 0,
-                    "overdrive_until": 0,
-                    "phase_shift_until": 0,
+                    "jam_until": 0,
+                    "ricochet_until": 0,
+                    "afterburner_until": 0,
+                    "exposed_until": 0,
                 },
                 "burst_shots_remaining": 0,
                 "burst_next_at_tick": 0,
@@ -609,16 +608,16 @@ class DuelEngine(GamePlugin):
                 "activating_powerup": False,
                 "powerup_activation_ticks": 0,
                 "effects": {
-                    "rapid_fire_until": 0,
                     "machine_gun_until": 0,
                     "shield_until": 0,
                     "wide_shot_until": 0,
                     "pierce_until": 0,
                     "ghost_until": 0,
                     "homing_until": 0,
-                    "mirror_until": 0,
-                    "overdrive_until": 0,
-                    "phase_shift_until": 0,
+                    "jam_until": 0,
+                    "ricochet_until": 0,
+                    "afterburner_until": 0,
+                    "exposed_until": 0,
                 },
                 "burst_shots_remaining": 0,
                 "burst_next_at_tick": 0,
@@ -642,16 +641,16 @@ class DuelEngine(GamePlugin):
             "activating_powerup": False,
             "powerup_activation_ticks": 0,
             "effects": {
-                "rapid_fire_until": 0,
                 "machine_gun_until": 0,
                 "shield_until": 0,
                 "wide_shot_until": 0,
                 "pierce_until": 0,
                 "ghost_until": 0,
                 "homing_until": 0,
-                "mirror_until": 0,
-                "overdrive_until": 0,
-                "phase_shift_until": 0,
+                "jam_until": 0,
+                "ricochet_until": 0,
+                "afterburner_until": 0,
+                "exposed_until": 0,
             },
             "burst_shots_remaining": 0,
             "burst_next_at_tick": 0,
@@ -796,7 +795,6 @@ class DuelEngine(GamePlugin):
             "round_winner": None,
             "match_stats": self._empty_match_stats(normalized_players),
             "powerup_bans": {},
-            "decoys": [],
             "event_log": [],
             "grid_width": grid_width,
             "grid_height": grid_height,
@@ -917,6 +915,8 @@ class DuelEngine(GamePlugin):
                 return state, events
             if not state["settings"].get("charge_shot_enabled"):
                 return state, events
+            if self._is_jammed(fighter, state["tick"]):
+                return self._reject_action(state, player, action, "jammed")
             if state["tick"] < fighter.get("cooldown_until_tick", 0):
                 return self._reject_action(state, player, action, "on_cooldown")
             fighter["charging"] = True
@@ -996,6 +996,8 @@ class DuelEngine(GamePlugin):
         if action_type == "release_charge":
             if state["settings"].get("training_drill") == "dodge_only":
                 return state, events
+            if self._is_jammed(fighter, state["tick"]):
+                return self._reject_action(state, player, action, "jammed")
             charge_max = int(state["settings"].get("charge_max_ticks", 15))
             if state["settings"].get("charge_shot_enabled"):
                 server_ticks = int(fighter.get("charge_ticks", 0))
@@ -1020,6 +1022,8 @@ class DuelEngine(GamePlugin):
         if action_type == "shoot":
             if state["settings"].get("training_drill") == "dodge_only":
                 return state, events
+            if self._is_jammed(fighter, state["tick"]):
+                return self._reject_action(state, player, action, "jammed")
             fighter["pending_shoot"] = True
             fighter["charge_ticks"] = 0
             fighter["charging"] = False
@@ -1075,11 +1079,14 @@ class DuelEngine(GamePlugin):
                 fighter["charge_ticks"] = 0
                 fighter["charging"] = False
 
-    def _is_frozen(self, fighter: dict, tick: int) -> bool:
-        return tick < fighter.get("effects", {}).get("freeze_until", 0)
+    def _is_jammed(self, fighter: dict, tick: int) -> bool:
+        return tick < fighter.get("effects", {}).get("jam_until", 0)
 
-    def _is_phase_shifted(self, fighter: dict, tick: int) -> bool:
-        return tick < fighter.get("effects", {}).get("phase_shift_until", 0)
+    def _has_afterburner(self, fighter: dict, tick: int) -> bool:
+        return tick < fighter.get("effects", {}).get("afterburner_until", 0)
+
+    def _is_exposed(self, fighter: dict, tick: int) -> bool:
+        return tick < fighter.get("effects", {}).get("exposed_until", 0)
 
     def _move_fighter(
         self,
@@ -1091,23 +1098,27 @@ class DuelEngine(GamePlugin):
         playable_y_max: int,
         tick: int = 0,
     ) -> None:
-        if self._is_frozen(fighter, tick):
+        if self._is_jammed(fighter, tick):
             return
         direction = fighter.get("move_direction", "stop")
         max_y = grid_height - fighter_height
         min_y = max(0, playable_y_min)
         max_allowed = min(max_y, playable_y_max - fighter_height + 1)
+        steps = AFTERBURNER_MOVE_STEPS if self._has_afterburner(fighter, tick) and direction != "stop" else 1
 
-        if direction == "up":
-            new_y = max(min_y, fighter["y"] - 1)
-        elif direction == "down":
-            new_y = min(max_allowed, fighter["y"] + 1)
-        else:
-            return
+        for _ in range(steps):
+            if direction == "up":
+                new_y = max(min_y, fighter["y"] - 1)
+            elif direction == "down":
+                new_y = min(max_allowed, fighter["y"] + 1)
+            else:
+                return
 
-        candidate = {**fighter, "y": new_y}
-        ignore_obstacles = self._is_phase_shifted(fighter, tick)
-        if ignore_obstacles or not self._fighter_overlaps_obstacle(candidate, fighter_height, obstacles):
+            candidate = {**fighter, "y": new_y}
+            if new_y == fighter["y"] or self._fighter_overlaps_obstacle(
+                candidate, fighter_height, obstacles
+            ):
+                break
             fighter["y"] = new_y
 
     def _shoot_row(self, fighter: dict, fighter_height: int) -> int:
@@ -1129,8 +1140,6 @@ class DuelEngine(GamePlugin):
         effects = fighter.get("effects", {})
         if tick < effects.get("machine_gun_until", 0):
             return max(2, base // 4)
-        if tick < effects.get("rapid_fire_until", 0):
-            return max(4, base // 2)
         return base
 
     def _spawn_bullet(
@@ -1193,10 +1202,13 @@ class DuelEngine(GamePlugin):
     def _try_shoot(self, state: dict, fighter: dict, owner_id: str) -> None:
         if not fighter.get("pending_shoot"):
             return
+        tick = state["tick"]
+        if self._is_jammed(fighter, tick):
+            fighter["pending_shoot"] = False
+            return
         if state["settings"].get("training_drill") == "dodge_only":
             fighter["pending_shoot"] = False
             return
-        tick = state["tick"]
         if tick < fighter.get("cooldown_until_tick", 0):
             fighter["pending_shoot"] = False
             return
@@ -1218,15 +1230,13 @@ class DuelEngine(GamePlugin):
         if tick < effects.get("wide_shot_until", 0):
             width = max(width, 3)
 
-        overdrive = tick < effects.get("overdrive_until", 0)
-        if overdrive:
-            width = max(width, 3)
-            damage = max(damage, 2)
-
         machine_gun = tick < effects.get("machine_gun_until", 0)
         if machine_gun:
             damage = 1
             width = 1
+
+        if tick < effects.get("ricochet_until", 0):
+            bounces = max(bounces, RICOCHET_BONUS_BOUNCES)
 
         center_row = self._shoot_row(fighter, fighter_height)
         if width >= fighter_height:
@@ -1519,9 +1529,7 @@ class DuelEngine(GamePlugin):
         effects = fighter.setdefault("effects", {})
         consumed = True
 
-        if ptype == "rapid_fire":
-            self._extend_timed_effect(effects, "rapid_fire_until", tick, duration)
-        elif ptype == "machine_gun":
+        if ptype == "machine_gun":
             self._extend_timed_effect(effects, "machine_gun_until", tick, duration)
         elif ptype == "shield":
             self._extend_timed_effect(effects, "shield_until", tick, duration)
@@ -1533,10 +1541,10 @@ class DuelEngine(GamePlugin):
             self._extend_timed_effect(effects, "ghost_until", tick, duration)
         elif ptype == "homing":
             self._extend_timed_effect(effects, "homing_until", tick, duration)
-        elif ptype == "mirror":
-            self._extend_timed_effect(effects, "mirror_until", tick, duration)
-        elif ptype == "overdrive":
-            self._extend_timed_effect(effects, "overdrive_until", tick, duration)
+        elif ptype == "ricochet":
+            self._extend_timed_effect(effects, "ricochet_until", tick, duration)
+        elif ptype == "afterburner":
+            self._extend_timed_effect(effects, "afterburner_until", tick, duration)
         elif ptype == "heal":
             hp_before = fighter.get("hp", 1)
             fighter["hp"] = min(fighter.get("max_hp", 3), hp_before + 1)
@@ -1546,15 +1554,22 @@ class DuelEngine(GamePlugin):
                 )
                 if owner_id in match_stats:
                     match_stats[owner_id]["clutch_heals"] += 1
-        elif ptype == "freeze":
-            caster_effects = fighter.setdefault("effects", {})
-            self._extend_timed_effect(caster_effects, "freeze_cast_until", tick, duration)
+        elif ptype == "jam":
+            self._extend_timed_effect(effects, "jam_cast_until", tick, duration)
             for pid, target in state["fighters"].items():
                 if pid != owner_id and target.get("alive"):
                     target_effects = target.setdefault("effects", {})
-                    self._extend_timed_effect(target_effects, "freeze_until", tick, duration)
-        elif ptype == "laser":
-            self._fire_laser(state, fighter, owner_id, events)
+                    self._extend_timed_effect(target_effects, "jam_until", tick, duration)
+                    target["charging"] = False
+                    target["pending_shoot"] = False
+        elif ptype == "expose":
+            self._extend_timed_effect(effects, "expose_cast_until", tick, duration)
+            for pid, target in state["fighters"].items():
+                if pid != owner_id and target.get("alive"):
+                    target_effects = target.setdefault("effects", {})
+                    self._extend_timed_effect(target_effects, "exposed_until", tick, duration)
+        elif ptype == "snipe":
+            self._fire_snipe(state, fighter, owner_id)
         elif ptype == "railgun":
             self._fire_railgun(state, fighter, owner_id, events)
         elif ptype == "bomb":
@@ -1570,31 +1585,8 @@ class DuelEngine(GamePlugin):
         elif ptype == "burst":
             fighter["burst_shots_remaining"] = 6
             fighter["burst_next_at_tick"] = tick
-        elif ptype == "phase_shift":
-            self._extend_timed_effect(effects, "phase_shift_until", tick, duration)
-        elif ptype == "decoy":
-            grid_height = state["grid_height"]
-            fighter_height = self._fighter_height(state)
-            settings = state["settings"]
-            y_min = state.get("playable_y_min", 0)
-            y_max = max(
-                y_min,
-                state.get("playable_y_max", grid_height - 1) - fighter_height,
-            )
-            if settings.get("layout_seed") is not None:
-                rng = self._layout_rng(settings, salt=tick + len(state.get("decoys", [])))
-                decoy_y = rng.randint(y_min, y_max)
-            else:
-                decoy_y = random.randint(y_min, y_max)
-            decoy_duration = self._powerup_effect_duration("decoy", state)
-            state.setdefault("decoys", []).append(
-                {
-                    "player_id": owner_id,
-                    "y": decoy_y,
-                    "until_tick": tick + decoy_duration,
-                    "side": fighter.get("side"),
-                }
-            )
+        elif ptype == "shockwave":
+            self._apply_shockwave(state, fighter, owner_id, events)
 
         if consumed:
             fighter["stored_powerup"] = None
@@ -1764,31 +1756,76 @@ class DuelEngine(GamePlugin):
             )
             self._apply_damage(state, target, owner_id, pid, damage, crit, events, hit_y=ey)
 
-    def _fire_laser(self, state: dict, fighter: dict, owner_id: str, events: list[dict]) -> None:
+    def _push_fighter_vertical(
+        self,
+        state: dict,
+        fighter: dict,
+        delta_rows: int,
+        obstacles: list[dict],
+        fighter_height: int,
+    ) -> bool:
+        if delta_rows == 0:
+            return False
+        grid_height = state["grid_height"]
+        playable_y_min = state.get("playable_y_min", 0)
+        playable_y_max = state.get("playable_y_max", grid_height - 1)
+        min_y = max(0, playable_y_min)
+        max_allowed = min(
+            grid_height - fighter_height,
+            playable_y_max - fighter_height + 1,
+        )
+        step = 1 if delta_rows > 0 else -1
+        moved = False
+        for _ in range(abs(delta_rows)):
+            if step < 0:
+                new_y = max(min_y, fighter["y"] - 1)
+            else:
+                new_y = min(max_allowed, fighter["y"] + 1)
+            if new_y == fighter["y"]:
+                break
+            candidate = {**fighter, "y": new_y}
+            if self._fighter_overlaps_obstacle(candidate, fighter_height, obstacles):
+                break
+            fighter["y"] = new_y
+            moved = True
+        return moved
+
+    def _apply_shockwave(
+        self, state: dict, fighter: dict, owner_id: str, events: list[dict]
+    ) -> None:
+        fighter_height = self._fighter_height(state)
+        caster_center = self._shoot_row(fighter, fighter_height)
+        obstacles = state.get("obstacles", [])
+        for pid, target in state["fighters"].items():
+            if pid == owner_id or not target.get("alive"):
+                continue
+            target_center = self._shoot_row(target, fighter_height)
+            if target_center == caster_center:
+                continue
+            delta = -SHOCKWAVE_PUSH_ROWS if target_center < caster_center else SHOCKWAVE_PUSH_ROWS
+            if self._push_fighter_vertical(state, target, delta, obstacles, fighter_height):
+                events.append(
+                    {
+                        "type": "shockwave_hit",
+                        "player_id": owner_id,
+                        "target_id": pid,
+                    }
+                )
+
+    def _fire_snipe(self, state: dict, fighter: dict, owner_id: str) -> None:
         fighter_height = self._fighter_height(state)
         center_row = self._shoot_row(fighter, fighter_height)
-        grid_width = state["grid_width"]
-        obstacles = state.get("obstacles", [])
-        side = fighter["side"]
-        x_start = fighter["x"] + (1 if side == "left" else -1)
-        x_end = grid_width - 1 if side == "left" else 0
-        step = 1 if side == "left" else -1
-
-        for x in range(x_start, x_end + step, step):
-            if self._cell_blocked(x, center_row, obstacles):
-                break
-            for pid, target in state["fighters"].items():
-                if pid == owner_id or not target.get("alive"):
-                    continue
-                if target["x"] == x and target["y"] <= center_row < target["y"] + fighter_height:
-                    damage, crit = self._hit_damage(
-                        state,
-                        {"y": center_row, "damage": 2},
-                        target,
-                        fighter_height,
-                    )
-                    self._apply_damage(state, target, owner_id, pid, damage, crit, events, hit_y=center_row)
-                    return
+        speed = max(2, int(state["settings"].get("bullet_speed", 2)) * SNIPE_SPEED_MULTIPLIER)
+        self._spawn_bullet(
+            state,
+            fighter,
+            owner_id,
+            center_row,
+            damage=SNIPE_DAMAGE,
+            bounces=0,
+            speed=speed,
+            pierce_obstacles=True,
+        )
 
     def _fire_railgun(self, state: dict, fighter: dict, owner_id: str, events: list[dict]) -> None:
         """Piercing beam that cuts through cover for heavy damage."""
@@ -1917,19 +1954,6 @@ class DuelEngine(GamePlugin):
                     top = fighter["y"]
                     if not (top <= cy < top + fighter_height):
                         continue
-                    effects = fighter.get("effects", {})
-                    if state["tick"] < effects.get("mirror_until", 0):
-                        shooter_id = bullet["owner_id"]
-                        bullet["vx"] *= -1
-                        bullet["owner_id"] = pid
-                        events.append(
-                            {
-                                "type": "bullet_reflected",
-                                "player_id": pid,
-                                "shooter_id": shooter_id,
-                            }
-                        )
-                        return True
                     self._detonate_bomb(state, cx, cy, bullet["owner_id"], events)
                     return False
                 continue
@@ -1965,20 +1989,6 @@ class DuelEngine(GamePlugin):
                 top = fighter["y"]
                 if not (top <= cy < top + fighter_height):
                     continue
-
-                effects = fighter.get("effects", {})
-                if state["tick"] < effects.get("mirror_until", 0):
-                    shooter_id = bullet["owner_id"]
-                    bullet["vx"] *= -1
-                    bullet["owner_id"] = pid
-                    events.append(
-                        {
-                            "type": "bullet_reflected",
-                            "player_id": pid,
-                            "shooter_id": shooter_id,
-                        }
-                    )
-                    return True
 
                 damage, crit = self._hit_damage(state, bullet, fighter, fighter_height)
                 eliminated = self._apply_damage(
@@ -2168,12 +2178,6 @@ class DuelEngine(GamePlugin):
             obstacle["y"] = candidate["y"]
             obstacle["vy"] = vy
 
-    def _cleanup_decoys(self, state: dict) -> None:
-        tick = state["tick"]
-        state["decoys"] = [
-            decoy for decoy in state.get("decoys", []) if int(decoy.get("until_tick", 0)) > tick
-        ]
-
     def _homing_lead_row(
         self,
         state: dict,
@@ -2186,7 +2190,7 @@ class DuelEngine(GamePlugin):
         dist_x = abs(int(fighter["x"]) - int(bullet["x"]))
         eta = dist_x / max(1, abs(int(bullet.get("vx", 1))))
         move = fighter.get("move_direction", "stop")
-        if self._is_frozen(fighter, state["tick"]):
+        if self._is_jammed(fighter, state["tick"]):
             move = "stop"
         lead = 0.0
         if move == "up":
@@ -2195,7 +2199,7 @@ class DuelEngine(GamePlugin):
             lead += eta * HOMING_LEAD_FACTOR
         tick = state["tick"]
         effects = fighter.get("effects", {})
-        if tick < effects.get("ghost_until", 0):
+        if tick < effects.get("ghost_until", 0) and not self._is_exposed(fighter, tick):
             lead += float((hash((fighter_id, tick // 4)) % 5) - 2)
         return center + lead
 
@@ -2209,17 +2213,6 @@ class DuelEngine(GamePlugin):
                 continue
             row = self._homing_lead_row(state, bullet, fighter, pid)
             score = abs(int(fighter["x"]) - bx) + abs(row - by) * 1.15
-            if best_score is None or score < best_score:
-                best_score = score
-                best_row = int(round(row))
-
-        for decoy in state.get("decoys", []):
-            if decoy.get("player_id") == bullet["owner_id"]:
-                continue
-            if decoy.get("side") == owner.get("side"):
-                continue
-            row = float(int(decoy["y"]) + 1)
-            score = abs(int(decoy.get("x", bx)) - bx) + abs(row - by) * 1.15 + HOMING_DECOY_DIST_PENALTY
             if best_score is None or score < best_score:
                 best_score = score
                 best_row = int(round(row))
@@ -2261,8 +2254,14 @@ class DuelEngine(GamePlugin):
 
     def _increment_charging(self, state: dict) -> None:
         max_charge = int(state["settings"].get("charge_max_ticks", 15))
+        tick = state["tick"]
         for fighter in state["fighters"].values():
-            if fighter.get("alive") and fighter.get("charging"):
+            if not fighter.get("alive"):
+                continue
+            if self._is_jammed(fighter, tick):
+                fighter["charging"] = False
+                continue
+            if fighter.get("charging"):
                 fighter["charge_ticks"] = min(max_charge, fighter.get("charge_ticks", 0) + 1)
 
     def _start_round_countdown(self, state: dict) -> None:
@@ -2292,7 +2291,6 @@ class DuelEngine(GamePlugin):
         state["playable_y_max"] = grid_height - 1
         state["bullets"] = []
         state["powerup"] = None
-        state["decoys"] = []
         state["next_powerup_at_tick"] = self._schedule_next_powerup_spawn_tick(settings, state["tick"])
         state["last_hit"] = None
         state["round_winner"] = None
@@ -2434,7 +2432,6 @@ class DuelEngine(GamePlugin):
         self._increment_powerup_activation(state)
         self._complete_ai_powerup_channels(state, events)
         self._rotate_obstacles(state)
-        self._cleanup_decoys(state)
         self._maybe_shrink_arena(state, events)
         self._apply_hazard_damage(state, events)
         self._maybe_spawn_powerup(state, events)
@@ -2515,17 +2512,17 @@ class DuelEngine(GamePlugin):
                 effects["ghost_active"] = False
             else:
                 effects["ghost_active"] = pid != viewer_id
-            effects["freeze_active"] = tick < effects.get("freeze_until", 0)
-            effects["freeze_cast_active"] = tick < effects.get("freeze_cast_until", 0)
-            effects["mirror_active"] = tick < effects.get("mirror_until", 0)
+            effects["jam_active"] = tick < effects.get("jam_until", 0)
+            effects["jam_cast_active"] = tick < effects.get("jam_cast_until", 0)
+            effects["exposed_active"] = tick < effects.get("exposed_until", 0)
+            effects["expose_cast_active"] = tick < effects.get("expose_cast_until", 0)
             effects["homing_active"] = tick < effects.get("homing_until", 0)
-            effects["rapid_fire_active"] = tick < effects.get("rapid_fire_until", 0)
             effects["machine_gun_active"] = tick < effects.get("machine_gun_until", 0)
             effects["shield_active"] = tick < effects.get("shield_until", 0)
             effects["wide_shot_active"] = tick < effects.get("wide_shot_until", 0)
             effects["pierce_active"] = tick < effects.get("pierce_until", 0)
-            effects["overdrive_active"] = tick < effects.get("overdrive_until", 0)
-            effects["phase_shift_active"] = tick < effects.get("phase_shift_until", 0)
+            effects["ricochet_active"] = tick < effects.get("ricochet_until", 0)
+            effects["afterburner_active"] = tick < effects.get("afterburner_until", 0)
             public["effects"] = effects
             public["charging"] = bool(fighter.get("charging"))
             public["charge_ticks"] = int(fighter.get("charge_ticks", 0))
@@ -2536,7 +2533,8 @@ class DuelEngine(GamePlugin):
             public["activating_powerup"] = fighter.get("activating_powerup", False)
             public["powerup_activation_ticks"] = fighter.get("powerup_activation_ticks", 0)
 
-            if fog and viewer_id and pid != viewer_id and not effects.get("ghost_active"):
+            exposed = tick < effects.get("exposed_until", 0)
+            if fog and viewer_id and pid != viewer_id and not effects.get("ghost_active") and not exposed:
                 offset = self._fog_offset(viewer_id, pid, tick)
                 public["display_y"] = max(0, fighter["y"] + offset)
             else:
@@ -2581,7 +2579,6 @@ class DuelEngine(GamePlugin):
             "fighters": fighters,
             "bullets": state["bullets"],
             "powerup": state.get("powerup"),
-            "decoys": state.get("decoys", []),
             "event_log": state.get("event_log", []),
             "round_stats": state.get("round_stats", {}),
             "match_stats": state.get("match_stats", {}),

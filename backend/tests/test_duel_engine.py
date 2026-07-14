@@ -326,14 +326,17 @@ def test_powerup_activation(engine: DuelEngine, state: dict) -> None:
     assert any(e["type"] == "powerup_activated" for e in events)
 
 
-def test_freeze_blocks_movement(engine: DuelEngine, state: dict) -> None:
+def test_jam_blocks_movement_and_shooting(engine: DuelEngine, state: dict) -> None:
     fighter = state["fighters"]["p0"]
     fighter["move_direction"] = "down"
-    fighter["effects"]["freeze_until"] = state["tick"] + 50
+    fighter["effects"]["jam_until"] = state["tick"] + 50
+    fighter["pending_shoot"] = True
+    fighter["cooldown_until_tick"] = 0
     start_y = fighter["y"]
 
     state, _ = engine.tick(state)
     assert fighter["y"] == start_y
+    assert not state["bullets"]
 
 
 def test_heal_at_max_hp_is_blocked(engine: DuelEngine, state: dict) -> None:
@@ -348,15 +351,15 @@ def test_heal_at_max_hp_is_blocked(engine: DuelEngine, state: dict) -> None:
     assert state["last_action"]["type"] == "powerup_blocked"
 
 
-def test_overdrive_increases_shot_damage(engine: DuelEngine, state: dict) -> None:
+def test_ricochet_adds_bounces(engine: DuelEngine, state: dict) -> None:
     left = state["fighters"]["p0"]
-    left["effects"]["overdrive_until"] = state["tick"] + 80
+    left["effects"]["ricochet_until"] = state["tick"] + 80
     left["pending_shoot"] = True
     left["cooldown_until_tick"] = 0
 
     state, _ = engine.tick(state)
     assert len(state["bullets"]) >= 1
-    assert all(b["damage"] >= 2 for b in state["bullets"])
+    assert all(b.get("bounces_remaining", 0) >= 3 for b in state["bullets"])
 
 
 def test_timed_effect_extends_instead_of_shortening(engine: DuelEngine, state: dict) -> None:
@@ -573,11 +576,17 @@ def test_powerup_release_without_hold_does_not_activate(engine: DuelEngine, stat
 def test_buff_powerup_activate(engine: DuelEngine, state: dict) -> None:
     player = state["players"][0]
     pid = player["id"]
-    state["fighters"][pid]["stored_powerup"] = "rapid_fire"
+    state["fighters"][pid]["stored_powerup"] = "ricochet"
+    state["fighters"][pid]["activating_powerup"] = True
+    state["fighters"][pid]["powerup_activation_ticks"] = 7
 
-    state, events = engine.apply_action(state, {"type": "powerup_activate"}, player)
+    state, events = engine.apply_action(
+        state,
+        {"type": "powerup_hold_release", "powerup_activation_ticks": 7},
+        player,
+    )
     assert state["fighters"][pid]["stored_powerup"] is None
-    assert state["fighters"][pid]["effects"]["rapid_fire_until"] > state["tick"]
+    assert state["fighters"][pid]["effects"]["ricochet_until"] > state["tick"]
     assert any(e["type"] == "powerup_activated" for e in events)
 
 
@@ -1021,34 +1030,6 @@ def test_burst_shots_respect_bullet_cap(engine: DuelEngine, state: dict) -> None
     assert len([b for b in state["bullets"] if b["owner_id"] == "p0"]) == 2
 
 
-def test_mirror_reflects_bomb(engine: DuelEngine, state: dict) -> None:
-    state["fighters"]["p1"]["x"] = 20
-    state["fighters"]["p1"]["y"] = 5
-    state["fighters"]["p1"]["effects"]["mirror_until"] = state["tick"] + 50
-    bomb = {
-        "id": 9,
-        "x": 19,
-        "y": 6,
-        "vx": 1,
-        "vy": 0,
-        "owner_id": "p0",
-        "kind": "bomb",
-    }
-    state["bullets"] = [bomb]
-    events: list[dict] = []
-    kept = engine._process_bullet(
-        state,
-        bomb,
-        state["fighters"],
-        engine._fighter_height(state),
-        state.get("obstacles", []),
-        events,
-    )
-    assert kept is True
-    assert bomb["owner_id"] == "p1"
-    assert bomb["vx"] == -1
-
-
 def test_duplicate_ban_returns_rejection(engine: DuelEngine, state: dict) -> None:
     state["phase"] = "powerup_draft"
     state["powerup_bans"] = {"p0": "shield"}
@@ -1060,19 +1041,56 @@ def test_duplicate_ban_returns_rejection(engine: DuelEngine, state: dict) -> Non
     assert state["last_action"]["reason"] == "already_banned"
 
 
-def test_decoy_spawn_uses_seeded_y(engine: DuelEngine, state: dict) -> None:
-    import copy
+def test_afterburner_moves_two_rows(engine: DuelEngine, state: dict) -> None:
+    fighter = state["fighters"]["p0"]
+    fighter["move_direction"] = "down"
+    fighter["effects"]["afterburner_until"] = state["tick"] + 50
+    start_y = fighter["y"]
 
-    state["settings"]["layout_seed"] = 999
-    state["tick"] = 50
-    a = copy.deepcopy(state)
-    b = copy.deepcopy(state)
-    for s in (a, b):
-        fighter = s["fighters"]["p0"]
-        fighter["stored_powerup"] = "decoy"
-        engine._activate_stored_powerup(s, fighter, "p0", [])
+    engine._move_fighter(
+        fighter,
+        state["grid_height"],
+        engine._fighter_height(state),
+        state.get("obstacles", []),
+        state.get("playable_y_min", 0),
+        state.get("playable_y_max", state["grid_height"] - 1),
+        state["tick"],
+    )
+    assert fighter["y"] == start_y + 2
 
-    assert a["decoys"][0]["y"] == b["decoys"][0]["y"]
+
+def test_snipe_spawns_piercing_shot(engine: DuelEngine, state: dict) -> None:
+    fighter = state["fighters"]["p0"]
+    fighter["stored_powerup"] = "snipe"
+    events: list[dict] = []
+    engine._activate_stored_powerup(state, fighter, "p0", events)
+    assert len(state["bullets"]) == 1
+    bullet = state["bullets"][0]
+    assert bullet["damage"] == 3
+    assert bullet.get("pierce_obstacles") is True
+
+
+def test_shockwave_pushes_enemy(engine: DuelEngine, state: dict) -> None:
+    caster = state["fighters"]["p0"]
+    enemy = state["fighters"]["p1"]
+    caster["y"] = 5
+    enemy["y"] = 8
+    enemy_start = enemy["y"]
+    caster["stored_powerup"] = "shockwave"
+    events: list[dict] = []
+    engine._activate_stored_powerup(state, caster, "p0", events)
+    assert enemy["y"] > enemy_start
+    assert any(e["type"] == "shockwave_hit" for e in events)
+
+
+def test_expose_reveals_enemy_in_fog(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["fog"] = True
+    caster = state["fighters"]["p0"]
+    enemy = state["fighters"]["p1"]
+    caster["stored_powerup"] = "expose"
+    engine._activate_stored_powerup(state, caster, "p0", [])
+    public = engine.get_public_state(state, state["players"][0])
+    assert public["fighters"]["p1"]["display_y"] == enemy["y"]
 
 
 def test_aim_trainer_blocks_human_movement(engine: DuelEngine, state: dict) -> None:
@@ -1162,22 +1180,13 @@ def test_side_swap_every_two_rounds(engine: DuelEngine) -> None:
     assert initial_sides != swapped_sides
 
 
-def test_phase_shift_passes_through_obstacle(engine: DuelEngine, state: dict) -> None:
-    fighter = state["fighters"]["p0"]
-    obstacle = {"x": 5, "y": fighter["y"], "w": 1, "h": 2, "vy": 0}
-    state["obstacles"] = [obstacle]
-    fighter["effects"]["phase_shift_until"] = state["tick"] + 50
-    fighter["move_direction"] = "down"
-    engine._move_fighter(
-        fighter,
-        state["grid_height"],
-        engine._fighter_height(state),
-        state["obstacles"],
-        state.get("playable_y_min", 0),
-        state.get("playable_y_max", state["grid_height"] - 1),
-        tick=state["tick"],
-    )
-    assert fighter["y"] > 0
+def test_jam_rejects_shoot_action(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    state["fighters"][pid]["effects"]["jam_until"] = state["tick"] + 50
+    state, _ = engine.apply_action(state, {"type": "shoot"}, player)
+    assert state["last_action"]["type"] == "action_rejected"
+    assert state["last_action"]["reason"] == "jammed"
 
 
 def test_obstacle_rotation_deterministic_with_layout_seed(engine: DuelEngine, state: dict) -> None:
