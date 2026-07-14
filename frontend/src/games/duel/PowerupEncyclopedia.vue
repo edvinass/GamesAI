@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { POWERUP_COLORS, POWERUP_ICONS, POWERUP_LABELS } from './duelRenderer'
 import {
+  BOMB_CHARGES,
   POWERUP_HINTS,
   POWERUP_TIER_LABELS,
   powerupTier,
@@ -19,7 +20,7 @@ const entries = computed(() =>
       color: POWERUP_COLORS[id],
       tier: POWERUP_TIER_LABELS[powerupTier(id)],
       hint: POWERUP_HINTS[id] ?? '',
-      use: powerupUseHint(id),
+      use: powerupUseHint(id, 75, id === 'bomb' ? BOMB_CHARGES : undefined),
     }))
     .filter((entry) => {
       const q = query.value.trim().toLowerCase()

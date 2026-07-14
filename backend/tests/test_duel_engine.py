@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.games.duel.engine import DuelEngine
+from app.games.duel.engine import HOMING_LOCK_ON_TICKS, DuelEngine
 
 
 def make_players(count: int = 2) -> list[dict]:
@@ -495,13 +495,64 @@ def test_release_charge_rejects_inflated_client_ticks(engine: DuelEngine, state:
     state, _ = engine.apply_action(
         state, {"type": "release_charge", "charge_ticks": 15}, player
     )
-    assert state["fighters"][pid]["charge_ticks"] <= 2
+    assert state["fighters"][pid]["charge_ticks"] <= 4
 
     fighter["pending_shoot"] = True
     fighter["cooldown_until_tick"] = 0
     state, _ = engine.tick(state)
     assert len(state["bullets"]) == 1
     assert state["bullets"][0]["damage"] == 1
+
+
+def test_full_charge_after_holding_ticks(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    state["fighters"][pid]["cooldown_until_tick"] = 0
+
+    state, _ = engine.apply_action(state, {"type": "charge_start"}, player)
+    for _ in range(11):
+        state, _ = engine.tick(state)
+    assert state["fighters"][pid]["charge_ticks"] >= 11
+
+    state, _ = engine.apply_action(
+        state, {"type": "release_charge", "charge_ticks": 11}, player
+    )
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 3
+    assert all(bullet["damage"] == 2 for bullet in state["bullets"])
+
+
+def test_release_charge_lag_compensation_grants_spread(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    fighter = state["fighters"][pid]
+    fighter["cooldown_until_tick"] = 0
+
+    state, _ = engine.apply_action(state, {"type": "charge_start"}, player)
+    for _ in range(9):
+        state, _ = engine.tick(state)
+    assert state["fighters"][pid]["charge_ticks"] == 9
+
+    state, _ = engine.apply_action(
+        state, {"type": "release_charge", "charge_ticks": 11}, player
+    )
+    assert state["fighters"][pid]["charge_ticks"] == 11
+
+    fighter["pending_shoot"] = True
+    fighter["cooldown_until_tick"] = 0
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 3
+
+
+def test_charge_start_rejected_on_cooldown(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    state["fighters"][pid]["cooldown_until_tick"] = state["tick"] + 5
+
+    state, _ = engine.apply_action(state, {"type": "charge_start"}, player)
+    assert state["fighters"][pid].get("charging") is not True
+    assert state["last_action"]["type"] == "action_rejected"
+    assert state["last_action"]["reason"] == "on_cooldown"
 
 
 def test_powerup_release_without_hold_does_not_activate(engine: DuelEngine, state: dict) -> None:
@@ -570,12 +621,36 @@ def test_instant_bomb_powerup(engine: DuelEngine, state: dict) -> None:
     player = state["players"][0]
     pid = player["id"]
     state["fighters"][pid]["stored_powerup"] = "bomb"
+    state["fighters"][pid]["powerup_charges"] = 3
 
     state, events = engine.apply_action(state, {"type": "powerup_activate"}, player)
-    assert state["fighters"][pid]["stored_powerup"] is None
+    assert state["fighters"][pid]["stored_powerup"] == "bomb"
+    assert state["fighters"][pid]["powerup_charges"] == 2
     assert len(state["bullets"]) == 1
     assert state["bullets"][0]["kind"] == "bomb"
-    assert any(e["type"] == "powerup_activated" for e in events)
+    activated = next(e for e in events if e["type"] == "powerup_activated")
+    assert activated["charges_remaining"] == 2
+
+
+def test_bomb_powerup_depletes_after_three_uses(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    state["fighters"][pid]["stored_powerup"] = "bomb"
+    state["fighters"][pid]["powerup_charges"] = 3
+
+    for expected_remaining in (2, 1, None):
+        state, events = engine.apply_action(state, {"type": "powerup_activate"}, player)
+        activated = next(e for e in events if e["type"] == "powerup_activated")
+        if expected_remaining is None:
+            assert state["fighters"][pid]["stored_powerup"] is None
+            assert "powerup_charges" not in state["fighters"][pid]
+            assert "charges_remaining" not in activated
+        else:
+            assert state["fighters"][pid]["stored_powerup"] == "bomb"
+            assert state["fighters"][pid]["powerup_charges"] == expected_remaining
+            assert activated["charges_remaining"] == expected_remaining
+
+    assert len(state["bullets"]) == 3
 
 
 def test_fighter_walkover_collects_powerup(engine: DuelEngine, state: dict) -> None:
@@ -789,11 +864,59 @@ def test_ghost_scrambles_homing_steering(engine: DuelEngine, state: dict) -> Non
     target = state["fighters"]["p1"]
     target["y"] = 10
     target.setdefault("effects", {})["ghost_until"] = state["tick"] + 50
-    bullet = {"x": 20, "y": 8, "vx": 1, "vy": 0, "homing": True, "owner_id": "p0"}
+    bullet = {
+        "x": 20,
+        "y": 8,
+        "vx": 1,
+        "vy": 0,
+        "homing": True,
+        "homing_age": HOMING_LOCK_ON_TICKS,
+        "owner_id": "p0",
+    }
 
     engine._steer_homing_bullet(state, bullet)
 
     assert bullet["vy"] != 0
+
+
+def test_homing_missile_locks_on_after_initial_flight(engine: DuelEngine, state: dict) -> None:
+    state["fighters"]["p1"]["y"] = 12
+    bullet = {
+        "x": 10,
+        "y": 8,
+        "vx": 2,
+        "vy": 0,
+        "homing": True,
+        "homing_age": 0,
+        "owner_id": "p0",
+    }
+
+    engine._steer_homing_bullet(state, bullet)
+    assert bullet["vy"] == 0
+    assert bullet["homing_age"] == 1
+
+    bullet["homing_age"] = HOMING_LOCK_ON_TICKS
+    engine._steer_homing_bullet(state, bullet)
+    assert bullet["vy"] == 1
+
+
+def test_homing_missile_leads_moving_target(engine: DuelEngine, state: dict) -> None:
+    target = state["fighters"]["p1"]
+    target["y"] = 8
+    target["move_direction"] = "down"
+    bullet = {
+        "x": 10,
+        "y": 8,
+        "vx": 2,
+        "vy": 0,
+        "homing": True,
+        "homing_age": HOMING_LOCK_ON_TICKS,
+        "owner_id": "p0",
+    }
+
+    engine._steer_homing_bullet(state, bullet)
+
+    assert bullet["vy"] == 1
 
 
 def test_ai_difficulty_attached_to_ai_players(engine: DuelEngine) -> None:

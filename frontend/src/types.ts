@@ -143,6 +143,7 @@ export interface DuelFighter {
   cooldown_until_tick: number
   color: string
   stored_powerup?: string | null
+  powerup_charges?: number
   activating_powerup?: boolean
   powerup_activation_ticks?: number
   effects?: DuelFighterEffects

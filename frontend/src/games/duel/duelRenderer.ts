@@ -1088,6 +1088,75 @@ export class DuelRenderer {
         continue
       }
 
+      if (homing) {
+        const vy = bullet.vy ?? 0
+        const travelX = dir * speed
+        const travelY = vy
+        const angle = Math.atan2(travelY, travelX)
+        const trailLen = 7 + speed * 2
+
+        for (let i = 1; i <= trailLen; i++) {
+          const t = i / trailLen
+          const alpha = (1 - t) * 0.22
+          const tx = cx - Math.cos(angle) * i * cell * 0.22
+          const ty = cy - Math.sin(angle) * i * cell * 0.22
+          const radius = cell * (0.14 - t * 0.08)
+          ctx.fillStyle = rgba(i % 2 === 0 ? '#94a3b8' : '#64748b', alpha)
+          ctx.beginPath()
+          ctx.arc(tx, ty, Math.max(1, radius), 0, Math.PI * 2)
+          ctx.fill()
+        }
+
+        const exhaustGrad = ctx.createRadialGradient(
+          cx - Math.cos(angle) * cell * 0.28,
+          cy - Math.sin(angle) * cell * 0.28,
+          0,
+          cx - Math.cos(angle) * cell * 0.28,
+          cy - Math.sin(angle) * cell * 0.28,
+          cell * 0.45,
+        )
+        exhaustGrad.addColorStop(0, rgba('#fef08a', 0.85))
+        exhaustGrad.addColorStop(0.45, rgba('#f97316', 0.45))
+        exhaustGrad.addColorStop(1, rgba('#ef4444', 0))
+        ctx.fillStyle = exhaustGrad
+        ctx.beginPath()
+        ctx.arc(
+          cx - Math.cos(angle) * cell * 0.22,
+          cy - Math.sin(angle) * cell * 0.22,
+          cell * 0.38,
+          0,
+          Math.PI * 2,
+        )
+        ctx.fill()
+
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.rotate(angle)
+        const bodyLen = cell * 0.42
+        const bodyW = cell * 0.14
+        ctx.fillStyle = colorblind ? '#38bdf8' : '#86efac'
+        ctx.beginPath()
+        ctx.moveTo(bodyLen, 0)
+        ctx.lineTo(-bodyLen * 0.55, bodyW)
+        ctx.lineTo(-bodyLen * 0.35, 0)
+        ctx.lineTo(-bodyLen * 0.55, -bodyW)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = colorblind ? '#0ea5e9' : '#22c55e'
+        ctx.beginPath()
+        ctx.moveTo(bodyLen * 0.95, 0)
+        ctx.lineTo(bodyLen * 0.35, bodyW * 0.55)
+        ctx.lineTo(bodyLen * 0.35, -bodyW * 0.55)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#fef08a'
+        ctx.beginPath()
+        ctx.arc(bodyLen * 0.72, 0, cell * 0.05, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+        continue
+      }
+
       const trailSteps = 4 + speed * 3
 
       for (let i = 1; i <= trailSteps; i++) {

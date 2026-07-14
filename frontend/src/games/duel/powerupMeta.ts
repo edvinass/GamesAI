@@ -45,6 +45,8 @@ export const POWERUP_EFFECT_DURATIONS: Record<string, number> = {
   decoy: 140,
 }
 
+export const BOMB_CHARGES = 3
+
 export const POWERUP_HINTS: Record<string, string> = {
   rapid_fire: 'Halves reload — ~10s of faster shots',
   machine_gun: 'Fast single-row spray — ~14s',
@@ -55,11 +57,11 @@ export const POWERUP_HINTS: Record<string, string> = {
   freeze: 'Stops opponent movement — ~8s',
   laser: 'Instant beam down your aim row (stops at cover)',
   railgun: 'Piercing beam through cover — heavy damage',
-  homing: 'Bullets steer toward your opponent — ~12s',
+  homing: 'Bullets steer toward your opponent with lock-on guidance — ~12s',
   heal: 'Restore 1 HP instantly',
   mirror: 'Reflects the next incoming bullets — ~12s',
   overdrive: 'Wide heavy shots (2 dmg) — ~10s',
-  bomb: 'Launches a bomb — wide blast when it hits a wall',
+  bomb: `Fire up to ${BOMB_CHARGES} bombs — wide blast on wall impact`,
   cluster: 'Fires three bombs in a vertical spread',
   burst: 'Unloads a six-shot rapid salvo',
   phase_shift: 'Pass through cover (not bullets) — ~10s',
@@ -105,7 +107,14 @@ export function formatPowerupSeconds(ticks: number, tickMs: number): string {
   return `${Math.round(sec * 10) / 10}s`
 }
 
-export function powerupUseHint(_type: string | null | undefined, _tickMs = 75): string {
+export function powerupUseHint(
+  type: string | null | undefined,
+  _tickMs = 75,
+  charges?: number | null,
+): string {
+  if (type === 'bomb' && charges != null && charges > 0) {
+    return `Press E or click Use to fire (${charges} left)`
+  }
   return 'Press E or click Use to activate'
 }
 

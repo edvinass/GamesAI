@@ -13,6 +13,13 @@ BOMB_BLAST_RADIUS = 1
 BOMB_WALL_INWARD_RADIUS = 5
 BOMB_WALL_VERTICAL_RADIUS = 4
 
+HOMING_LOCK_ON_TICKS = 5
+HOMING_MAX_TURN_RATE = 1
+HOMING_LEAD_FACTOR = 0.55
+HOMING_DECOY_DIST_PENALTY = 3
+
+BOMB_CHARGES = 3
+
 MOVE_DIRECTIONS = {"up", "down", "stop"}
 
 POWERUP_TYPES = (
@@ -108,7 +115,7 @@ TRAINING_DRILLS = frozenset({"none", "dodge_only", "aim_trainer", "powerup_sandb
 AI_PERSONALITIES = frozenset({"balanced", "aggressive", "turtle", "trickster"})
 ARENA_THEMES = frozenset({"classic", "neon", "asteroid", "crt"})
 
-CLIENT_PROGRESS_LAG_TICKS = 2
+CLIENT_PROGRESS_LAG_TICKS = 4
 
 MUTATOR_PRESETS: dict[str, dict[str, Any]] = {
     "classic": {
@@ -772,6 +779,8 @@ class DuelEngine(GamePlugin):
         if loadout and loadout != "none":
             for fighter in fighters.values():
                 fighter["stored_powerup"] = loadout
+                if loadout == "bomb":
+                    fighter["powerup_charges"] = BOMB_CHARGES
 
         drill = settings.get("training_drill", "none")
         if drill == "aim_trainer":
@@ -896,7 +905,7 @@ class DuelEngine(GamePlugin):
             if not state["settings"].get("charge_shot_enabled"):
                 return state, events
             if state["tick"] < fighter.get("cooldown_until_tick", 0):
-                return state, events
+                return self._reject_action(state, player, action, "on_cooldown")
             fighter["charging"] = True
             fighter["charge_ticks"] = 0
             state["last_action"] = {"type": "charge_start", "player_id": player_id}
@@ -917,11 +926,15 @@ class DuelEngine(GamePlugin):
                 }
                 return state, events
             self._activate_stored_powerup(state, fighter, player_id, events)
-            state["last_action"] = {
+            last_action: dict = {
                 "type": "powerup_activated",
                 "player_id": player_id,
                 "powerup_type": ptype,
             }
+            charges = fighter.get("powerup_charges")
+            if ptype == "bomb" and charges is not None:
+                last_action["charges_remaining"] = int(charges)
+            state["last_action"] = last_action
             return state, events
 
         if action_type == "powerup_hold_start":
@@ -1136,6 +1149,7 @@ class DuelEngine(GamePlugin):
                 "homing": homing,
                 "kind": kind,
                 "pierce_obstacles": pierce_obstacles,
+                "homing_age": 0 if homing else None,
             }
         )
 
@@ -1317,6 +1331,8 @@ class DuelEngine(GamePlugin):
             return
         ptype = powerup["type"]
         fighter["stored_powerup"] = ptype
+        if ptype == "bomb":
+            fighter["powerup_charges"] = BOMB_CHARGES
         events.append({"type": "powerup_collected", "player_id": owner_id, "powerup_type": ptype})
         state["last_action"] = {
             "type": "powerup_collected",
@@ -1483,7 +1499,7 @@ class DuelEngine(GamePlugin):
         tick = state["tick"]
         duration = self._powerup_effect_duration(ptype, state)
         effects = fighter.setdefault("effects", {})
-        fighter["stored_powerup"] = None
+        consumed = True
 
         if ptype == "rapid_fire":
             self._extend_timed_effect(effects, "rapid_fire_until", tick, duration)
@@ -1525,6 +1541,12 @@ class DuelEngine(GamePlugin):
             self._fire_railgun(state, fighter, owner_id, events)
         elif ptype == "bomb":
             self._fire_bomb(state, fighter, owner_id)
+            charges = int(fighter.get("powerup_charges", BOMB_CHARGES)) - 1
+            if charges > 0:
+                fighter["powerup_charges"] = charges
+                consumed = False
+            else:
+                fighter.pop("powerup_charges", None)
         elif ptype == "cluster":
             self._fire_cluster_bombs(state, fighter, owner_id)
         elif ptype == "burst":
@@ -1556,6 +1578,10 @@ class DuelEngine(GamePlugin):
                 }
             )
 
+        if consumed:
+            fighter["stored_powerup"] = None
+            fighter.pop("powerup_charges", None)
+
         self._update_match_stats(state, owner_id, owner_id, kind="powerup")
         nickname = next(
             (p.get("nickname", "Player") for p in state["players"] if p["id"] == owner_id),
@@ -1564,7 +1590,12 @@ class DuelEngine(GamePlugin):
         self._append_event_log(
             state, f"{nickname} activated {ptype.replace('_', ' ')}", kind="success"
         )
-        events.append({"type": "powerup_activated", "player_id": owner_id, "powerup_type": ptype})
+        event: dict = {"type": "powerup_activated", "player_id": owner_id, "powerup_type": ptype}
+        if ptype == "bomb":
+            charges = fighter.get("powerup_charges")
+            if charges is not None:
+                event["charges_remaining"] = int(charges)
+        events.append(event)
 
     def _fire_bomb(self, state: dict, fighter: dict, owner_id: str) -> None:
         fighter_height = self._fighter_height(state)
@@ -2105,39 +2136,90 @@ class DuelEngine(GamePlugin):
             decoy for decoy in state.get("decoys", []) if int(decoy.get("until_tick", 0)) > tick
         ]
 
+    def _homing_lead_row(
+        self,
+        state: dict,
+        bullet: dict,
+        fighter: dict,
+        fighter_id: str,
+    ) -> float:
+        height = self._fighter_height(state)
+        center = fighter["y"] + (height - 1) / 2.0
+        dist_x = abs(int(fighter["x"]) - int(bullet["x"]))
+        eta = dist_x / max(1, abs(int(bullet.get("vx", 1))))
+        move = fighter.get("move_direction", "stop")
+        if self._is_frozen(fighter, state["tick"]):
+            move = "stop"
+        lead = 0.0
+        if move == "up":
+            lead -= eta * HOMING_LEAD_FACTOR
+        elif move == "down":
+            lead += eta * HOMING_LEAD_FACTOR
+        tick = state["tick"]
+        effects = fighter.get("effects", {})
+        if tick < effects.get("ghost_until", 0):
+            lead += float((hash((fighter_id, tick // 4)) % 5) - 2)
+        return center + lead
+
+    def _homing_target_row(self, state: dict, bullet: dict, owner: dict) -> int | None:
+        bx, by = bullet["x"], bullet["y"]
+        best_row: int | None = None
+        best_score: float | None = None
+
+        for pid, fighter in state["fighters"].items():
+            if pid == bullet["owner_id"] or not fighter.get("alive"):
+                continue
+            row = self._homing_lead_row(state, bullet, fighter, pid)
+            score = abs(int(fighter["x"]) - bx) + abs(row - by) * 1.15
+            if best_score is None or score < best_score:
+                best_score = score
+                best_row = int(round(row))
+
+        for decoy in state.get("decoys", []):
+            if decoy.get("player_id") == bullet["owner_id"]:
+                continue
+            if decoy.get("side") == owner.get("side"):
+                continue
+            row = float(int(decoy["y"]) + 1)
+            score = abs(int(decoy.get("x", bx)) - bx) + abs(row - by) * 1.15 + HOMING_DECOY_DIST_PENALTY
+            if best_score is None or score < best_score:
+                best_score = score
+                best_row = int(round(row))
+
+        return best_row
+
     def _steer_homing_bullet(self, state: dict, bullet: dict) -> None:
         if not bullet.get("homing"):
             return
         owner = state["fighters"].get(bullet["owner_id"])
         if not owner:
             return
-        tick = state["tick"]
-        target_center: int | None = None
-        for pid, fighter in state["fighters"].items():
-            if pid == bullet["owner_id"] or not fighter.get("alive"):
-                continue
-            target_center = fighter["y"] + self._fighter_height(state) // 2
-            effects = fighter.get("effects", {})
-            if tick < effects.get("ghost_until", 0):
-                offset = (hash((pid, tick // 3)) % 5) - 2
-                target_center += offset
-            break
-        if target_center is None:
-            for decoy in state.get("decoys", []):
-                if decoy.get("player_id") == bullet["owner_id"]:
-                    continue
-                if decoy.get("side") == owner.get("side"):
-                    continue
-                target_center = int(decoy["y"]) + 1
-                break
-        if target_center is None:
-            return
-        if bullet["y"] < target_center:
-            bullet["vy"] = 1
-        elif bullet["y"] > target_center:
-            bullet["vy"] = -1
-        else:
+
+        age = int(bullet.get("homing_age", 0))
+        bullet["homing_age"] = age + 1
+        if age < HOMING_LOCK_ON_TICKS:
             bullet["vy"] = 0
+            return
+
+        target_row = self._homing_target_row(state, bullet, owner)
+        if target_row is None:
+            return
+
+        error = target_row - bullet["y"]
+        if error > 0:
+            desired_vy = 1
+        elif error < 0:
+            desired_vy = -1
+        else:
+            desired_vy = 0
+
+        current_vy = int(bullet.get("vy", 0))
+        if desired_vy > current_vy:
+            bullet["vy"] = min(desired_vy, current_vy + HOMING_MAX_TURN_RATE)
+        elif desired_vy < current_vy:
+            bullet["vy"] = max(desired_vy, current_vy - HOMING_MAX_TURN_RATE)
+        else:
+            bullet["vy"] = desired_vy
 
     def _increment_charging(self, state: dict) -> None:
         max_charge = int(state["settings"].get("charge_max_ticks", 15))
@@ -2200,6 +2282,8 @@ class DuelEngine(GamePlugin):
         if loadout and loadout != "none":
             for fighter in state["fighters"].values():
                 fighter["stored_powerup"] = loadout
+                if loadout == "bomb":
+                    fighter["powerup_charges"] = BOMB_CHARGES
 
         if settings.get("training_drill") == "aim_trainer":
             for fighter in state["fighters"].values():
@@ -2407,6 +2491,9 @@ class DuelEngine(GamePlugin):
             public["charging"] = bool(fighter.get("charging"))
             public["charge_ticks"] = int(fighter.get("charge_ticks", 0))
             public["stored_powerup"] = fighter.get("stored_powerup")
+            charges = fighter.get("powerup_charges")
+            if charges is not None:
+                public["powerup_charges"] = int(charges)
             public["activating_powerup"] = fighter.get("activating_powerup", False)
             public["powerup_activation_ticks"] = fighter.get("powerup_activation_ticks", 0)
 

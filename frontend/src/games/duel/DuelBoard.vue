@@ -19,6 +19,7 @@ import {
   playPowerupActivateSound,
   playPowerupCollectSound,
   playRoundWinSound,
+  playMatchWinSound,
   playShieldBlockSound,
   playShootSound,
   setSoundMuted,
@@ -81,6 +82,7 @@ const powerupsEnabled = computed(() => Boolean(props.gameState.powerups_enabled)
 const chargeMaxTicks = computed(() => props.gameState.charge_max_ticks ?? 15)
 const tickMs = computed(() => props.gameState.tick_ms || 75)
 const storedPowerup = computed(() => myFighter.value?.stored_powerup ?? null)
+const storedPowerupCharges = computed(() => myFighter.value?.powerup_charges ?? null)
 
 const roundsToWin = computed(() => Math.ceil(props.gameState.best_of / 2))
 
@@ -107,6 +109,56 @@ const winnerName = computed(() => {
 const matchResultText = computed(() => {
   if (!props.gameState.winner) return 'Match drawn!'
   return `${winnerName.value} wins!`
+})
+
+const matchWinnerId = computed(() => props.gameState.winner ?? null)
+
+const matchPodium = computed(() => {
+  const winnerId = matchWinnerId.value
+  return [...playerRows.value]
+    .sort((a, b) => {
+      if (a.id === winnerId) return -1
+      if (b.id === winnerId) return 1
+      return b.roundWins - a.roundWins
+    })
+    .map((row) => ({
+      ...row,
+      isWinner: Boolean(winnerId && row.id === winnerId),
+      isMe: row.id === props.playerId,
+    }))
+})
+
+const viewerMatchOutcome = computed(() => {
+  if (!isFinished.value) return null
+  const winnerId = matchWinnerId.value
+  if (!winnerId) {
+    return {
+      kind: 'draw' as const,
+      headline: 'Draw',
+      sub: 'No match winner — scores tied',
+    }
+  }
+  if (winnerId === props.playerId) {
+    return {
+      kind: 'victory' as const,
+      headline: 'Victory!',
+      sub: 'You won the match',
+    }
+  }
+  return {
+    kind: 'defeat' as const,
+    headline: `${winnerName.value} wins`,
+    sub: 'You lost the match',
+  }
+})
+
+const matchScoreSummary = computed(() => {
+  const rows = playerRows.value
+  if (rows.length !== 2) {
+    return rows.map((row) => `${row.nickname} ${row.roundWins}`).join(' · ')
+  }
+  const [left, right] = rows
+  return `${left.nickname} ${left.roundWins} – ${right.roundWins} ${right.nickname}`
 })
 
 const phaseAnnouncement = computed(() => {
@@ -139,6 +191,11 @@ const playerRows = computed(() =>
 const heldMove = ref<'up' | 'down' | null>(null)
 const charging = ref(false)
 const chargeTicks = ref(0)
+const shootOnCooldown = computed(() => {
+  const tick = props.gameState.tick ?? 0
+  const until = myFighter.value?.cooldown_until_tick ?? 0
+  return tick < until
+})
 const canUsePowerup = computed(() =>
   canUseStoredPowerup(
     storedPowerup.value,
@@ -146,7 +203,6 @@ const canUsePowerup = computed(() =>
     myFighter.value?.max_hp ?? 3,
   ),
 )
-const localChargeInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const hpPulseId = ref<string | null>(null)
 const powerupNotice = ref<{ text: string; tone: 'info' | 'success' | 'warn' } | null>(null)
 let powerupNoticeTimer: ReturnType<typeof setTimeout> | null = null
@@ -436,7 +492,9 @@ function playGameSounds() {
   lastRoundPhase.value = props.gameState.phase
 }
 
-const storedPowerupHint = computed(() => powerupUseHint(storedPowerup.value, tickMs.value))
+const storedPowerupHint = computed(() =>
+  powerupUseHint(storedPowerup.value, tickMs.value, storedPowerupCharges.value),
+)
 const storedPowerupDescription = computed(() =>
   storedPowerup.value ? POWERUP_HINTS[storedPowerup.value] ?? '' : '',
 )
@@ -599,7 +657,7 @@ watch(
   (stored, prev) => {
     if (stored && stored !== prev) {
       const label = POWERUP_LABELS[stored] ?? stored
-      showPowerupNotice(`${label} collected — ${powerupUseHint(stored, tickMs.value)}`, 'success')
+      showPowerupNotice(`${label} collected — ${powerupUseHint(stored, tickMs.value, myFighter.value?.powerup_charges)}`, 'success')
     }
     lastStoredPowerup.value = stored ?? null
   },
@@ -609,10 +667,7 @@ watch(
   () => myFighter.value?.charge_ticks,
   (serverTicks) => {
     if (!charging.value || typeof serverTicks !== 'number') return
-    chargeTicks.value = Math.max(
-      chargeTicks.value,
-      Math.min(chargeMaxTicks.value, serverTicks),
-    )
+    chargeTicks.value = Math.min(chargeMaxTicks.value, serverTicks)
   },
 )
 
@@ -705,16 +760,26 @@ watch(
     if (pid !== props.playerId) return
     if (type === 'powerup_activated') {
       const ptype = action.powerup_type as string
-      showPowerupNotice(`${POWERUP_LABELS[ptype] ?? ptype} activated!`, 'success')
+      const charges = action.charges_remaining as number | undefined
+      if (ptype === 'bomb' && typeof charges === 'number' && charges > 0) {
+        showPowerupNotice(`${POWERUP_LABELS.bomb} launched — ${charges} left`, 'success')
+      } else {
+        showPowerupNotice(`${POWERUP_LABELS[ptype] ?? ptype} activated!`, 'success')
+      }
     } else if (type === 'powerup_blocked' && action.reason === 'max_hp') {
       showPowerupNotice('Heal saved — you are already at full health', 'warn')
     } else if (type === 'action_rejected') {
       const reason = action.reason as string | undefined
+      const attempted = action.attempted as string | undefined
+      if (attempted === 'charge_start') {
+        cancelLocalCharge()
+      }
       const messages: Record<string, string> = {
         wrong_phase: 'Not available right now',
         not_alive: 'You are eliminated',
         already_banned: 'You already banned a power-up',
         invalid_powerup: 'Invalid power-up choice',
+        on_cooldown: 'Wait for reload before charging',
       }
       showPowerupNotice(messages[reason ?? ''] ?? 'Action rejected', 'warn')
     }
@@ -730,6 +795,11 @@ watch(
     if (phase === 'finished' && prev !== 'finished') {
       milestones.value = recordMatchMilestones(props.playerId, props.gameState.match_stats)
       matchPowerupActions.value = []
+      if (props.gameState.winner === props.playerId) {
+        playMatchWinSound()
+      } else if (props.gameState.winner) {
+        playRoundWinSound()
+      }
     }
     if (phase === 'countdown' && prev === 'finished') {
       matchPowerupActions.value = []
@@ -751,27 +821,29 @@ watch(
   },
 )
 
+function cancelLocalCharge() {
+  charging.value = false
+  chargeTicks.value = 0
+}
+
 function startCharge() {
   if (!canControl.value || !chargeEnabled.value) return
+  if (shootOnCooldown.value) {
+    showPowerupNotice('Wait for reload before charging', 'warn')
+    return
+  }
   charging.value = true
   chargeTicks.value = 0
   emit('action', { type: 'charge_start' })
-  if (localChargeInterval.value) clearInterval(localChargeInterval.value)
-  localChargeInterval.value = setInterval(() => {
-    if (charging.value) {
-      chargeTicks.value = Math.min(chargeMaxTicks.value, chargeTicks.value + 1)
-    }
-  }, tickMs.value)
 }
 
 function releaseCharge() {
   if (!charging.value) return
   charging.value = false
-  if (localChargeInterval.value) {
-    clearInterval(localChargeInterval.value)
-    localChargeInterval.value = null
-  }
-  emit('action', { type: 'release_charge', charge_ticks: chargeTicks.value })
+  const serverTicks = myFighter.value?.charge_ticks ?? chargeTicks.value
+  // Credit one in-flight tick so a release right as the bar fills still reaches spread tier.
+  const ticks = Math.min(chargeMaxTicks.value, serverTicks + 1)
+  emit('action', { type: 'release_charge', charge_ticks: ticks })
   chargeTicks.value = 0
 }
 
@@ -937,7 +1009,6 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   cancelAnimationFrame(animFrame)
   if (countdownTimer) clearInterval(countdownTimer)
-  if (localChargeInterval.value) clearInterval(localChargeInterval.value)
   if (powerupNoticeTimer) clearTimeout(powerupNoticeTimer)
   renderer.reset()
 })
@@ -1063,6 +1134,12 @@ onUnmounted(() => {
         <div class="powerup-slot-copy">
           <div class="powerup-slot-title">
             <strong>{{ POWERUP_LABELS[storedPowerup] ?? storedPowerup }}</strong>
+            <span
+              v-if="storedPowerup === 'bomb' && storedPowerupCharges"
+              class="powerup-charges-badge"
+            >
+              ×{{ storedPowerupCharges }}
+            </span>
             <span class="powerup-tier">{{ POWERUP_TIER_LABELS[storedPowerupTier] }}</span>
           </div>
           <span>{{ storedPowerupDescription }}</span>
@@ -1206,8 +1283,64 @@ onUnmounted(() => {
       </div>
 
       <div v-else-if="isFinished" class="overlay finished">
-        <span class="overlay-label slide-in">Match over</span>
-        <span class="overlay-value winner-glow">{{ matchResultText }}</span>
+        <div v-if="matchWinnerId" class="match-confetti" aria-hidden="true">
+          <span v-for="i in 28" :key="i" class="confetti-piece" :style="{ '--i': i }" />
+        </div>
+
+        <div
+          v-if="viewerMatchOutcome"
+          class="match-outcome-banner"
+          :class="viewerMatchOutcome.kind"
+        >
+          <span class="match-outcome-icon" aria-hidden="true">
+            {{
+              viewerMatchOutcome.kind === 'victory'
+                ? '🏆'
+                : viewerMatchOutcome.kind === 'defeat'
+                  ? '💫'
+                  : '🤝'
+            }}
+          </span>
+          <span class="match-outcome-headline">{{ viewerMatchOutcome.headline }}</span>
+          <span class="match-outcome-sub">{{ viewerMatchOutcome.sub }}</span>
+          <span class="match-outcome-score">{{ matchScoreSummary }}</span>
+        </div>
+
+        <div class="match-podium">
+          <article
+            v-for="row in matchPodium"
+            :key="row.id"
+            class="podium-card"
+            :class="{
+              winner: row.isWinner,
+              runner: matchWinnerId && !row.isWinner,
+              me: row.isMe,
+            }"
+            :style="
+              row.fighter?.color
+                ? { '--podium-color': row.fighter.color }
+                : undefined
+            "
+          >
+            <span v-if="row.isWinner" class="podium-crown" aria-hidden="true">👑</span>
+            <span
+              class="ship-avatar podium-avatar"
+              :class="{ left: row.fighter?.side === 'left', right: row.fighter?.side === 'right' }"
+              :style="{ '--ship-color': row.fighter?.color ?? '#666' }"
+              aria-hidden="true"
+            />
+            <div class="podium-copy">
+              <div class="podium-name-row">
+                <strong class="podium-name">{{ row.nickname }}</strong>
+                <span v-if="row.isMe" class="podium-you">You</span>
+              </div>
+              <span class="podium-score">{{ row.roundWins }} / {{ roundsToWin }} rounds</span>
+              <span v-if="row.isWinner" class="podium-badge">Match winner</span>
+              <span v-else-if="matchWinnerId" class="podium-badge muted">Runner-up</span>
+            </div>
+          </article>
+        </div>
+
         <p v-if="disconnectMessage" class="disconnect-note">{{ disconnectMessage }}</p>
         <div class="milestones">
           <span class="milestones-note">Saved on this device only</span>
@@ -1953,6 +2086,16 @@ onUnmounted(() => {
   color: #cbd5e1;
 }
 
+.powerup-charges-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(251, 146, 60, 0.2);
+  color: #fdba74;
+  border: 1px solid rgba(251, 146, 60, 0.35);
+}
+
 .tier-rare .powerup-tier {
   color: #e9d5ff;
   background: rgba(192, 132, 252, 0.18);
@@ -2277,6 +2420,199 @@ onUnmounted(() => {
   animation: winnerGlow 2s ease-in-out infinite;
 }
 
+.overlay.finished {
+  gap: 1rem;
+  overflow: hidden;
+}
+
+.match-confetti {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -8%;
+  left: calc((var(--i) * 3.7%) + 1%);
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  opacity: 0.85;
+  animation: confettiFall 3.2s linear infinite;
+  animation-delay: calc(var(--i) * -0.12s);
+  background: hsl(calc(var(--i) * 13), 85%, 62%);
+}
+
+.match-outcome-banner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.85rem 1.25rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.55);
+  animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.match-outcome-banner.victory {
+  border-color: rgba(251, 191, 36, 0.55);
+  box-shadow: 0 0 40px rgba(251, 191, 36, 0.25);
+}
+
+.match-outcome-banner.defeat {
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.match-outcome-banner.draw {
+  border-color: rgba(96, 165, 250, 0.4);
+}
+
+.match-outcome-icon {
+  font-size: 2.25rem;
+  line-height: 1;
+}
+
+.match-outcome-headline {
+  font-size: clamp(1.85rem, 5vw, 2.75rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.match-outcome-banner.victory .match-outcome-headline {
+  background: linear-gradient(135deg, #fde68a, #fbbf24, #f59e0b);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: winnerGlow 2.2s ease-in-out infinite;
+}
+
+.match-outcome-sub {
+  font-size: 0.95rem;
+  color: #cbd5e1;
+}
+
+.match-outcome-score {
+  margin-top: 0.15rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.match-podium {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  width: min(100%, 520px);
+}
+
+.podium-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1 1 220px;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.65);
+  animation: slideIn 0.45s ease-out both;
+}
+
+.podium-card.winner {
+  flex: 1 1 100%;
+  transform: scale(1.02);
+  border-color: color-mix(in srgb, var(--podium-color, #fbbf24) 65%, white);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--podium-color, #fbbf24) 22%, transparent),
+    rgba(15, 23, 42, 0.75)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--podium-color, #fbbf24) 35%, transparent),
+    0 12px 36px color-mix(in srgb, var(--podium-color, #fbbf24) 25%, transparent);
+  animation: podiumWinnerIn 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.podium-card.runner {
+  opacity: 0.72;
+  filter: saturate(0.85);
+}
+
+.podium-card.me:not(.winner) {
+  border-color: rgba(91, 156, 255, 0.35);
+}
+
+.podium-crown {
+  position: absolute;
+  top: -0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 1.35rem;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
+  animation: crownBob 1.8s ease-in-out infinite;
+}
+
+.podium-avatar {
+  width: 32px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.podium-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.podium-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.podium-name {
+  font-size: 1.05rem;
+}
+
+.podium-you {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(91, 156, 255, 0.2);
+  color: #93c5fd;
+}
+
+.podium-score {
+  font-size: 0.88rem;
+  color: #cbd5e1;
+}
+
+.podium-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #fde68a;
+}
+
+.podium-badge.muted {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
 .overlay-label {
   font-size: 1.1rem;
   font-weight: 600;
@@ -2508,6 +2844,36 @@ onUnmounted(() => {
 @keyframes winnerGlow {
   0%, 100% { filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.4)); }
   50% { filter: drop-shadow(0 0 14px rgba(91, 156, 255, 0.6)); }
+}
+
+@keyframes confettiFall {
+  0% {
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate3d(calc((var(--i) - 14) * 8px), 110vh, 0) rotate(720deg);
+    opacity: 0.2;
+  }
+}
+
+@keyframes podiumWinnerIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.02) translateY(0);
+  }
+}
+
+@keyframes crownBob {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-4px); }
 }
 
 @keyframes chargePulse {

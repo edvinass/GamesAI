@@ -163,6 +163,14 @@ export function playRoundWinSound(): void {
   tone(784, 0.16, { type: 'triangle', volume: 0.14 })
 }
 
+export function playMatchWinSound(): void {
+  tone(392, 0.12, { type: 'square', volume: 0.1 })
+  tone(523, 0.12, { type: 'square', volume: 0.12 })
+  tone(659, 0.12, { type: 'square', volume: 0.13 })
+  tone(784, 0.14, { type: 'triangle', volume: 0.14 })
+  tone(988, 0.22, { type: 'triangle', volume: 0.16 })
+}
+
 export function playHazardTickSound(): void {
   tone(120, 0.06, { type: 'sawtooth', volume: 0.08 })
 }
