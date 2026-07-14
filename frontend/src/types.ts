@@ -170,6 +170,7 @@ export interface DuelPowerup {
     | 'heal'
     | 'mirror'
     | 'overdrive'
+  despawn_at_tick?: number
 }
 
 export interface DuelLastHit {

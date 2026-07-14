@@ -190,6 +190,45 @@ def test_obstacle_blocks_bullet(engine: DuelEngine, state: dict) -> None:
     assert state["bullets"] == []
 
 
+def test_fast_bullet_hits_obstacle(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = [{"x": 10, "y": 4, "w": 1, "h": 2}]
+    state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 2, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}]
+
+    state, _ = engine.tick(state)
+    assert state["bullets"] == []
+
+
+def test_fast_bullet_hits_opponent(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = []
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 46
+    state["bullets"] = [
+        {"id": 0, "x": 44, "y": 6, "vx": 2, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}
+    ]
+
+    state, events = engine.tick(state)
+    assert state["fighters"]["p1"]["hp"] < state["fighters"]["p1"]["max_hp"]
+    assert any(e["type"] == "player_hit" for e in events)
+
+
+def test_default_speed_shot_damages_opponent(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = []
+    left = state["fighters"]["p0"]
+    right = state["fighters"]["p1"]
+    right["y"] = left["y"] + 1
+    left["pending_shoot"] = True
+    left["cooldown_until_tick"] = 0
+
+    for _ in range(30):
+        if right["hp"] < right["max_hp"]:
+            break
+        state, events = engine.tick(state)
+    else:
+        raise AssertionError("bullet never hit opponent at default speed")
+
+    assert any(e["type"] == "player_hit" for e in events)
+
+
 def test_ricochet_off_obstacle(engine: DuelEngine, state: dict) -> None:
     state["settings"]["ricochet_bounces"] = 1
     state["obstacles"] = [{"x": 10, "y": 4, "w": 1, "h": 2}]
@@ -249,6 +288,53 @@ def test_heal_powerup(engine: DuelEngine, state: dict) -> None:
     state, events = engine.apply_action(state, {"type": "powerup_hold_release"}, player)
     assert state["fighters"][pid]["hp"] == 2
     assert any(e["type"] == "powerup_activated" for e in events)
+
+
+def test_powerup_valid_cell_rejects_obstacle_and_red_zone(engine: DuelEngine, state: dict) -> None:
+    state["playable_y_min"] = 2
+    state["playable_y_max"] = 20
+    state["obstacles"] = [{"x": 10, "y": 8, "w": 2, "h": 2}]
+
+    assert engine._powerup_in_red_zone(1, state) is True
+    assert engine._powerup_in_red_zone(21, state) is True
+    assert engine._powerup_in_red_zone(10, state) is False
+
+    assert engine._is_valid_powerup_cell(10, 8, state) is False
+    assert engine._is_valid_powerup_cell(10, 1, state) is False
+    assert engine._is_valid_powerup_cell(1, 10, state) is False
+    assert engine._is_valid_powerup_cell(12, 10, state) is True
+
+
+def test_powerup_spawns_at_random_valid_location(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["powerups_enabled"] = True
+    state["powerup"] = None
+    state["next_powerup_at_tick"] = 0
+    state["obstacles"] = [{"x": 24, "y": 12, "w": 2, "h": 2}]
+
+    events: list[dict] = []
+    engine._update_powerups(state, events)
+
+    assert state["powerup"] is not None
+    assert any(e["type"] == "powerup_spawned" for e in events)
+    loc = state["powerup"]
+    assert engine._is_valid_powerup_cell(loc["x"], loc["y"], state)
+    assert "despawn_at_tick" in loc
+
+
+def test_powerup_despawns_after_lifetime(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["powerups_enabled"] = True
+    state["powerup"] = {
+        "x": 12,
+        "y": 10,
+        "type": "shield",
+        "despawn_at_tick": state["tick"],
+    }
+    state["next_powerup_at_tick"] = 9999
+
+    state, events = engine.tick(state)
+    assert state["powerup"] is None
+    assert any(e["type"] == "powerup_despawned" for e in events)
+    assert state["next_powerup_at_tick"] > state["tick"]
 
 
 def test_ai_moves_slower_than_humans(engine: DuelEngine, state: dict) -> None:

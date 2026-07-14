@@ -21,7 +21,7 @@ export const duelRules: GameRules = {
     },
     {
       heading: 'Arena',
-      body: 'Center obstacles block movement and bullets (ricochet in Bounce House). After a while the top and bottom rows shrink inward. Shoot through center power-ups to collect them into your inventory — hold Space to activate when ready.',
+      body: 'Center obstacles block movement and bullets (ricochet in Bounce House). After a while the top and bottom rows shrink inward — the red hazard zones. Power-ups spawn at random safe spots in the arena, linger for a short time, then vanish until the next cooldown.',
     },
     {
       heading: 'Power-ups',
@@ -43,7 +43,7 @@ export const duelRules: GameRules = {
   tips: [
     'Strafe vertically while charging to bait predictable shots.',
     'Use obstacles to break line-of-sight and force repositioning.',
-    'Tag center power-ups with a passing shot when safe — save Heal and Shield for clutch moments.',
+    'Tag power-ups with a passing shot before they despawn — they blink faster when about to vanish.',
     'Hold Space to activate a stored power-up; keep shooting with F while you carry one.',
     'In Fog mode, watch bullet rows — they reveal true aim.',
     'Save shield for an all-in push when the arena shrinks.',

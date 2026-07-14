@@ -342,7 +342,7 @@ export class DuelRenderer {
     this.drawArena(ctx, offsetX, offsetY, boardW, boardH, grid_width, grid_height, cell, playable_y_min, playable_y_max, now)
     this.drawSpawnZones(ctx, offsetX, offsetY, boardW, boardH, cell, now)
     this.drawObstacles(ctx, offsetX, offsetY, cell, obstacles, now)
-    this.drawPowerup(ctx, offsetX, offsetY, cell, powerup, now)
+    this.drawPowerup(ctx, offsetX, offsetY, cell, powerup, now, state.tick)
     this.drawBullets(ctx, offsetX, offsetY, cell, bullets, now)
     this.drawFighters(ctx, offsetX, offsetY, boardW, cell, barCount, fighters, viewerId, dangerRows, now)
     this.drawMuzzleFlashes(ctx, cell, now)
@@ -534,12 +534,19 @@ export class DuelRenderer {
     cell: number,
     powerup: DuelPowerup | null,
     now: number,
+    tick = 0,
   ) {
     if (!powerup) return
     const color = POWERUP_COLORS[powerup.type] ?? '#fbbf24'
     const cx = offsetX + powerup.x * cell + cell / 2
     const cy = offsetY + powerup.y * cell + cell / 2
-    const pulse = 0.8 + Math.sin(now * 0.006) * 0.2
+    let pulse = 0.8 + Math.sin(now * 0.006) * 0.2
+    if (powerup.despawn_at_tick != null && tick > 0) {
+      const remaining = powerup.despawn_at_tick - tick
+      if (remaining <= 30) {
+        pulse *= 0.65 + Math.sin(now * 0.015) * 0.35
+      }
+    }
     const orbit = now * 0.003
 
     for (let i = 0; i < 3; i++) {
