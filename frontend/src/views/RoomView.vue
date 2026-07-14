@@ -119,6 +119,16 @@ const tickMs = computed({
   set: (val: number) => updateSettings({ tick_ms: val }),
 })
 
+const duelMatchFormat = computed({
+  get: () => String(room.value?.settings?.match_format ?? 'best_of_5'),
+  set: (val: string) => updateSettings({ match_format: val }),
+})
+
+const duelMutator = computed({
+  get: () => String(room.value?.settings?.mutator ?? 'classic'),
+  set: (val: string) => updateSettings({ mutator: val }),
+})
+
 const baseDropTicks = computed({
   get: () => Number(room.value?.settings?.base_drop_ticks ?? 20),
   set: (val: number) => updateSettings({ base_drop_ticks: val }),
@@ -320,6 +330,8 @@ async function copyUrl() {
         v-else-if="isDuel"
         v-model:solo-practice="soloPractice"
         v-model:tick-ms="tickMs"
+        v-model:match-format="duelMatchFormat"
+        v-model:mutator="duelMutator"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

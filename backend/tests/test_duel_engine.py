@@ -52,7 +52,9 @@ def test_initial_state_spawns_on_sides(engine: DuelEngine) -> None:
     assert left["side"] == "left"
     assert right["side"] == "right"
     assert left["x"] < right["x"]
+    assert left["hp"] == 3
     assert game_state["phase"] == "countdown"
+    assert game_state["round_scores"] == {"p0": 0, "p1": 0}
 
 
 def test_move_and_shoot_actions(engine: DuelEngine, state: dict) -> None:
@@ -64,6 +66,20 @@ def test_move_and_shoot_actions(engine: DuelEngine, state: dict) -> None:
 
     state, _ = engine.apply_action(state, {"type": "shoot"}, player)
     assert state["fighters"][pid]["pending_shoot"] is True
+
+
+def test_charge_actions(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+
+    state, _ = engine.apply_action(state, {"type": "charge_start"}, player)
+    assert state["fighters"][pid]["charging"] is True
+
+    state, _ = engine.apply_action(
+        state, {"type": "release_charge", "charge_ticks": 10}, player
+    )
+    assert state["fighters"][pid]["pending_shoot"] is True
+    assert state["fighters"][pid]["charge_ticks"] == 10
 
 
 def test_shoot_spawns_bullet(engine: DuelEngine, state: dict) -> None:
@@ -85,15 +101,102 @@ def test_fighter_is_three_bars_tall(engine: DuelEngine) -> None:
     assert left["y"] == (game_state["grid_height"] - 3) // 2
 
 
-def test_bullet_hits_any_fighter_bar(engine: DuelEngine, state: dict) -> None:
+def test_bullet_damages_fighter_without_eliminating(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = []
     state["fighters"]["p1"]["y"] = 5
     state["fighters"]["p1"]["x"] = 10
-    state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 1, "owner_id": "p0"}]
+    state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}]
+
+    state, events = engine.tick(state)
+    assert state["phase"] == "playing"
+    assert state["fighters"]["p1"]["hp"] == 2
+    assert state["fighters"]["p1"]["alive"] is True
+    assert any(e["type"] == "player_hit" for e in events)
+
+
+def test_center_hit_deals_extra_damage(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = []
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 10
+    center_row = 5 + 1
+    state["bullets"] = [
+        {"id": 0, "x": 9, "y": center_row, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}
+    ]
+
+    state, _ = engine.tick(state)
+    assert state["fighters"]["p1"]["hp"] == 1
+
+
+def test_elimination_ends_round(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = []
+    state["fighters"]["p1"]["hp"] = 1
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 10
+    state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}]
+
+    state, events = engine.tick(state)
+    assert state["phase"] == "round_over"
+    assert state["round_winner"] == "p0"
+    assert state["round_scores"]["p0"] == 1
+    assert any(e["type"] == "round_over" for e in events)
+
+
+def test_quick_duel_finishes_match_on_hit(engine: DuelEngine) -> None:
+    players = make_players(2)
+    state = engine.create_initial_state(
+        players, {"countdown_sec": 0, "match_format": "quick_duel", "mutator": "classic"}
+    )
+    state["phase"] = "playing"
+    state["fighters"]["p1"]["hp"] = 1
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 10
+    state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}]
 
     state, events = engine.tick(state)
     assert state["phase"] == "finished"
     assert state["winner"] == "p0"
-    assert any(e["type"] == "player_hit" for e in events)
+    assert any(e["type"] == "game_over" for e in events)
+
+
+def test_shield_blocks_damage(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = []
+    state["fighters"]["p1"]["effects"]["shield"] = True
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 10
+    state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}]
+
+    state, events = engine.tick(state)
+    assert state["fighters"]["p1"]["hp"] == 3
+    assert any(e["type"] == "shield_blocked" for e in events)
+
+
+def test_obstacle_blocks_bullet(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = [{"x": 10, "y": 4, "w": 1, "h": 3}]
+    state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}]
+
+    state, _ = engine.tick(state)
+    assert state["bullets"] == []
+
+
+def test_ricochet_off_obstacle(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["ricochet_bounces"] = 1
+    state["obstacles"] = [{"x": 10, "y": 4, "w": 1, "h": 3}]
+    state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 1}]
+
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 1
+    assert state["bullets"][0]["vx"] == -1
+    assert state["bullets"][0]["bounces_remaining"] == 0
+
+
+def test_powerup_collected_by_bullet(engine: DuelEngine, state: dict) -> None:
+    state["powerup"] = {"x": 20, "y": 8, "type": "shield"}
+    state["bullets"] = [{"id": 0, "x": 19, "y": 8, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}]
+
+    state, events = engine.tick(state)
+    assert state["powerup"] is None
+    assert state["fighters"]["p0"]["effects"]["shield"] is True
+    assert any(e["type"] == "powerup_collected" for e in events)
 
 
 def test_ai_moves_slower_than_humans(engine: DuelEngine, state: dict) -> None:
@@ -126,3 +229,21 @@ def test_cooldown_blocks_rapid_fire(engine: DuelEngine, state: dict) -> None:
     left["pending_shoot"] = True
     state, _ = engine.tick(state)
     assert len(state["bullets"]) == first_count
+
+
+def test_match_won_after_enough_rounds(engine: DuelEngine) -> None:
+    players = make_players(2)
+    state = engine.create_initial_state(
+        players, {"countdown_sec": 0, "match_format": "best_of_3", "mutator": "classic"}
+    )
+    state["phase"] = "playing"
+    state["round_scores"] = {"p0": 1, "p1": 0}
+    state["fighters"]["p1"]["hp"] = 1
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 10
+    state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}]
+
+    state, events = engine.tick(state)
+    assert state["phase"] == "finished"
+    assert state["winner"] == "p0"
+    assert state["round_scores"]["p0"] == 2

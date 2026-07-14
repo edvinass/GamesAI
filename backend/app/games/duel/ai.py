@@ -46,15 +46,42 @@ def _bullet_heading_toward(bullet: dict, fighter_x: int, side: str) -> bool:
 
 
 def _ticks_until_column(bullet: dict, fighter_x: int) -> int:
-    return abs(bullet["x"] - fighter_x)
+    speed = abs(bullet.get("vx", 1)) or 1
+    return max(0, abs(bullet["x"] - fighter_x) // speed)
 
 
-def _top_after_move(top: int, direction: str, max_y: int) -> int:
+def _top_after_move(top: int, direction: str, min_y: int, max_y: int) -> int:
     if direction == "up":
-        return max(0, top - 1)
+        return max(min_y, top - 1)
     if direction == "down":
         return min(max_y, top + 1)
     return top
+
+
+def _playable_bounds(state: dict, fighter_height: int) -> tuple[int, int]:
+    min_y = state.get("playable_y_min", 0)
+    max_top = min(
+        state["grid_height"] - fighter_height,
+        state.get("playable_y_max", state["grid_height"] - 1) - fighter_height + 1,
+    )
+    return min_y, max_top
+
+
+def _cell_in_obstacle(x: int, y: int, obstacle: dict) -> bool:
+    return (
+        obstacle["x"] <= x < obstacle["x"] + obstacle["w"]
+        and obstacle["y"] <= y < obstacle["y"] + obstacle["h"]
+    )
+
+
+def _fighter_overlaps_obstacle(
+    fighter: dict[str, Any], fighter_height: int, obstacles: list[dict]
+) -> bool:
+    for i in range(fighter_height):
+        y = fighter["y"] + i
+        if any(_cell_in_obstacle(fighter["x"], y, obs) for obs in obstacles):
+            return True
+    return False
 
 
 def _predict_enemy_top(
@@ -62,17 +89,19 @@ def _predict_enemy_top(
     height: int,
     grid_height: int,
     ticks: int,
+    min_y: int,
+    max_y: int,
 ) -> int:
     y = enemy["y"]
     direction = enemy.get("move_direction", "stop")
-    max_y = grid_height - height
     for _ in range(max(0, ticks)):
-        y = _top_after_move(y, direction, max_y)
+        y = _top_after_move(y, direction, min_y, max_y)
     return y
 
 
-def _travel_ticks_to_enemy(fighter: dict[str, Any], enemy: dict[str, Any]) -> int:
-    return max(0, abs(enemy["x"] - fighter["x"]) - 1)
+def _travel_ticks_to_enemy(fighter: dict[str, Any], enemy: dict[str, Any], speed: int) -> int:
+    distance = max(0, abs(enemy["x"] - fighter["x"]) - 1)
+    return max(0, distance // max(1, speed))
 
 
 def _shot_aligns_with_enemy(shoot_row: int, enemy_top: int, height: int) -> bool:
@@ -84,10 +113,13 @@ def _enemy_aim_centers(
     fighter: dict[str, Any],
     height: int,
     grid_height: int,
+    min_y: int,
+    max_y: int,
+    speed: int,
 ) -> tuple[int, int]:
-    travel = _travel_ticks_to_enemy(fighter, enemy)
+    travel = _travel_ticks_to_enemy(fighter, enemy, speed)
     lead_ticks = min(max(travel, 1), 24)
-    predicted_top = _predict_enemy_top(enemy, height, grid_height, lead_ticks)
+    predicted_top = _predict_enemy_top(enemy, height, grid_height, lead_ticks, min_y, max_y)
     current_center = _fighter_center(enemy["y"], height)
     lead_center = _fighter_center(predicted_top, height)
     return current_center, lead_center
@@ -99,6 +131,7 @@ def _bullet_threatens_move(
     height: int,
     new_top: int,
     old_center: int,
+    speed: int,
 ) -> bool:
     if not _bullet_heading_toward(bullet, fighter["x"], fighter["side"]):
         return False
@@ -107,7 +140,9 @@ def _bullet_threatens_move(
     ticks = _ticks_until_column(bullet, fighter["x"])
     if bullet_y in new_rows:
         return True
-    if ticks <= 10 and abs(bullet_y - old_center) <= height + 1:
+    if ticks <= 12 and abs(bullet_y - old_center) <= height + 1:
+        return True
+    if bullet.get("damage", 1) >= 2 and abs(bullet_y - old_center) <= height + 2:
         return True
     return False
 
@@ -116,14 +151,19 @@ def _move_is_safe_from_bullets(
     direction: str,
     fighter: dict[str, Any],
     height: int,
-    grid_height: int,
+    min_y: int,
+    max_y: int,
     bullets: list[dict],
+    obstacles: list[dict],
+    speed: int,
 ) -> bool:
-    max_y = grid_height - height
-    new_top = _top_after_move(fighter["y"], direction, max_y)
+    new_top = _top_after_move(fighter["y"], direction, min_y, max_y)
+    candidate = {**fighter, "y": new_top}
+    if _fighter_overlaps_obstacle(candidate, height, obstacles):
+        return False
     old_center = _fighter_center(fighter["y"], height)
     for bullet in bullets:
-        if _bullet_threatens_move(bullet, fighter, height, new_top, old_center):
+        if _bullet_threatens_move(bullet, fighter, height, new_top, old_center, speed):
             if bullet["y"] in _fighter_rows(new_top, height):
                 return False
     return True
@@ -134,12 +174,20 @@ def _score_move(
     fighter: dict[str, Any],
     height: int,
     grid_height: int,
+    min_y: int,
+    max_y: int,
     bullets: list[dict],
     enemy: dict[str, Any] | None,
+    obstacles: list[dict],
+    powerup: dict | None,
+    speed: int,
 ) -> float:
     y = fighter["y"]
-    max_y = grid_height - height
-    new_top = _top_after_move(y, direction, max_y)
+    new_top = _top_after_move(y, direction, min_y, max_y)
+    candidate = {**fighter, "y": new_top}
+    if _fighter_overlaps_obstacle(candidate, height, obstacles):
+        return float("-inf")
+
     new_rows = _fighter_rows(new_top, height)
     old_center = _fighter_center(y, height)
     new_center = _fighter_center(new_top, height)
@@ -174,15 +222,17 @@ def _score_move(
     if incoming and direction == "stop":
         score -= 120.0
 
-    edge_clearance = min(new_top, max_y - new_top)
+    edge_clearance = min(new_top - min_y, max_y - new_top)
     score += edge_clearance * 12.0
 
-    if new_top == 0 or new_top == max_y:
+    if new_top == min_y or new_top == max_y:
         wall_penalty = 140.0 if immediate_danger else 180.0
         score -= wall_penalty
 
     if enemy is not None and not immediate_danger:
-        current_center, lead_center = _enemy_aim_centers(enemy, fighter, height, grid_height)
+        current_center, lead_center = _enemy_aim_centers(
+            enemy, fighter, height, grid_height, min_y, max_y, speed
+        )
         primary_target = lead_center
 
         score -= abs(new_center - primary_target) * 55.0
@@ -203,39 +253,64 @@ def _score_move(
                 score += 60.0
     elif not immediate_danger:
         score -= abs(new_center - arena_center) * 14.0
-        if y == 0 and direction == "down":
+        if y == min_y and direction == "down":
             score += 90.0
         if y == max_y and direction == "up":
             score += 90.0
+
+    if powerup and not immediate_danger:
+        center_row = _fighter_center(new_top, height)
+        if abs(center_row - powerup["y"]) <= 1:
+            score += 120.0
 
     return score
 
 
 def _choose_move(
     fighter: dict[str, Any],
+    state: dict,
     height: int,
-    grid_height: int,
     bullets: list[dict],
     enemy: dict[str, Any] | None,
 ) -> str:
-    max_y = grid_height - height
+    min_y, max_y = _playable_bounds(state, height)
+    obstacles = state.get("obstacles", [])
+    powerup = state.get("powerup")
+    speed = int(state["settings"].get("bullet_speed", 1))
 
     scored: list[tuple[str, float]] = []
     for direction in MOVE_OPTIONS:
-        score = _score_move(direction, fighter, height, grid_height, bullets, enemy)
+        score = _score_move(
+            direction,
+            fighter,
+            height,
+            state["grid_height"],
+            min_y,
+            max_y,
+            bullets,
+            enemy,
+            obstacles,
+            powerup,
+            speed,
+        )
         scored.append((direction, score))
 
     safe_moves = [
-        d for d, _ in scored
-        if _move_is_safe_from_bullets(d, fighter, height, grid_height, bullets)
+        d
+        for d, _ in scored
+        if _move_is_safe_from_bullets(
+            d, fighter, height, min_y, max_y, bullets, obstacles, speed
+        )
     ]
 
     if safe_moves:
         if enemy is not None:
-            _, lead_center = _enemy_aim_centers(enemy, fighter, height, grid_height)
+            _, lead_center = _enemy_aim_centers(
+                enemy, fighter, height, state["grid_height"], min_y, max_y, speed
+            )
             pursuit_target = lead_center
         else:
-            pursuit_target = _arena_center_row(grid_height, height)
+            pursuit_target = _arena_center_row(state["grid_height"], height)
 
         best_direction = safe_moves[0]
         best_score = float("-inf")
@@ -244,7 +319,7 @@ def _choose_move(
         for direction, score in scored:
             if direction not in safe_moves:
                 continue
-            new_top = _top_after_move(fighter["y"], direction, max_y)
+            new_top = _top_after_move(fighter["y"], direction, min_y, max_y)
             target_dist = abs(_fighter_center(new_top, height) - pursuit_target)
             if score > best_score or (score >= best_score - 25 and target_dist < best_target_dist):
                 best_score = score
@@ -266,13 +341,15 @@ def _should_shoot(
     if tick < fighter.get("cooldown_until_tick", 0):
         return False
 
-    grid_height = state["grid_height"]
-    max_y = grid_height - height
-    shoot_top = _top_after_move(fighter["y"], move_direction, max_y)
+    min_y, max_y = _playable_bounds(state, height)
+    speed = int(state["settings"].get("bullet_speed", 1))
+    shoot_top = _top_after_move(fighter["y"], move_direction, min_y, max_y)
     shoot_row = _fighter_center(shoot_top, height)
 
-    travel = _travel_ticks_to_enemy(fighter, enemy)
-    predicted_top = _predict_enemy_top(enemy, height, grid_height, travel)
+    travel = _travel_ticks_to_enemy(fighter, enemy, speed)
+    predicted_top = _predict_enemy_top(
+        enemy, height, state["grid_height"], travel, min_y, max_y
+    )
     if _shot_aligns_with_enemy(shoot_row, predicted_top, height):
         return True
 
@@ -282,12 +359,14 @@ def _should_shoot(
 
     direction = enemy.get("move_direction", "stop")
     if direction in ("up", "down"):
-        next_top = _predict_enemy_top(enemy, height, grid_height, 1)
+        next_top = _predict_enemy_top(enemy, height, state["grid_height"], 1, min_y, max_y)
         if _shot_aligns_with_enemy(shoot_row, next_top, height):
             return True
 
     if travel <= 20:
-        predicted_top = _predict_enemy_top(enemy, height, grid_height, travel)
+        predicted_top = _predict_enemy_top(
+            enemy, height, state["grid_height"], travel, min_y, max_y
+        )
         if _shot_aligns_with_enemy(shoot_row, predicted_top, height):
             return True
 
@@ -295,23 +374,69 @@ def _should_shoot(
     if abs(shoot_row - enemy_center) <= 1:
         return True
 
+    powerup = state.get("powerup")
+    if powerup and abs(shoot_row - powerup["y"]) <= 1:
+        return True
+
     return False
+
+
+def _should_charge(
+    state: dict,
+    fighter: dict[str, Any],
+    enemy: dict[str, Any],
+    height: int,
+    move_direction: str,
+) -> tuple[bool, int]:
+    if not state["settings"].get("charge_shot_enabled"):
+        return False, 0
+    tick = state["tick"]
+    if tick < fighter.get("cooldown_until_tick", 0):
+        return False, 0
+
+    min_y, max_y = _playable_bounds(state, height)
+    speed = int(state["settings"].get("bullet_speed", 1))
+    shoot_top = _top_after_move(fighter["y"], move_direction, min_y, max_y)
+    shoot_row = _fighter_center(shoot_top, height)
+    enemy_center = _fighter_center(enemy["y"], height)
+
+    if abs(shoot_row - enemy_center) <= 1:
+        return True, 12
+    if _should_shoot(state, fighter, enemy, height, move_direction):
+        return True, 8
+    return False, 0
 
 
 def choose_ai_actions(
     state: dict,
     player_id: str,
     fighter: dict[str, Any],
-) -> tuple[str, bool]:
+) -> tuple[str, bool, bool, bool, int]:
+    """Returns move, shoot, charge_start, charge_release, charge_ticks."""
     height = _fighter_height(state)
-    grid_height = state["grid_height"]
     bullets = _incoming_bullets(state, player_id, fighter)
     enemy = _enemy_fighter(state, player_id)
 
-    move = _choose_move(fighter, height, grid_height, bullets, enemy)
+    move = _choose_move(fighter, state, height, bullets, enemy)
 
     shoot = False
-    if enemy is not None:
-        shoot = _should_shoot(state, fighter, enemy, height, move)
+    charge_start = False
+    charge_release = False
+    charge_ticks = 0
 
-    return move, shoot
+    if enemy is not None:
+        if fighter.get("charging"):
+            charge_ticks = fighter.get("charge_ticks", 0) + 1
+            if charge_ticks >= 8 or _should_shoot(state, fighter, enemy, height, move):
+                charge_release = True
+            else:
+                charge_start = True
+        else:
+            want_charge, ticks = _should_charge(state, fighter, enemy, height, move)
+            if want_charge and random.random() < 0.55:
+                charge_start = True
+                charge_ticks = ticks
+            elif _should_shoot(state, fighter, enemy, height, move):
+                shoot = True
+
+    return move, shoot, charge_start, charge_release, charge_ticks

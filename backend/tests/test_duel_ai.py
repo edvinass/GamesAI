@@ -31,7 +31,7 @@ def test_ai_dodges_bullet_on_current_row() -> None:
 
     state["bullets"] = [{"id": 0, "x": 40, "y": 10, "vx": 1, "owner_id": "human"}]
 
-    move, _ = choose_ai_actions(state, "ai", ai)
+    move, *_ = choose_ai_actions(state, "ai", ai)
     assert 10 not in _rows_after(ai["y"], move)
 
 
@@ -44,7 +44,7 @@ def test_ai_dodges_approaching_bullet_before_overlap() -> None:
 
     state["bullets"] = [{"id": 0, "x": 25, "y": 11, "vx": 1, "owner_id": "human"}]
 
-    move, _ = choose_ai_actions(state, "ai", ai)
+    move, *_ = choose_ai_actions(state, "ai", ai)
     new_top = ai["y"] + (1 if move == "down" else -1 if move == "up" else 0)
     assert move != "down"
     assert 11 not in range(new_top, new_top + 3)
@@ -59,13 +59,14 @@ def test_ai_left_side_dodges_incoming_shot() -> None:
 
     state["bullets"] = [{"id": 0, "x": 30, "y": 10, "vx": -1, "owner_id": "ai"}]
 
-    move, _ = choose_ai_actions(state, "human", left)
+    move, *_ = choose_ai_actions(state, "human", left)
     new_top = left["y"] + (1 if move == "down" else -1 if move == "up" else 0)
     assert 10 not in range(new_top, new_top + 3)
 
 
 def test_ai_shoots_when_aligned() -> None:
     state = make_state()
+    state["settings"]["charge_shot_enabled"] = False
     ai = state["fighters"]["ai"]
     human = state["fighters"]["human"]
     ai["side"] = "right"
@@ -75,12 +76,13 @@ def test_ai_shoots_when_aligned() -> None:
     human["y"] = 10
     ai["cooldown_until_tick"] = 0
 
-    _, shoot = choose_ai_actions(state, "ai", ai)
+    _, shoot, *_ = choose_ai_actions(state, "ai", ai)
     assert shoot is True
 
 
 def test_ai_leads_moving_target() -> None:
     state = make_state()
+    state["settings"]["charge_shot_enabled"] = False
     ai = state["fighters"]["ai"]
     human = state["fighters"]["human"]
     ai["side"] = "right"
@@ -91,7 +93,7 @@ def test_ai_leads_moving_target() -> None:
     human["move_direction"] = "down"
     ai["cooldown_until_tick"] = 0
 
-    _, shoot = choose_ai_actions(state, "ai", ai)
+    _, shoot, *_ = choose_ai_actions(state, "ai", ai)
     assert shoot is True
 
 
@@ -104,7 +106,7 @@ def test_ai_moves_back_from_top_edge_when_safe() -> None:
     ai["move_direction"] = "up"
     state["bullets"] = []
 
-    move, _ = choose_ai_actions(state, "ai", ai)
+    move, *_ = choose_ai_actions(state, "ai", ai)
     assert move == "down"
 
 
@@ -117,7 +119,7 @@ def test_ai_moves_back_from_bottom_edge_when_safe() -> None:
     ai["move_direction"] = "down"
     state["bullets"] = []
 
-    move, _ = choose_ai_actions(state, "ai", ai)
+    move, *_ = choose_ai_actions(state, "ai", ai)
     assert move == "up"
 
 
@@ -129,7 +131,7 @@ def test_ai_prefers_center_among_safe_dodges() -> None:
     ai["y"] = 1
     state["bullets"] = [{"id": 0, "x": 10, "y": 20, "vx": 1, "owner_id": "human"}]
 
-    move, _ = choose_ai_actions(state, "ai", ai)
+    move, *_ = choose_ai_actions(state, "ai", ai)
     assert move == "down"
 
 
@@ -145,7 +147,7 @@ def test_ai_follows_enemy_moving_down() -> None:
     human["move_direction"] = "down"
     state["bullets"] = []
 
-    move, _ = choose_ai_actions(state, "ai", ai)
+    move, *_ = choose_ai_actions(state, "ai", ai)
     assert move == "down"
 
 
@@ -161,12 +163,13 @@ def test_ai_follows_enemy_moving_up() -> None:
     human["move_direction"] = "up"
     state["bullets"] = []
 
-    move, _ = choose_ai_actions(state, "ai", ai)
+    move, *_ = choose_ai_actions(state, "ai", ai)
     assert move == "up"
 
 
 def test_ai_shoots_after_moving_into_alignment() -> None:
     state = make_state()
+    state["settings"]["charge_shot_enabled"] = False
     ai = state["fighters"]["ai"]
     human = state["fighters"]["human"]
     ai["side"] = "right"
@@ -177,6 +180,6 @@ def test_ai_shoots_after_moving_into_alignment() -> None:
     ai["cooldown_until_tick"] = 0
     state["bullets"] = []
 
-    move, shoot = choose_ai_actions(state, "ai", ai)
+    move, shoot, *_ = choose_ai_actions(state, "ai", ai)
     assert move == "down"
     assert shoot is True

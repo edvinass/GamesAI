@@ -102,15 +102,29 @@ export interface SnakeGameState {
   viewer_id: string | null
 }
 
+export interface DuelFighterEffects {
+  rapid_fire_until: number
+  shield: boolean
+  wide_shot: boolean
+  ghost_until: number
+  ghost_active?: boolean
+}
+
 export interface DuelFighter {
   x: number
   y: number
+  display_y?: number
   side: 'left' | 'right'
   alive: boolean
+  hp: number
+  max_hp: number
   move_direction: string
   pending_shoot: boolean
+  charging?: boolean
+  charge_ticks?: number
   cooldown_until_tick: number
   color: string
+  effects?: DuelFighterEffects
 }
 
 export interface DuelBullet {
@@ -118,22 +132,56 @@ export interface DuelBullet {
   x: number
   y: number
   vx: number
+  vy?: number
   owner_id: string
+  damage?: number
+  bounces_remaining?: number
+}
+
+export interface DuelObstacle {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface DuelPowerup {
+  x: number
+  y: number
+  type: 'rapid_fire' | 'shield' | 'wide_shot' | 'ghost'
+}
+
+export interface DuelLastHit {
+  player_id: string
+  damage: number
+  crit: boolean
+  blocked?: boolean
 }
 
 export interface DuelGameState {
-  phase: 'countdown' | 'playing' | 'finished'
+  phase: 'countdown' | 'playing' | 'round_over' | 'finished'
   countdown_ends_at: string | null
   tick: number
+  round: number
+  round_scores: Record<string, number>
+  round_winner: string | null
+  best_of: number
+  match_format: string
+  mutator: string
   grid_width: number
   grid_height: number
+  playable_y_min: number
+  playable_y_max: number
   fighter_height: number
+  obstacles: DuelObstacle[]
   fighters: Record<string, DuelFighter>
   bullets: DuelBullet[]
+  powerup: DuelPowerup | null
   players: Player[]
   winner: string | null
   win_reason: string | null
   last_action: Record<string, unknown> | null
+  last_hit: DuelLastHit | null
   viewer_id: string | null
 }
 

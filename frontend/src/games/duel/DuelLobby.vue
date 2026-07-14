@@ -13,6 +13,8 @@ defineProps<{
 
 const soloPractice = defineModel<boolean>('soloPractice', { required: true })
 const tickMs = defineModel<number>('tickMs', { required: true })
+const matchFormat = defineModel<string>('matchFormat', { required: true })
+const mutator = defineModel<string>('mutator', { required: true })
 
 const emit = defineEmits<{
   addAi: []
@@ -25,6 +27,20 @@ const speedOptions = [
   { label: 'Slow', value: 100 },
   { label: 'Relaxed', value: 150 },
 ]
+
+const matchFormatOptions = [
+  { label: 'Quick duel (1 hit)', value: 'quick_duel' },
+  { label: 'Best of 3', value: 'best_of_3' },
+  { label: 'Best of 5', value: 'best_of_5' },
+]
+
+const mutatorOptions = [
+  { label: 'Classic', value: 'classic', hint: 'Cover, HP, power-ups' },
+  { label: 'Chaos', value: 'chaos', hint: 'Fast bullets, rapid fire' },
+  { label: 'Sniper', value: 'sniper', hint: 'One shot, long cooldown' },
+  { label: 'Bounce House', value: 'bounce_house', hint: 'Ricochet + obstacles' },
+  { label: 'Fog', value: 'fog', hint: 'Imprecise enemy position' },
+]
 </script>
 
 <template>
@@ -34,9 +50,28 @@ const speedOptions = [
         <input v-model="soloPractice" type="checkbox" />
         Solo practice (play against AI)
       </label>
-      <div class="speed-setting">
+
+      <div class="setting-row">
+        <span class="setting-label">Match format</span>
+        <select v-model="matchFormat" class="setting-select">
+          <option v-for="opt in matchFormatOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+      </div>
+
+      <div class="setting-row">
+        <span class="setting-label">Mutator</span>
+        <select v-model="mutator" class="setting-select">
+          <option v-for="opt in mutatorOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }} — {{ opt.hint }}
+          </option>
+        </select>
+      </div>
+
+      <div class="setting-row">
         <span class="setting-label">Game speed</span>
-        <select v-model.number="tickMs" class="speed-select">
+        <select v-model.number="tickMs" class="setting-select">
           <option v-for="opt in speedOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }} ({{ opt.value }}ms)
           </option>
@@ -45,7 +80,10 @@ const speedOptions = [
     </div>
 
     <div v-if="soloPractice" class="solo-notice card">
-      <p>Solo practice adds one AI opponent when you start. You'll duel from opposite sides of the arena.</p>
+      <p>
+        Solo practice adds one AI opponent. Duel across rounds with HP, cover, power-ups,
+        shrinking arena, and charge shots (in match modes).
+      </p>
     </div>
 
     <template v-else>
@@ -110,7 +148,7 @@ const speedOptions = [
   gap: 0.75rem;
 }
 
-.speed-setting {
+.setting-row {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -121,8 +159,8 @@ const speedOptions = [
   color: var(--text-muted);
 }
 
-.speed-select {
-  max-width: 220px;
+.setting-select {
+  max-width: 100%;
   padding: 0.4rem 0.6rem;
   border-radius: 6px;
   border: 1px solid var(--border);

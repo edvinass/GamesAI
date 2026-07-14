@@ -34,7 +34,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "codenames": {"name": "Codenames", "description": "Team word guessing game"},
     "spyfall": {"name": "Spyfall", "description": "Social deduction at a secret location"},
     "snake": {"name": "Multiplayer Snake", "description": "Battle on a shared grid — last snake standing"},
-    "duel": {"name": "Side Duel", "description": "Two players shoot from opposite sides — dodge and fire"},
+    "duel": {"name": "Side Duel", "description": "Best-of rounds with HP, cover, power-ups, and mutators"},
     "tetris": {"name": "Multiplier Tetris", "description": "Each player stacks alone — speed rises, last board standing wins"},
     "gravity_master": {"name": "Gravity Master", "description": "Draw shapes that fall and become walls — guide the ball to the target"},
     "poker": {"name": "Poker", "description": "Texas Hold'em — bluff, bet, and beat your friends (or AI)"},

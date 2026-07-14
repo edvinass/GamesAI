@@ -26,9 +26,9 @@ const metaByGameType: Record<string, GameMeta> = {
   },
   duel: {
     name: 'Side Duel',
-    description: 'Shoot from opposite sides — dodge bullets and land the hit.',
+    description: 'Best-of rounds with HP, cover, power-ups, charge shots, and mutators.',
     emoji: '⚔️',
-    lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
+    lobbyHint: 'Need exactly 2 players. Pick a format and mutator, then start.',
   },
   tetris: {
     name: 'Multiplier Tetris',

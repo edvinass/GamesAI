@@ -31,7 +31,7 @@ export function validateLobby(room: Room): LobbyValidation {
 
   return {
     valid: issues.length === 0,
-    message: issues[0] ?? '2 players ready — dodge and shoot!',
+    message: issues[0] ?? '2 players ready — pick your mutator and duel!',
     issues,
   }
 }
