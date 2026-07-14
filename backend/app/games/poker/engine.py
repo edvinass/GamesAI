@@ -2,6 +2,7 @@ import copy
 from typing import Any
 
 from app.games.base import GamePlugin
+from app.games.poker.ai import normalize_ai_difficulty
 from app.games.poker.deck import Deck
 from app.games.poker.hand_eval import describe_hand, evaluate_hand
 from app.games.poker.opponent_model import capture_to_call, on_hand_started, record_action
@@ -21,6 +22,8 @@ class PokerEngine(GamePlugin):
             "big_blind": 10,
             "solo_practice": False,
             "ai_difficulty": "medium",
+            "ai_difficulties": {},
+            "solo_ai_difficulties": ["medium", "medium"],
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -38,7 +41,28 @@ class PokerEngine(GamePlugin):
         if difficulty not in ("easy", "medium", "hard"):
             difficulty = "medium"
         merged["ai_difficulty"] = difficulty
+        raw_difficulties = merged.get("ai_difficulties") or {}
+        merged["ai_difficulties"] = {
+            str(player_id): normalize_ai_difficulty(level)
+            for player_id, level in raw_difficulties.items()
+        }
+        solo_defaults = list(merged.get("solo_ai_difficulties") or ["medium", "medium"])
+        while len(solo_defaults) < 2:
+            solo_defaults.append("medium")
+        merged["solo_ai_difficulties"] = [
+            normalize_ai_difficulty(level) for level in solo_defaults[:2]
+        ]
         return merged
+
+    def assign_lobby_roles(self, players: list[dict], settings: dict) -> list[dict]:
+        difficulties = settings.get("ai_difficulties") or {}
+        default = settings.get("ai_difficulty", "medium")
+        for player in players:
+            if player.get("is_ai"):
+                player["ai_difficulty"] = normalize_ai_difficulty(
+                    difficulties.get(player["id"], default)
+                )
+        return players
 
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
         settings = self.validate_settings(settings)
@@ -62,6 +86,13 @@ class PokerEngine(GamePlugin):
                 "id": p["id"],
                 "nickname": p["nickname"],
                 "is_ai": p.get("is_ai", False),
+                "ai_difficulty": normalize_ai_difficulty(
+                    p.get("ai_difficulty")
+                    or (settings.get("ai_difficulties") or {}).get(p["id"])
+                    or settings.get("ai_difficulty")
+                )
+                if p.get("is_ai")
+                else None,
                 "chips": settings["starting_chips"],
                 "hole_cards": [],
                 "bet_this_round": 0,

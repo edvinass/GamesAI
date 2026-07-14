@@ -262,6 +262,24 @@ def test_next_hand_requires_host(engine: PokerEngine, state: dict) -> None:
     assert state["phase"] == "preflop"
 
 
+def test_assign_lobby_roles_sets_ai_difficulty(engine: PokerEngine) -> None:
+    players = make_players(3, ai_indices={1, 2})
+    settings = {
+        "host_id": "p0",
+        "ai_difficulties": {"p1": "easy", "p2": "hard"},
+    }
+    result = engine.assign_lobby_roles(players, engine.validate_settings(settings))
+    assert result[1]["ai_difficulty"] == "easy"
+    assert result[2]["ai_difficulty"] == "hard"
+
+
+def test_create_initial_state_stores_per_player_ai_difficulty(engine: PokerEngine) -> None:
+    players = make_players(2, ai_indices={1})
+    players[1]["ai_difficulty"] = "hard"
+    state = engine.create_initial_state(players, {"host_id": "p0"})
+    assert state["players"]["p1"]["ai_difficulty"] == "hard"
+
+
 def test_get_current_actor_ai_only(engine: PokerEngine, state: dict) -> None:
     state["players"][state["current_actor_id"]]["is_ai"] = True
     actor = engine.get_current_actor(state)

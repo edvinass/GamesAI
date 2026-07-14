@@ -5,7 +5,7 @@ export interface Player {
   role: 'spymaster' | 'operative' | null
   is_ai: boolean
   is_connected: boolean
-  ai_difficulty?: 'easy' | 'normal' | 'hard'
+  ai_difficulty?: 'easy' | 'normal' | 'medium' | 'hard'
 }
 
 export interface Room {

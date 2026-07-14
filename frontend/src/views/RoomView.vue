@@ -147,14 +147,21 @@ const aiDifficulty = computed({
 const soloAiDifficulties = computed({
   get: () => {
     const raw = room.value?.settings?.solo_ai_difficulties
-    const maxAi = Math.max(0, Number(room.value?.settings?.max_players ?? 4) - 1)
+    const isPokerRoom = room.value?.game_type === 'poker'
+    const defaultLevel = isPokerRoom ? 'medium' : 'normal'
+    const maxAi = isPokerRoom
+      ? 2
+      : Math.max(0, Number(room.value?.settings?.max_players ?? 4) - 1)
     if (Array.isArray(raw) && raw.length >= maxAi) {
       return raw.slice(0, maxAi).map(String)
     }
-    return Array.from({ length: maxAi }, () => 'normal')
+    return Array.from({ length: maxAi }, () => defaultLevel)
   },
   set: (val: string[]) => {
-    const maxAi = Math.max(0, Number(room.value?.settings?.max_players ?? 4) - 1)
+    const isPokerRoom = room.value?.game_type === 'poker'
+    const maxAi = isPokerRoom
+      ? 2
+      : Math.max(0, Number(room.value?.settings?.max_players ?? 4) - 1)
     updateSettings({ solo_ai_difficulties: val.slice(0, maxAi) })
   },
 })
@@ -349,6 +356,7 @@ async function copyUrl() {
         v-model:small-blind="smallBlind"
         v-model:big-blind="bigBlind"
         v-model:ai-difficulty="aiDifficulty"
+        v-model:solo-ai-difficulties="soloAiDifficulties"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"
@@ -358,6 +366,7 @@ async function copyUrl() {
         :validation-issues="lobbyValidation.issues"
         @add-ai="addAi()"
         @remove="removePlayer"
+        @set-ai-difficulty="setAiDifficulty"
       />
 
       <ChessLobby

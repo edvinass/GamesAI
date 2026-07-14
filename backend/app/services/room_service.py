@@ -197,10 +197,13 @@ class RoomService:
             )
             self.db.add(player)
             await self.db.flush()
-            if room.game_type == "tetris":
+            if room.game_type in ("tetris", "poker"):
                 settings = dict(room.settings or {})
                 difficulties = dict(settings.get("ai_difficulties") or {})
-                difficulties[str(player.id)] = "normal"
+                default = "normal" if room.game_type == "tetris" else str(
+                    settings.get("ai_difficulty") or "medium"
+                )
+                difficulties[str(player.id)] = default
                 settings["ai_difficulties"] = difficulties
                 room.settings = get_game(room.game_type).validate_settings(settings)
             await self.db.commit()
@@ -255,7 +258,7 @@ class RoomService:
             raise ValueError("Host cannot remove themselves")
 
         await self.db.delete(target)
-        if room.game_type == "tetris":
+        if room.game_type in ("tetris", "poker"):
             settings = dict(room.settings or {})
             difficulties = dict(settings.get("ai_difficulties") or {})
             difficulties.pop(str(target_id), None)
@@ -524,6 +527,19 @@ class RoomService:
                     is_connected=True,
                 )
             )
+        await self.db.flush()
+
+        settings = dict(room.settings or {})
+        difficulties = dict(settings.get("ai_difficulties") or {})
+        solo_defaults = list(settings.get("solo_ai_difficulties") or ["medium", "medium"])
+        ai_index = 0
+        for p in room.players:
+            if p.is_ai:
+                default = solo_defaults[ai_index] if ai_index < len(solo_defaults) else "medium"
+                difficulties.setdefault(str(p.id), default)
+                ai_index += 1
+        settings["ai_difficulties"] = difficulties
+        room.settings = get_game("poker").validate_settings(settings)
         await self.db.flush()
 
     async def _setup_chess_solo(self, room: Room) -> None:

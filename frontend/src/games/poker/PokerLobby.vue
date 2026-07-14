@@ -17,10 +17,12 @@ const startingChips = defineModel<number>('startingChips', { required: true })
 const smallBlind = defineModel<number>('smallBlind', { required: true })
 const bigBlind = defineModel<number>('bigBlind', { required: true })
 const aiDifficulty = defineModel<string>('aiDifficulty', { required: true })
+const soloAiDifficulties = defineModel<string[]>('soloAiDifficulties', { required: true })
 
 const emit = defineEmits<{
   addAi: []
   remove: [id: string]
+  setAiDifficulty: [playerId: string, difficulty: string]
 }>()
 
 type GameMode = 'multiplayer' | 'solo_practice'
@@ -85,6 +87,22 @@ const activeMode = computed(() => gameModes.find((mode) => mode.id === gameMode.
 const activeDifficulty = computed(
   () => difficultyOptions.find((opt) => opt.value === aiDifficulty.value) ?? difficultyOptions[1],
 )
+
+function playerAiDifficulty(player: { id: string; ai_difficulty?: string }): string {
+  const map = (props.room.settings?.ai_difficulties ?? {}) as Record<string, string>
+  return player.ai_difficulty ?? map[player.id] ?? aiDifficulty.value
+}
+
+function difficultyLabel(value: string): string {
+  return difficultyOptions.find((opt) => opt.value === value)?.label ?? value
+}
+
+function updateSoloAiDifficulty(index: number, difficulty: string) {
+  const next = [...soloAiDifficulties.value]
+  while (next.length < 2) next.push('medium')
+  next[index] = difficulty
+  soloAiDifficulties.value = next.slice(0, 2)
+}
 
 const activePresetId = computed(() => {
   const match = stakePresets.find(
@@ -195,12 +213,35 @@ function seatInitial(nickname: string): string {
         </p>
       </div>
 
-      <div class="difficulty-section">
+      <div v-if="soloPractice" class="difficulty-section">
         <div class="difficulty-header">
-          <h2 class="section-title">AI strength</h2>
+          <h2 class="section-title">AI opponents</h2>
+          <span class="difficulty-hint">Set strength for each solo-practice bot.</span>
+        </div>
+        <div class="solo-ai-grid">
+          <label v-for="index in 2" :key="index" class="solo-ai-field">
+            <span class="field-label">Opponent {{ index }}</span>
+            <select
+              class="difficulty-select"
+              :value="soloAiDifficulties[index - 1] ?? 'medium'"
+              @change="
+                updateSoloAiDifficulty(index - 1, ($event.target as HTMLSelectElement).value)
+              "
+            >
+              <option v-for="opt in difficultyOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }} · {{ opt.detail }}
+              </option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div v-else class="difficulty-section">
+        <div class="difficulty-header">
+          <h2 class="section-title">Default AI strength</h2>
           <span class="difficulty-hint">{{ activeDifficulty.hint }}</span>
         </div>
-        <div class="difficulty-row" role="radiogroup" aria-label="AI difficulty">
+        <div class="difficulty-row" role="radiogroup" aria-label="Default AI difficulty">
           <button
             v-for="opt in difficultyOptions"
             :key="opt.value"
@@ -215,6 +256,7 @@ function seatInitial(nickname: string): string {
             <span class="diff-detail">{{ opt.detail }}</span>
           </button>
         </div>
+        <p class="default-ai-note">New AI players start at this level. Override per seat below.</p>
       </div>
     </section>
 
@@ -224,17 +266,23 @@ function seatInitial(nickname: string): string {
         <p class="mode-summary-label">{{ activeMode.label }}</p>
         <p class="mode-summary-desc">{{ activeMode.description }}</p>
         <p class="mode-summary-stakes">
-          {{ startingChips.toLocaleString() }} chips · blinds {{ smallBlind }}/{{ bigBlind }} ·
-          AI {{ activeDifficulty.label }} ({{ activeDifficulty.detail }})
+          {{ startingChips.toLocaleString() }} chips · blinds {{ smallBlind }}/{{ bigBlind }}
+          <template v-if="soloPractice">
+            · solo opponents
+            {{ soloAiDifficulties.map((level) => difficultyLabel(level)).join(' & ') }}
+          </template>
+          <template v-else> · default AI {{ activeDifficulty.label }}</template>
         </p>
-        <p class="mode-summary-ai-hint">{{ activeDifficulty.hint }}</p>
+        <p v-if="!soloPractice" class="mode-summary-ai-hint">{{ activeDifficulty.hint }}</p>
       </div>
     </section>
 
     <section v-if="soloPractice" class="solo-notice card">
       <p>
         Solo practice auto-adds 2 AI players when you start. You'll play 3-handed Texas Hold'em
-        against {{ activeDifficulty.label.toLowerCase() }} bots.
+        against
+        {{ soloAiDifficulties.map((level) => difficultyLabel(level).toLowerCase()).join(' and ') }}
+        bots.
       </p>
     </section>
 
@@ -292,14 +340,33 @@ function seatInitial(nickname: string): string {
                 <span v-if="player.id === currentPlayerId" class="badge you-badge">You</span>
                 <span v-if="player.id === hostPlayerId" class="badge host-badge">Host</span>
               </div>
-              <button
-                v-if="isHost && player.is_ai"
-                type="button"
-                class="btn-secondary remove-btn"
-                @click="emit('remove', player.id)"
-              >
-                Remove
-              </button>
+              <div class="player-actions">
+                <label v-if="isHost && player.is_ai" class="inline-select">
+                  <span>Strength</span>
+                  <select
+                    class="difficulty-select"
+                    :value="playerAiDifficulty(player)"
+                    @change="
+                      emit('setAiDifficulty', player.id, ($event.target as HTMLSelectElement).value)
+                    "
+                  >
+                    <option v-for="opt in difficultyOptions" :key="opt.value" :value="opt.value">
+                      {{ opt.label }}
+                    </option>
+                  </select>
+                </label>
+                <span v-else-if="player.is_ai" class="difficulty-readonly">
+                  {{ difficultyLabel(playerAiDifficulty(player)) }}
+                </span>
+                <button
+                  v-if="isHost && player.is_ai"
+                  type="button"
+                  class="btn-secondary remove-btn"
+                  @click="emit('remove', player.id)"
+                >
+                  Remove
+                </button>
+              </div>
             </li>
           </ul>
           <p v-else class="empty-players">Waiting for players to join…</p>
@@ -801,6 +868,60 @@ function seatInitial(nickname: string): string {
   border-bottom: 1px solid var(--border);
 }
 
+.player-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-shrink: 0;
+}
+
+.inline-select {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.difficulty-select {
+  padding: 0.35rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.difficulty-readonly {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface-hover);
+}
+
+.default-ai-note,
+.solo-ai-grid {
+  margin: 0;
+}
+
+.default-ai-note {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.solo-ai-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.solo-ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 .player-row:last-child {
   border-bottom: none;
 }
@@ -943,6 +1064,15 @@ function seatInitial(nickname: string): string {
   .player-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .player-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .solo-ai-grid {
+    grid-template-columns: 1fr;
   }
 
   .difficulty-row {

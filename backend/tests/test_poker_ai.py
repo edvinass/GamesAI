@@ -1,4 +1,4 @@
-from app.games.poker.ai import choose_poker_action
+from app.games.poker.ai import choose_poker_action, get_ai_config
 from app.games.poker.engine import PokerEngine
 
 
@@ -58,3 +58,36 @@ def test_ai_raise_amount_is_legal() -> None:
             to_call = max(0, state["current_bet"] - p["bet_this_round"])
             fallback = {"type": "call"} if to_call > 0 else {"type": "check"}
             state, _ = engine.apply_action(state, fallback, actor)
+
+
+def test_per_player_difficulty_uses_player_setting() -> None:
+    engine = PokerEngine()
+    players = [
+        {"id": "p0", "nickname": "Human", "is_ai": False, "team": None, "role": None, "is_connected": True},
+        {
+            "id": "p1",
+            "nickname": "Easy AI",
+            "is_ai": True,
+            "team": None,
+            "role": None,
+            "is_connected": True,
+            "ai_difficulty": "easy",
+        },
+        {
+            "id": "p2",
+            "nickname": "Hard AI",
+            "is_ai": True,
+            "team": None,
+            "role": None,
+            "is_connected": True,
+            "ai_difficulty": "hard",
+        },
+    ]
+    state = engine.create_initial_state(
+        players,
+        {"host_id": "p0", "ai_difficulty": "medium"},
+    )
+    assert get_ai_config(state["players"]["p1"]["ai_difficulty"])["bluff_rate"] == 0.08
+    assert get_ai_config(state["players"]["p2"]["ai_difficulty"])["strategy"] == "ev"
+    action = choose_poker_action(state, "p2")
+    assert action["type"] in ("fold", "check", "call", "raise", "all_in")

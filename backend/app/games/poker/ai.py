@@ -370,12 +370,22 @@ def _choose_heuristic_action(
     return {"type": "call"}
 
 
+def _player_ai_difficulty(state: dict, player_id: str) -> str | None:
+    p = state["players"].get(player_id)
+    if p and p.get("ai_difficulty"):
+        return str(p["ai_difficulty"])
+    difficulties = state.get("settings", {}).get("ai_difficulties") or {}
+    if player_id in difficulties:
+        return str(difficulties[player_id])
+    return state.get("settings", {}).get("ai_difficulty")
+
+
 def choose_poker_action(
     state: dict,
     player_id: str,
     difficulty: str | None = None,
 ) -> dict[str, Any]:
-    difficulty = difficulty or state.get("settings", {}).get("ai_difficulty")
+    difficulty = difficulty or _player_ai_difficulty(state, player_id)
     cfg = get_ai_config(difficulty)
 
     if cfg.get("strategy") == "ev":

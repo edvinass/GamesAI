@@ -23,7 +23,8 @@ def player_to_dict(player: Any, room_settings: dict | None = None) -> dict:
     }
     if player.is_ai and room_settings:
         difficulties = room_settings.get("ai_difficulties") or {}
-        data["ai_difficulty"] = difficulties.get(str(player.id), "normal")
+        default = str(room_settings.get("ai_difficulty") or "normal")
+        data["ai_difficulty"] = difficulties.get(str(player.id), default)
     return data
 
 
