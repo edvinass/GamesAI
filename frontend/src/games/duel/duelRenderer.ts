@@ -552,7 +552,16 @@ export class DuelRenderer {
     this.drawArena(ctx, offsetX, offsetY, boardW, boardH, grid_width, grid_height, cell, playable_y_min, playable_y_max, now)
     this.drawSpawnZones(ctx, offsetX, offsetY, boardW, boardH, cell, now)
     this.drawObstacles(ctx, offsetX, offsetY, cell, obstacles, now)
-    this.drawPowerup(ctx, offsetX, offsetY, cell, powerup, now, state.tick)
+    this.drawPowerup(
+      ctx,
+      offsetX,
+      offsetY,
+      cell,
+      powerup,
+      now,
+      state.tick,
+      state.powerup_lifetime_ticks ?? 100,
+    )
     this.drawArenaPulses(ctx, now)
     this.drawBullets(ctx, offsetX, offsetY, cell, bullets, now)
     this.drawFighters(ctx, offsetX, offsetY, boardW, cell, barCount, fighters, viewerId, dangerRows, now)
@@ -747,6 +756,7 @@ export class DuelRenderer {
     powerup: DuelPowerup | null,
     now: number,
     tick = 0,
+    lifetimeTicks = 100,
   ) {
     if (!powerup) return
     const color = POWERUP_COLORS[powerup.type] ?? '#fbbf24'
@@ -834,7 +844,7 @@ export class DuelRenderer {
 
     if (powerup.despawn_at_tick != null && tick > 0) {
       const remaining = Math.max(0, powerup.despawn_at_tick - tick)
-      const progress = Math.max(0, Math.min(1, remaining / 100))
+      const progress = Math.max(0, Math.min(1, remaining / lifetimeTicks))
       ctx.strokeStyle = rgba(tierRing, 0.75)
       ctx.lineWidth = Math.max(2, cell * 0.09)
       ctx.beginPath()
@@ -1028,38 +1038,167 @@ export class DuelRenderer {
     }
   }
 
-  private drawFighterSegment(
+  private traceFighterHullPath(
     ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    color: string,
-    danger: boolean,
+    fx: number,
+    top: number,
+    fw: number,
+    height: number,
+    cell: number,
+    facingRight: boolean,
+  ) {
+    const nose = cell * 0.14
+    const tail = cell * 0.1
+    const wingY = top + height * 0.56
+    const wingOut = fw * 0.24
+
+    if (facingRight) {
+      const back = fx + tail
+      const front = fx + fw + nose
+      ctx.moveTo(back, top + height * 0.14)
+      ctx.quadraticCurveTo(fx + fw * 0.35, top + height * 0.02, front, top + height * 0.5)
+      ctx.quadraticCurveTo(fx + fw * 0.35, top + height * 0.98, back, top + height * 0.86)
+      ctx.lineTo(fx + fw * 0.08, wingY + cell * 0.08)
+      ctx.lineTo(fx - wingOut, wingY)
+      ctx.lineTo(fx + fw * 0.08, wingY - cell * 0.08)
+      ctx.closePath()
+    } else {
+      const back = fx + fw - tail
+      const front = fx - nose
+      ctx.moveTo(back, top + height * 0.14)
+      ctx.quadraticCurveTo(fx + fw * 0.65, top + height * 0.02, front, top + height * 0.5)
+      ctx.quadraticCurveTo(fx + fw * 0.65, top + height * 0.98, back, top + height * 0.86)
+      ctx.lineTo(fx + fw * 0.92, wingY + cell * 0.08)
+      ctx.lineTo(fx + fw + wingOut, wingY)
+      ctx.lineTo(fx + fw * 0.92, wingY - cell * 0.08)
+      ctx.closePath()
+    }
+  }
+
+  private drawFighterShip(
+    ctx: CanvasRenderingContext2D,
+    fx: number,
+    shipTop: number,
+    fw: number,
+    shipHeight: number,
+    cell: number,
+    barCount: number,
+    fighter: DuelFighter,
+    dangerRows: Set<number>,
+    displayY: number,
+    isMe: boolean,
     moving: boolean,
     now: number,
   ) {
-    const r = Math.min(w, h) * 0.28
-    const drawColor = danger ? '#fca5a5' : color
+    const color = fighter.color
+    const facingRight = fighter.side === 'left'
+    const cx = fx + fw / 2
+    const cy = shipTop + shipHeight / 2
 
-    ctx.fillStyle = rgba(drawColor, 0.25)
-    ctx.beginPath()
-    ctx.roundRect(x - 1, y - 1, w + 2, h + 2, r + 1)
+    ctx.save()
+    this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, facingRight)
+
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, cell * barCount * 0.75)
+    glow.addColorStop(0, rgba(color, 0.35))
+    glow.addColorStop(1, rgba(color, 0))
+    ctx.fillStyle = glow
     ctx.fill()
 
-    const grad = ctx.createLinearGradient(x, y, x + w, y + h)
-    grad.addColorStop(0, lighten(drawColor, 0.35))
-    grad.addColorStop(0.55, drawColor)
-    grad.addColorStop(1, darken(drawColor, 0.25))
-    ctx.fillStyle = grad
-    ctx.beginPath()
-    ctx.roundRect(x, y, w, h, r)
+    this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, facingRight)
+    const hullGrad = ctx.createLinearGradient(
+      facingRight ? fx : fx + fw,
+      shipTop,
+      facingRight ? fx + fw : fx,
+      shipTop + shipHeight,
+    )
+    hullGrad.addColorStop(0, lighten(color, 0.42))
+    hullGrad.addColorStop(0.45, color)
+    hullGrad.addColorStop(1, darken(color, 0.35))
+    ctx.fillStyle = hullGrad
     ctx.fill()
 
-    if (moving) {
-      const flicker = 0.35 + Math.sin(now * 0.03) * 0.2
-      ctx.fillStyle = rgba(drawColor, flicker)
-      ctx.fillRect(x - w * 0.35, y + h * 0.25, w * 0.25, h * 0.5)
+    ctx.clip()
+
+    for (let i = 0; i < barCount; i++) {
+      const rowTop = shipTop + i * cell
+      if (i > 0) {
+        ctx.strokeStyle = rgba('#ffffff', 0.08)
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(fx - cell * 0.05, rowTop)
+        ctx.lineTo(fx + fw + cell * 0.05, rowTop)
+        ctx.stroke()
+      }
+      if (isMe && dangerRows.has(displayY + i)) {
+        const pulse = 0.28 + Math.sin(now * 0.025) * 0.12
+        ctx.fillStyle = rgba('#ef4444', pulse)
+        ctx.fillRect(fx - cell * 0.1, rowTop, fw + cell * 0.2, cell)
+      }
+    }
+
+    const lostHp = Math.max(0, fighter.max_hp - fighter.hp)
+    if (lostHp > 0 && fighter.alive) {
+      const damageH = (shipHeight / fighter.max_hp) * lostHp
+      ctx.fillStyle = rgba('#0f172a', 0.45)
+      ctx.fillRect(fx - cell * 0.1, shipTop, fw + cell * 0.2, damageH)
+      ctx.strokeStyle = rgba('#fca5a5', 0.35)
+      ctx.lineWidth = 1
+      for (let i = 0; i < lostHp; i++) {
+        const sy = shipTop + (i + 0.5) * (shipHeight / fighter.max_hp)
+        ctx.beginPath()
+        ctx.moveTo(fx + fw * 0.15, sy - cell * 0.08)
+        ctx.lineTo(fx + fw * 0.75, sy + cell * 0.06)
+        ctx.stroke()
+      }
+    }
+
+    ctx.restore()
+
+    this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, facingRight)
+    ctx.strokeStyle = rgba(lighten(color, 0.55), 0.55)
+    ctx.lineWidth = Math.max(1, cell * 0.07)
+    ctx.stroke()
+
+    const cockpitX = facingRight ? fx + fw * 0.58 : fx + fw * 0.42
+    const cockpitY = cy
+    ctx.fillStyle = rgba('#e0f2fe', 0.85)
+    ctx.beginPath()
+    ctx.ellipse(cockpitX, cockpitY, cell * 0.14, cell * 0.2, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = rgba('#ffffff', 0.65)
+    ctx.lineWidth = Math.max(1, cell * 0.05)
+    ctx.stroke()
+
+    ctx.fillStyle = rgba('#0c4a6e', 0.75)
+    ctx.beginPath()
+    ctx.ellipse(cockpitX + (facingRight ? cell * 0.03 : -cell * 0.03), cockpitY, cell * 0.06, cell * 0.1, 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    const nozzleX = facingRight ? fx + cell * 0.06 : fx + fw - cell * 0.06
+    if (moving && fighter.alive) {
+      const flicker = 0.55 + Math.sin(now * 0.035) * 0.25
+      const flameLen = cell * (0.35 + flicker * 0.25)
+      const flameGrad = ctx.createLinearGradient(
+        nozzleX,
+        cy,
+        facingRight ? nozzleX - flameLen : nozzleX + flameLen,
+        cy,
+      )
+      flameGrad.addColorStop(0, rgba(color, 0.95))
+      flameGrad.addColorStop(0.35, rgba('#fde68a', 0.85 * flicker))
+      flameGrad.addColorStop(1, rgba('#f97316', 0))
+      ctx.fillStyle = flameGrad
+      ctx.beginPath()
+      ctx.moveTo(nozzleX, cy - cell * 0.12)
+      ctx.lineTo(facingRight ? nozzleX - flameLen : nozzleX + flameLen, cy)
+      ctx.lineTo(nozzleX, cy + cell * 0.12)
+      ctx.closePath()
+      ctx.fill()
+    } else if (fighter.alive) {
+      ctx.fillStyle = rgba(lighten(color, 0.3), 0.5)
+      ctx.beginPath()
+      ctx.arc(nozzleX, cy, cell * 0.07, 0, Math.PI * 2)
+      ctx.fill()
     }
   }
 
@@ -1088,9 +1227,7 @@ export class DuelRenderer {
       }
       ctx.globalAlpha = alpha
 
-      const inset = Math.max(1, cell * 0.12)
-      const barGap = Math.max(1, cell * 0.07)
-      const barH = (cell * barCount - barGap * (barCount - 1)) / barCount
+      const inset = Math.max(1, cell * 0.1)
       const fx = offsetX + fighter.x * cell + inset
       const fw = cell - inset * 2
       const shipTop = offsetY + displayY * cell
@@ -1098,11 +1235,21 @@ export class DuelRenderer {
 
       this.drawFighterEffectAura(ctx, fx, shipTop, fw, shipHeight, cell, fighter, now)
 
-      for (let i = 0; i < barCount; i++) {
-        const barY = displayY + i
-        const fy = offsetY + barY * cell + (cell - barH) / 2
-        this.drawFighterSegment(ctx, fx, fy, fw, barH, fighter.color, dangerRows.has(barY) && isMe, moving, now)
-      }
+      this.drawFighterShip(
+        ctx,
+        fx,
+        shipTop,
+        fw,
+        shipHeight,
+        cell,
+        barCount,
+        fighter,
+        dangerRows,
+        displayY,
+        isMe,
+        moving,
+        now,
+      )
 
       if (fighter.effects?.shield_active) {
         const top = offsetY + displayY * cell
@@ -1147,30 +1294,38 @@ export class DuelRenderer {
         ctx.strokeStyle = 'rgba(255,255,255,0.85)'
         ctx.lineWidth = Math.max(1.5, cell * 0.08)
         ctx.beginPath()
-        ctx.roundRect(fx - 1, offsetY + displayY * cell, fw + 2, cell * barCount, cell * 0.15)
+        this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, fighter.side === 'left')
         ctx.stroke()
 
         const aimRow = displayY + Math.floor(barCount / 2)
         const ay = offsetY + aimRow * cell + cell / 2
         const sweep = (Math.sin(now * 0.008) + 1) * 0.5
         const aimEndX = fighter.side === 'left' ? offsetX + boardW : offsetX
+        const muzzleX = fighter.side === 'left' ? fx + fw + cell * 0.08 : fx - cell * 0.08
         ctx.strokeStyle = `rgba(255,255,255,${0.12 + sweep * 0.12})`
         ctx.lineWidth = 1
         ctx.setLineDash([cell * 0.35, cell * 0.3])
         ctx.beginPath()
-        ctx.moveTo(offsetX + fighter.x * cell + cell, ay)
+        ctx.moveTo(muzzleX, ay)
         ctx.lineTo(aimEndX, ay)
         ctx.stroke()
         ctx.setLineDash([])
       }
 
       if (!fighter.alive) {
-        const cx = offsetX + fighter.x * cell + cell / 2
-        const cy = offsetY + displayY * cell + (cell * barCount) / 2
-        ctx.strokeStyle = rgba(fighter.color, 0.35)
-        ctx.lineWidth = 2
+        const cx = fx + fw / 2
+        const cy = shipTop + shipHeight / 2
+        ctx.strokeStyle = rgba(fighter.color, 0.45)
+        ctx.lineWidth = Math.max(2, cell * 0.1)
         ctx.beginPath()
-        ctx.arc(cx, cy, cell * 0.55, 0, Math.PI * 2)
+        ctx.moveTo(cx - cell * 0.35, cy - cell * 0.35)
+        ctx.lineTo(cx + cell * 0.35, cy + cell * 0.35)
+        ctx.moveTo(cx + cell * 0.35, cy - cell * 0.35)
+        ctx.lineTo(cx - cell * 0.35, cy + cell * 0.35)
+        ctx.stroke()
+        ctx.strokeStyle = rgba(fighter.color, 0.2)
+        ctx.beginPath()
+        this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, fighter.side === 'left')
         ctx.stroke()
       }
 

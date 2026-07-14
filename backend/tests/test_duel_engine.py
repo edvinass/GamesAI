@@ -344,6 +344,38 @@ def test_freeze_blocks_movement(engine: DuelEngine, state: dict) -> None:
     assert fighter["y"] == start_y
 
 
+def test_heal_at_max_hp_is_blocked(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    state["fighters"][pid]["hp"] = state["fighters"][pid]["max_hp"]
+    state["fighters"][pid]["stored_powerup"] = "heal"
+
+    state, events = engine.apply_action(state, {"type": "powerup_activate"}, player)
+    assert state["fighters"][pid]["stored_powerup"] == "heal"
+    assert not any(e["type"] == "powerup_activated" for e in events)
+    assert state["last_action"]["type"] == "powerup_blocked"
+
+
+def test_overdrive_increases_shot_damage(engine: DuelEngine, state: dict) -> None:
+    left = state["fighters"]["p0"]
+    left["effects"]["overdrive_until"] = state["tick"] + 80
+    left["pending_shoot"] = True
+    left["cooldown_until_tick"] = 0
+
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) >= 1
+    assert all(b["damage"] >= 2 for b in state["bullets"])
+
+
+def test_timed_effect_extends_instead_of_shortening(engine: DuelEngine, state: dict) -> None:
+    fighter = state["fighters"]["p0"]
+    fighter["effects"]["shield_until"] = state["tick"] + 60
+    fighter["stored_powerup"] = "shield"
+    events: list[dict] = []
+    engine._activate_stored_powerup(state, fighter, "p0", events)
+    assert fighter["effects"]["shield_until"] >= state["tick"] + 100
+
+
 def test_heal_powerup(engine: DuelEngine, state: dict) -> None:
     player = state["players"][0]
     pid = player["id"]

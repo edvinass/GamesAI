@@ -2,12 +2,26 @@ import random
 from typing import Any
 
 POWERUP_ACTIVATION_TICKS = 8
+
 FULL_CHARGE_TICKS = 11
 MID_CHARGE_TICKS = 8
 
 INSTANT_POWERUP_TYPES = frozenset(
     {"heal", "laser", "railgun", "bomb", "cluster", "burst"}
 )
+
+POWERUP_CHANNEL_TICKS: dict[str, int] = {
+    "rapid_fire": 6,
+    "machine_gun": 6,
+    "shield": 8,
+    "wide_shot": 6,
+    "homing": 7,
+    "pierce": 7,
+    "ghost": 7,
+    "freeze": 8,
+    "mirror": 8,
+    "overdrive": 7,
+}
 
 OFFENSIVE_BUFF_TYPES = frozenset(
     {"rapid_fire", "machine_gun", "homing", "overdrive", "pierce", "wide_shot"}
@@ -535,12 +549,18 @@ def _should_charge(
     shoot_row = _aim_row_after_move(fighter, height, move_direction, state)
     predicted_top = _predicted_enemy_top(state, fighter, enemy, height)
     gap = _row_gap_to_enemy(shoot_row, predicted_top, height)
+    relaxed_safe = not _immediate_bullet_threat(fighter, height, bullets, max_ticks=18)
+    enemy_low_hp = enemy.get("hp", 3) <= 2
 
     if gap == 0:
         return True, FULL_CHARGE_TICKS
     if gap <= 1:
+        if relaxed_safe and (enemy_low_hp or random.random() < 0.55):
+            return True, FULL_CHARGE_TICKS
         return True, MID_CHARGE_TICKS
     if _should_shoot(state, fighter, enemy, height, move_direction) and gap <= 2:
+        if relaxed_safe and random.random() < 0.35:
+            return True, FULL_CHARGE_TICKS
         return True, MID_CHARGE_TICKS
     return False, 0
 
@@ -561,8 +581,10 @@ def _charge_release_ticks(
     predicted_top = _predicted_enemy_top(state, fighter, enemy, height)
     gap = _row_gap_to_enemy(shoot_row, predicted_top, height)
 
-    if gap == 0 and charge_ticks >= FULL_CHARGE_TICKS:
-        return charge_ticks
+    if gap == 0:
+        if charge_ticks >= FULL_CHARGE_TICKS:
+            return charge_ticks
+        return 0
     if gap <= 1 and charge_ticks >= MID_CHARGE_TICKS:
         return charge_ticks
     if _should_shoot(state, fighter, enemy, height, move_direction) and charge_ticks >= MID_CHARGE_TICKS:
@@ -588,7 +610,8 @@ def _should_activate_powerup(
 
     if fighter.get("activating_powerup"):
         ticks = fighter.get("powerup_activation_ticks", 0) + 1
-        if ticks >= POWERUP_ACTIVATION_TICKS:
+        required = POWERUP_CHANNEL_TICKS.get(stored, POWERUP_ACTIVATION_TICKS)
+        if ticks >= required:
             return False, True
         return False, False
 
@@ -704,8 +727,6 @@ def choose_ai_actions(
             if release_ticks:
                 charge_release = True
                 charge_ticks = release_ticks
-            else:
-                charge_start = True
         else:
             want_charge, ticks = _should_charge(state, fighter, enemy, height, move, bullets)
             if want_charge:

@@ -33,6 +33,33 @@ POWERUP_TYPES = (
 POWERUP_ACTIVATION_TICKS = 8
 POWERUP_ACTIVATION_MIN_SERVER_TICKS = 5
 
+# Per-power-up effect length (ticks) and channel time before release (ticks).
+POWERUP_EFFECT_DURATIONS: dict[str, int] = {
+    "rapid_fire": 70,
+    "machine_gun": 90,
+    "shield": 100,
+    "wide_shot": 75,
+    "pierce": 70,
+    "ghost": 85,
+    "freeze": 55,
+    "homing": 80,
+    "mirror": 75,
+    "overdrive": 65,
+}
+
+POWERUP_CHANNEL_TICKS: dict[str, int] = {
+    "rapid_fire": 6,
+    "machine_gun": 6,
+    "shield": 8,
+    "wide_shot": 6,
+    "homing": 7,
+    "pierce": 7,
+    "ghost": 7,
+    "freeze": 8,
+    "mirror": 8,
+    "overdrive": 7,
+}
+
 INSTANT_POWERUP_TYPES = frozenset(
     {
         "heal",
@@ -260,19 +287,32 @@ class DuelEngine(GamePlugin):
             return server
         return min(max_ticks, min(client, server + CLIENT_PROGRESS_LAG_TICKS))
 
+    def _powerup_channel_ticks(self, ptype: str) -> int:
+        return POWERUP_CHANNEL_TICKS.get(ptype, POWERUP_ACTIVATION_TICKS)
+
+    def _powerup_effect_duration(self, ptype: str, state: dict) -> int:
+        return POWERUP_EFFECT_DURATIONS.get(
+            ptype, int(state["settings"].get("effect_duration_ticks", 80))
+        )
+
+    def _extend_timed_effect(self, effects: dict, key: str, tick: int, duration: int) -> None:
+        effects[key] = max(int(effects.get(key, 0)), tick + duration)
+
     def _powerup_activation_succeeds(
-        self, was_activating: bool, server_ticks: int, client_ticks: int | None
+        self,
+        was_activating: bool,
+        server_ticks: int,
+        client_ticks: int | None,
+        required_ticks: int,
     ) -> bool:
         if not was_activating:
             return False
-        if server_ticks >= POWERUP_ACTIVATION_TICKS:
+        if server_ticks >= required_ticks:
             return True
         if client_ticks is None:
             return False
-        return (
-            int(client_ticks) >= POWERUP_ACTIVATION_TICKS
-            and server_ticks >= POWERUP_ACTIVATION_MIN_SERVER_TICKS
-        )
+        min_server = min(POWERUP_ACTIVATION_MIN_SERVER_TICKS, required_ticks)
+        return int(client_ticks) >= required_ticks and server_ticks >= min_server
 
     def _rounds_to_win(self, state: dict) -> int:
         return (int(state["settings"].get("best_of", 5)) + 1) // 2
@@ -509,6 +549,14 @@ class DuelEngine(GamePlugin):
             ptype = fighter.get("stored_powerup")
             if not ptype or ptype not in INSTANT_POWERUP_TYPES:
                 return state, events
+            if ptype == "heal" and fighter.get("hp", 1) >= fighter.get("max_hp", 3):
+                state["last_action"] = {
+                    "type": "powerup_blocked",
+                    "player_id": player_id,
+                    "powerup_type": ptype,
+                    "reason": "max_hp",
+                }
+                return state, events
             self._activate_stored_powerup(state, fighter, player_id, events)
             state["last_action"] = {
                 "type": "powerup_activated",
@@ -535,12 +583,15 @@ class DuelEngine(GamePlugin):
                 return state, events
             was_activating = bool(fighter.get("activating_powerup"))
             fighter["activating_powerup"] = False
+            ptype = fighter.get("stored_powerup") or ""
+            required_ticks = self._powerup_channel_ticks(ptype)
             server_ticks = int(fighter.get("powerup_activation_ticks", 0))
             client_ticks = action.get("powerup_activation_ticks")
             activated = self._powerup_activation_succeeds(
                 was_activating,
                 server_ticks,
                 int(client_ticks) if client_ticks is not None else None,
+                required_ticks,
             )
             ticks = max(
                 server_ticks,
@@ -606,7 +657,8 @@ class DuelEngine(GamePlugin):
 
             stored = fighter.get("stored_powerup")
             if fighter.get("activating_powerup") and stored and stored not in INSTANT_POWERUP_TYPES:
-                if int(fighter.get("powerup_activation_ticks", 0)) >= POWERUP_ACTIVATION_TICKS:
+                required = self._powerup_channel_ticks(stored)
+                if int(fighter.get("powerup_activation_ticks", 0)) >= required:
                     fighter["activating_powerup"] = False
                     self._activate_stored_powerup(state, fighter, pid, ai_events)
                     fighter["powerup_activation_ticks"] = 0
@@ -777,8 +829,10 @@ class DuelEngine(GamePlugin):
         if tick < effects.get("wide_shot_until", 0):
             width = max(width, 3)
 
-        if tick < effects.get("overdrive_until", 0):
+        overdrive = tick < effects.get("overdrive_until", 0)
+        if overdrive:
             width = max(width, 3)
+            damage = max(damage, 2)
 
         machine_gun = tick < effects.get("machine_gun_until", 0)
         if machine_gun:
@@ -1020,34 +1074,35 @@ class DuelEngine(GamePlugin):
         if not ptype:
             return
         tick = state["tick"]
-        duration = int(state["settings"].get("effect_duration_ticks", 80))
+        duration = self._powerup_effect_duration(ptype, state)
         effects = fighter.setdefault("effects", {})
         fighter["stored_powerup"] = None
 
         if ptype == "rapid_fire":
-            effects["rapid_fire_until"] = tick + duration
+            self._extend_timed_effect(effects, "rapid_fire_until", tick, duration)
         elif ptype == "machine_gun":
-            effects["machine_gun_until"] = tick + duration
+            self._extend_timed_effect(effects, "machine_gun_until", tick, duration)
         elif ptype == "shield":
-            effects["shield_until"] = tick + duration
+            self._extend_timed_effect(effects, "shield_until", tick, duration)
         elif ptype == "wide_shot":
-            effects["wide_shot_until"] = tick + duration
+            self._extend_timed_effect(effects, "wide_shot_until", tick, duration)
         elif ptype == "pierce":
-            effects["pierce_until"] = tick + duration
+            self._extend_timed_effect(effects, "pierce_until", tick, duration)
         elif ptype == "ghost":
-            effects["ghost_until"] = tick + duration
+            self._extend_timed_effect(effects, "ghost_until", tick, duration)
         elif ptype == "homing":
-            effects["homing_until"] = tick + duration
+            self._extend_timed_effect(effects, "homing_until", tick, duration)
         elif ptype == "mirror":
-            effects["mirror_until"] = tick + duration
+            self._extend_timed_effect(effects, "mirror_until", tick, duration)
         elif ptype == "overdrive":
-            effects["overdrive_until"] = tick + duration
+            self._extend_timed_effect(effects, "overdrive_until", tick, duration)
         elif ptype == "heal":
             fighter["hp"] = min(fighter.get("max_hp", 3), fighter.get("hp", 1) + 1)
         elif ptype == "freeze":
             for pid, target in state["fighters"].items():
                 if pid != owner_id and target.get("alive"):
-                    target.setdefault("effects", {})["freeze_until"] = tick + duration
+                    target_effects = target.setdefault("effects", {})
+                    self._extend_timed_effect(target_effects, "freeze_until", tick, duration)
         elif ptype == "laser":
             self._fire_laser(state, fighter, owner_id, events)
         elif ptype == "railgun":
@@ -1065,16 +1120,18 @@ class DuelEngine(GamePlugin):
     def _fire_bomb(self, state: dict, fighter: dict, owner_id: str) -> None:
         fighter_height = self._fighter_height(state)
         center_row = self._shoot_row(fighter, fighter_height)
-        self._spawn_bomb(state, fighter, owner_id, center_row)
+        speed = max(2, int(state["settings"].get("bullet_speed", 2)))
+        self._spawn_bomb(state, fighter, owner_id, center_row, speed=speed)
 
     def _fire_cluster_bombs(self, state: dict, fighter: dict, owner_id: str) -> None:
         fighter_height = self._fighter_height(state)
         center_row = self._shoot_row(fighter, fighter_height)
         grid_height = state["grid_height"]
+        speed = max(2, int(state["settings"].get("bullet_speed", 2)))
         for offset in (-1, 0, 1):
             row = center_row + offset
             if 0 <= row < grid_height:
-                self._spawn_bomb(state, fighter, owner_id, row)
+                self._spawn_bomb(state, fighter, owner_id, row, speed=speed)
 
     def _process_burst_shots(self, state: dict) -> None:
         tick = state["tick"]
@@ -1636,6 +1693,7 @@ class DuelEngine(GamePlugin):
             "mutator": state["settings"].get("mutator", "classic"),
             "powerups_enabled": bool(state["settings"].get("powerups_enabled")),
             "effect_duration_ticks": int(state["settings"].get("effect_duration_ticks", 80)),
+            "powerup_lifetime_ticks": int(state["settings"].get("powerup_lifetime_ticks", 100)),
             "bullet_speed": int(state["settings"].get("bullet_speed", 2)),
             "tick_ms": int(state["settings"].get("tick_ms", 75)),
             "charge_max_ticks": int(state["settings"].get("charge_max_ticks", 15)),

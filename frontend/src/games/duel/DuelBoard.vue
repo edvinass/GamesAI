@@ -3,11 +3,13 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, DuelGameState } from '@/types'
 import { DuelRenderer, POWERUP_COLORS, POWERUP_ICONS, POWERUP_LABELS } from './duelRenderer'
 import {
-  POWERUP_ACTIVATION_TICKS,
   POWERUP_HINTS,
   POWERUP_TIER_LABELS,
+  canUseStoredPowerup,
+  formatPowerupSeconds,
   isInstantPowerup,
   listActivePowerupEffects,
+  powerupChannelTicks,
   powerupTier,
   powerupUseHint,
 } from './powerupMeta'
@@ -81,11 +83,19 @@ const charging = ref(false)
 const chargeTicks = ref(0)
 const activatingPowerup = ref(false)
 const powerupActivationTicks = ref(0)
+const channelTicksRequired = computed(() => powerupChannelTicks(storedPowerup.value))
+const canUsePowerup = computed(() =>
+  canUseStoredPowerup(
+    storedPowerup.value,
+    myFighter.value?.hp ?? 0,
+    myFighter.value?.max_hp ?? 3,
+  ),
+)
 const powerupReady = computed(
   () =>
     activatingPowerup.value &&
-    (powerupActivationTicks.value >= POWERUP_ACTIVATION_TICKS ||
-      (myFighter.value?.powerup_activation_ticks ?? 0) >= POWERUP_ACTIVATION_TICKS),
+    (powerupActivationTicks.value >= channelTicksRequired.value ||
+      (myFighter.value?.powerup_activation_ticks ?? 0) >= channelTicksRequired.value),
 )
 const localChargeInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const localPowerupInterval = ref<ReturnType<typeof setInterval> | null>(null)
@@ -97,7 +107,7 @@ const lastSeenPowerupKey = ref('')
 const lastStoredPowerup = ref<string | null>(null)
 const lastActionStamp = ref('')
 
-const storedPowerupHint = computed(() => powerupUseHint(storedPowerup.value))
+const storedPowerupHint = computed(() => powerupUseHint(storedPowerup.value, tickMs.value))
 const storedPowerupDescription = computed(() =>
   storedPowerup.value ? POWERUP_HINTS[storedPowerup.value] ?? '' : '',
 )
@@ -109,6 +119,7 @@ const activeBuffs = computed(() =>
   listActivePowerupEffects(
     myFighter.value?.effects as Record<string, unknown> | undefined,
     props.gameState.tick,
+    tickMs.value,
     props.gameState.effect_duration_ticks ?? 80,
   ),
 )
@@ -172,7 +183,12 @@ function showPowerupNotice(text: string, tone: 'info' | 'success' | 'warn' = 'in
 }
 
 function useStoredPowerup() {
-  if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value) return
+  if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value || !canUsePowerup.value) {
+    if (storedPowerup.value === 'heal' && !canUsePowerup.value) {
+      showPowerupNotice('Already at full health', 'warn')
+    }
+    return
+  }
   if (isInstantStored.value) {
     emit('action', { type: 'powerup_activate' })
     return
@@ -180,18 +196,34 @@ function useStoredPowerup() {
   if (!activatingPowerup.value) startPowerupActivation()
 }
 
-function startPowerupActivation() {
+function onPowerupButtonDown(e: MouseEvent | TouchEvent) {
+  e.preventDefault()
   if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value) return
+  if (isInstantStored.value) {
+    useStoredPowerup()
+    return
+  }
+  if (!canUsePowerup.value) return
+  if (!activatingPowerup.value) startPowerupActivation()
+}
+
+function onPowerupButtonUp(e: MouseEvent | TouchEvent) {
+  e.preventDefault()
+  if (activatingPowerup.value && !isInstantStored.value) {
+    releasePowerupActivation()
+  }
+}
+
+function startPowerupActivation() {
+  if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value || !canUsePowerup.value) return
   activatingPowerup.value = true
   powerupActivationTicks.value = 0
   emit('action', { type: 'powerup_hold_start' })
   if (localPowerupInterval.value) clearInterval(localPowerupInterval.value)
+  const required = channelTicksRequired.value
   localPowerupInterval.value = setInterval(() => {
     if (activatingPowerup.value) {
-      powerupActivationTicks.value = Math.min(
-        POWERUP_ACTIVATION_TICKS,
-        powerupActivationTicks.value + 1,
-      )
+      powerupActivationTicks.value = Math.min(required, powerupActivationTicks.value + 1)
     }
   }, tickMs.value)
 }
@@ -219,7 +251,7 @@ watch(
     if (!activatingPowerup.value || typeof serverTicks !== 'number') return
     powerupActivationTicks.value = Math.max(
       powerupActivationTicks.value,
-      Math.min(POWERUP_ACTIVATION_TICKS, serverTicks),
+      Math.min(channelTicksRequired.value, serverTicks),
     )
   },
 )
@@ -229,7 +261,7 @@ watch(
   (stored, prev) => {
     if (stored && stored !== prev) {
       const label = POWERUP_LABELS[stored] ?? stored
-      showPowerupNotice(`${label} collected — ${powerupUseHint(stored)}`, 'success')
+      showPowerupNotice(`${label} collected — ${powerupUseHint(stored, tickMs.value)}`, 'success')
     }
     if (!stored) {
       activatingPowerup.value = false
@@ -268,8 +300,13 @@ watch(
     if (type === 'powerup_activated') {
       const ptype = action.powerup_type as string
       showPowerupNotice(`${POWERUP_LABELS[ptype] ?? ptype} activated!`, 'success')
+    } else if (type === 'powerup_blocked' && action.reason === 'max_hp') {
+      showPowerupNotice('Heal saved — you are already at full health', 'warn')
     } else if (type === 'powerup_hold_release' && action.activated === false) {
-      showPowerupNotice('Hold E a bit longer to activate', 'warn')
+      showPowerupNotice(
+        `Hold E a bit longer (${formatPowerupSeconds(channelTicksRequired.value, tickMs.value)})`,
+        'warn',
+      )
     }
   },
 )
@@ -355,8 +392,8 @@ function onKeyDown(e: KeyboardEvent) {
   ) {
     e.preventDefault()
     if (isInstantStored.value) {
-      emit('action', { type: 'powerup_activate' })
-    } else if (!activatingPowerup.value) {
+      useStoredPowerup()
+    } else if (!activatingPowerup.value && canUsePowerup.value) {
       startPowerupActivation()
     }
     return
@@ -497,8 +534,25 @@ onUnmounted(() => {
           <span>{{ storedPowerupDescription }}</span>
           <span class="powerup-slot-hint">{{ storedPowerupHint }}</span>
         </div>
-        <button type="button" class="powerup-use-btn" @click="useStoredPowerup">
-          {{ isInstantStored ? 'Use [E]' : 'Hold [E]' }}
+        <button
+          type="button"
+          class="powerup-use-btn"
+          :class="{ disabled: !canUsePowerup }"
+          :disabled="!canUsePowerup"
+          @mousedown="onPowerupButtonDown"
+          @mouseup="onPowerupButtonUp"
+          @mouseleave="onPowerupButtonUp"
+          @touchstart.prevent="onPowerupButtonDown"
+          @touchend.prevent="onPowerupButtonUp"
+          @touchcancel.prevent="onPowerupButtonUp"
+        >
+          {{
+            !canUsePowerup && storedPowerup === 'heal'
+              ? 'Full HP'
+              : isInstantStored
+                ? 'Use [E]'
+                : 'Hold [E]'
+          }}
         </button>
       </div>
 
@@ -511,6 +565,7 @@ onUnmounted(() => {
         >
           <span class="active-buff-icon">{{ POWERUP_ICONS[buff.id] ?? '★' }}</span>
           <span class="active-buff-label">{{ buff.label }}</span>
+          <span class="active-buff-time">{{ formatPowerupSeconds(buff.remainingTicks, tickMs) }}</span>
           <span class="active-buff-ring">
             <svg viewBox="0 0 36 36">
               <circle cx="18" cy="18" r="15" class="ring-bg" />
@@ -549,7 +604,7 @@ onUnmounted(() => {
           class="charge-fill powerup-fill"
           :class="{ 'charge-full': powerupReady, 'powerup-charging': !powerupReady }"
           :style="{
-            width: `${(powerupActivationTicks / POWERUP_ACTIVATION_TICKS) * 100}%`,
+            width: `${(powerupActivationTicks / channelTicksRequired) * 100}%`,
             background: `linear-gradient(90deg, ${POWERUP_COLORS[storedPowerup] ?? '#a855f7'}, #fff)`,
           }"
         />
@@ -557,7 +612,10 @@ onUnmounted(() => {
           {{
             powerupReady
               ? 'RELEASE!'
-              : `Activating ${POWERUP_LABELS[storedPowerup] ?? storedPowerup}…`
+              : `Activating… ${formatPowerupSeconds(
+                  Math.max(0, channelTicksRequired - powerupActivationTicks),
+                  tickMs,
+                )} left`
           }}
         </span>
       </div>
@@ -601,7 +659,12 @@ onUnmounted(() => {
             'hp-hit': hpPulseId === `${row.id}-${gameState.tick}`,
           }"
         >
-          <span class="color-dot" :style="{ background: row.fighter?.color ?? '#666' }" />
+          <span
+            class="ship-avatar"
+            :class="{ left: row.fighter?.side === 'left', right: row.fighter?.side === 'right' }"
+            :style="{ '--ship-color': row.fighter?.color ?? '#666' }"
+            aria-hidden="true"
+          />
           <span class="name">{{ row.nickname }}</span>
           <span class="round-wins">{{ row.roundWins }}/{{ roundsToWin }}</span>
           <span v-if="row.fighter" class="hp-bar">
@@ -637,7 +700,7 @@ onUnmounted(() => {
       <div class="controls-hint">
         <p v-if="canControl && chargeEnabled && storedPowerup">
           <strong>Controls:</strong> W/S move · Space charge & fire ·
-          {{ isInstantStored ? 'E to use power-up' : `Hold E ~${Math.round((POWERUP_ACTIVATION_TICKS * tickMs) / 1000 * 10) / 10}s to activate` }}
+          {{ isInstantStored ? 'E to use power-up' : `Hold E ~${formatPowerupSeconds(channelTicksRequired, tickMs)} to activate` }}
         </p>
         <p v-else-if="canControl && chargeEnabled && powerupsEnabled && arenaPowerup">
           <strong>Controls:</strong> W/S move · Space charge & fire · Collect the {{ POWERUP_LABELS[arenaPowerup.type] ?? 'power-up' }} (shoot or touch it)
@@ -1005,8 +1068,22 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.powerup-use-btn:hover {
+.powerup-use-btn:hover:not(:disabled) {
   background: rgba(168, 85, 247, 0.3);
+}
+
+.powerup-use-btn.disabled,
+.powerup-use-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.active-buff-time {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #94a3b8;
+  min-width: 1.8rem;
+  text-align: right;
 }
 
 .callout-dot {
@@ -1155,11 +1232,18 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.45rem;
   font-size: 0.9rem;
-  transition: transform 0.2s ease;
+  padding: 0.35rem 0.65rem 0.35rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: rgba(15, 23, 42, 0.35);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .player-score-row.me {
   font-weight: 700;
+  border-color: rgba(91, 156, 255, 0.35);
+  background: linear-gradient(135deg, rgba(91, 156, 255, 0.12), rgba(124, 108, 240, 0.08));
+  box-shadow: 0 0 0 1px rgba(91, 156, 255, 0.08), 0 4px 14px rgba(91, 156, 255, 0.12);
 }
 
 .player-score-row.dead {
@@ -1170,12 +1254,46 @@ onUnmounted(() => {
   animation: hpShake 0.35s ease;
 }
 
-.color-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+.ship-avatar {
+  position: relative;
+  width: 22px;
+  height: 16px;
   flex-shrink: 0;
-  box-shadow: 0 0 6px currentColor;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--ship-color) 55%, transparent));
+}
+
+.ship-avatar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ship-color) 70%, white),
+    var(--ship-color) 55%,
+    color-mix(in srgb, var(--ship-color) 80%, black)
+  );
+  clip-path: polygon(18% 12%, 88% 50%, 18% 88%, 8% 62%, 0% 50%, 8% 38%);
+}
+
+.ship-avatar::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 58%;
+  width: 5px;
+  height: 7px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(224, 242, 254, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.ship-avatar.right::before {
+  clip-path: polygon(82% 12%, 12% 50%, 82% 88%, 92% 62%, 100% 50%, 92% 38%);
+}
+
+.ship-avatar.right::after {
+  left: 42%;
 }
 
 .name {
@@ -1197,12 +1315,12 @@ onUnmounted(() => {
 }
 
 .hp-pip {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 2px;
-  background: #22c55e;
-  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
-  transition: background 0.25s ease, transform 0.25s ease;
+  background: linear-gradient(180deg, #4ade80, #16a34a);
+  box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
+  transition: background 0.25s ease, transform 0.25s ease, opacity 0.25s ease;
 }
 
 .hp-pip.spent {

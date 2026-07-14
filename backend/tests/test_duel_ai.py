@@ -332,3 +332,46 @@ def test_ai_charges_when_aligned_and_safe() -> None:
     assert charge_start is True
     assert charge_release is False
     assert charge_ticks >= 8
+
+
+def test_ai_builds_full_charge_while_aligned() -> None:
+    engine = DuelEngine()
+    state = make_state()
+    state["settings"]["charge_shot_enabled"] = True
+    state["settings"]["ai_reaction_interval_ticks"] = 2
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["y"] = 10
+    human["y"] = 10
+    ai["cooldown_until_tick"] = 0
+    state["bullets"] = []
+
+    max_seen = 0
+    for _ in range(20):
+        state, _ = engine.tick(state)
+        max_seen = max(max_seen, ai.get("charge_ticks", 0))
+
+    assert max_seen >= 10
+
+
+def test_ai_releases_full_charge_shot() -> None:
+    engine = DuelEngine()
+    state = make_state()
+    state["settings"]["charge_shot_enabled"] = True
+    state["settings"]["ai_reaction_interval_ticks"] = 1
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["y"] = 10
+    human["y"] = 10
+    ai["cooldown_until_tick"] = 0
+    state["bullets"] = []
+
+    released_full = False
+    for _ in range(25):
+        state, _ = engine.tick(state)
+        ai_bullets = [b for b in state["bullets"] if b["owner_id"] == "ai"]
+        if len(ai_bullets) >= 3 and all(b.get("damage", 1) >= 2 for b in ai_bullets[:3]):
+            released_full = True
+            break
+
+    assert released_full

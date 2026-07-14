@@ -208,6 +208,7 @@ export interface DuelGameState {
   mutator: string
   powerups_enabled: boolean
   effect_duration_ticks?: number
+  powerup_lifetime_ticks?: number
   bullet_speed: number
   tick_ms: number
   charge_max_ticks: number

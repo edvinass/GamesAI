@@ -37,22 +37,50 @@ export const POWERUP_TIER_LABELS: Record<PowerupTier, string> = {
   epic: 'Epic',
 }
 
+/** Active buff/debuff length in ticks — keep in sync with backend POWERUP_EFFECT_DURATIONS */
+export const POWERUP_EFFECT_DURATIONS: Record<string, number> = {
+  rapid_fire: 70,
+  machine_gun: 90,
+  shield: 100,
+  wide_shot: 75,
+  pierce: 70,
+  ghost: 85,
+  freeze: 55,
+  homing: 80,
+  mirror: 75,
+  overdrive: 65,
+}
+
+/** Hold-to-activate time in ticks — keep in sync with backend POWERUP_CHANNEL_TICKS */
+export const POWERUP_CHANNEL_TICKS: Record<string, number> = {
+  rapid_fire: 6,
+  machine_gun: 6,
+  shield: 8,
+  wide_shot: 6,
+  homing: 7,
+  pierce: 7,
+  ghost: 7,
+  freeze: 8,
+  mirror: 8,
+  overdrive: 7,
+}
+
 export const POWERUP_HINTS: Record<string, string> = {
-  rapid_fire: 'Shorter reload between shots',
-  machine_gun: 'Sprays fast regular bullets',
-  shield: 'Blocks all damage for a few seconds',
-  wide_shot: 'Three-row spread on every shot',
-  pierce: 'Shots pass through cover and keep going',
-  ghost: 'Harder for enemies to track your position',
-  freeze: 'Freezes opponent movement',
-  laser: 'Instant beam down your aim row',
-  railgun: 'Piercing beam that ignores cover',
-  homing: 'Bullets steer toward your opponent',
+  rapid_fire: 'Halves reload — ~5s of faster shots',
+  machine_gun: 'Fast single-row spray — ~7s',
+  shield: 'Blocks all damage — ~8s',
+  wide_shot: 'Three-row spread on every shot — ~6s',
+  pierce: 'Shots pass through cover and fighters — ~5s',
+  ghost: 'Enemies see a faint, jittery silhouette — ~6s',
+  freeze: 'Stops opponent movement — ~4s',
+  laser: 'Instant beam down your aim row (stops at cover)',
+  railgun: 'Piercing beam through cover — heavy damage',
+  homing: 'Bullets steer toward your opponent — ~6s',
   heal: 'Restore 1 HP instantly',
-  mirror: 'Reflects incoming bullets',
-  overdrive: 'Wide, heavy shots for a few seconds',
+  mirror: 'Reflects the next incoming bullets — ~6s',
+  overdrive: 'Wide heavy shots (2 dmg) — ~5s',
   bomb: 'Launches an explosive projectile',
-  cluster: 'Fires three bombs in a spread',
+  cluster: 'Fires three bombs in a vertical spread',
   burst: 'Unloads a six-shot rapid salvo',
 }
 
@@ -66,7 +94,7 @@ const BUFF_EFFECT_KEYS = [
   ['homing_until', 'homing_active', 'homing', 'Homing'],
   ['mirror_until', 'mirror_active', 'mirror', 'Mirror'],
   ['overdrive_until', 'overdrive_active', 'overdrive', 'Overdrive'],
-  ['freeze_until', 'freeze_active', 'freeze', 'Freeze'],
+  ['freeze_until', 'freeze_active', 'freeze', 'Frozen'],
 ] as const
 
 export interface ActivePowerupEffect {
@@ -75,6 +103,7 @@ export interface ActivePowerupEffect {
   remainingTicks: number
   totalTicks: number
   progress: number
+  remainingSec: number
 }
 
 export function isInstantPowerup(type: string | null | undefined): boolean {
@@ -86,16 +115,35 @@ export function powerupTier(type: string | null | undefined): PowerupTier {
   return POWERUP_TIERS[type] ?? 'common'
 }
 
-export function powerupUseHint(type: string | null | undefined): string {
+export function powerupChannelTicks(type: string | null | undefined): number {
+  if (!type) return POWERUP_ACTIVATION_TICKS
+  return POWERUP_CHANNEL_TICKS[type] ?? POWERUP_ACTIVATION_TICKS
+}
+
+export function powerupEffectDuration(type: string | null | undefined, fallback = 80): number {
+  if (!type) return fallback
+  return POWERUP_EFFECT_DURATIONS[type] ?? fallback
+}
+
+export function formatPowerupSeconds(ticks: number, tickMs: number): string {
+  const sec = Math.max(0, (ticks * tickMs) / 1000)
+  if (sec >= 10) return `${Math.round(sec)}s`
+  return `${Math.round(sec * 10) / 10}s`
+}
+
+export function powerupUseHint(type: string | null | undefined, tickMs = 75): string {
   if (!type) return ''
+  if (type === 'heal') return 'Press E or click Use (only when injured)'
   if (isInstantPowerup(type)) return 'Press E or click Use to fire instantly'
-  return 'Hold E until the bar fills, then release'
+  const holdSec = formatPowerupSeconds(powerupChannelTicks(type), tickMs)
+  return `Hold E or the Use button for ${holdSec}, then release`
 }
 
 export function listActivePowerupEffects(
   effects: Record<string, unknown> | undefined,
   tick: number,
-  effectDurationTicks = 80,
+  tickMs = 75,
+  fallbackDuration = 80,
 ): ActivePowerupEffect[] {
   if (!effects) return []
   const active: ActivePowerupEffect[] = []
@@ -105,14 +153,25 @@ export function listActivePowerupEffects(
     if (!isActive && until <= tick) continue
     const remainingTicks = Math.max(0, until - tick)
     if (remainingTicks <= 0 && !isActive) continue
-    const totalTicks = Math.max(effectDurationTicks, remainingTicks)
+    const totalTicks = powerupEffectDuration(id, fallbackDuration)
     active.push({
       id,
       label,
       remainingTicks,
       totalTicks,
       progress: Math.max(0, Math.min(1, remainingTicks / totalTicks)),
+      remainingSec: (remainingTicks * tickMs) / 1000,
     })
   }
   return active
+}
+
+export function canUseStoredPowerup(
+  type: string | null | undefined,
+  hp: number,
+  maxHp: number,
+): boolean {
+  if (!type) return false
+  if (type === 'heal') return hp < maxHp
+  return true
 }
