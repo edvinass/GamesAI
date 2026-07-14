@@ -1,16 +1,5 @@
 export const POWERUP_ACTIVATION_TICKS = 8
 
-/** Fire immediately on E — no hold required */
-export const INSTANT_POWERUP_TYPES = new Set([
-  'heal',
-  'laser',
-  'railgun',
-  'bomb',
-  'cluster',
-  'burst',
-  'decoy',
-])
-
 export type PowerupTier = 'common' | 'rare' | 'epic'
 
 export const POWERUP_TIERS: Record<string, PowerupTier> = {
@@ -55,21 +44,6 @@ export const POWERUP_EFFECT_DURATIONS: Record<string, number> = {
   phase_shift: 60,
 }
 
-/** Hold-to-activate time in ticks — keep in sync with backend POWERUP_CHANNEL_TICKS */
-export const POWERUP_CHANNEL_TICKS: Record<string, number> = {
-  rapid_fire: 6,
-  machine_gun: 6,
-  shield: 8,
-  wide_shot: 6,
-  homing: 7,
-  pierce: 7,
-  ghost: 7,
-  freeze: 8,
-  mirror: 8,
-  overdrive: 7,
-  phase_shift: 7,
-}
-
 export const POWERUP_HINTS: Record<string, string> = {
   rapid_fire: 'Halves reload — ~5s of faster shots',
   machine_gun: 'Fast single-row spray — ~7s',
@@ -84,7 +58,7 @@ export const POWERUP_HINTS: Record<string, string> = {
   heal: 'Restore 1 HP instantly',
   mirror: 'Reflects the next incoming bullets — ~6s',
   overdrive: 'Wide heavy shots (2 dmg) — ~5s',
-  bomb: 'Launches an explosive projectile',
+  bomb: 'Launches a bomb — wide blast when it hits a wall',
   cluster: 'Fires three bombs in a vertical spread',
   burst: 'Unloads a six-shot rapid salvo',
   phase_shift: 'Pass through cover (not bullets) — ~5s',
@@ -114,18 +88,9 @@ export interface ActivePowerupEffect {
   remainingSec: number
 }
 
-export function isInstantPowerup(type: string | null | undefined): boolean {
-  return Boolean(type && INSTANT_POWERUP_TYPES.has(type))
-}
-
 export function powerupTier(type: string | null | undefined): PowerupTier {
   if (!type) return 'common'
   return POWERUP_TIERS[type] ?? 'common'
-}
-
-export function powerupChannelTicks(type: string | null | undefined): number {
-  if (!type) return POWERUP_ACTIVATION_TICKS
-  return POWERUP_CHANNEL_TICKS[type] ?? POWERUP_ACTIVATION_TICKS
 }
 
 export function powerupEffectDuration(type: string | null | undefined, fallback = 80): number {
@@ -139,12 +104,8 @@ export function formatPowerupSeconds(ticks: number, tickMs: number): string {
   return `${Math.round(sec * 10) / 10}s`
 }
 
-export function powerupUseHint(type: string | null | undefined, tickMs = 75): string {
-  if (!type) return ''
-  if (type === 'heal') return 'Press E or click Use (only when injured)'
-  if (isInstantPowerup(type)) return 'Press E or click Use to fire instantly'
-  const holdSec = formatPowerupSeconds(powerupChannelTicks(type), tickMs)
-  return `Hold E or the Use button for ${holdSec}, then release`
+export function powerupUseHint(_type: string | null | undefined, _tickMs = 75): string {
+  return 'Press E or click Use to activate'
 }
 
 export function listActivePowerupEffects(

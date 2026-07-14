@@ -1,28 +1,12 @@
 import random
 from typing import Any
 
-POWERUP_ACTIVATION_TICKS = 8
-
 FULL_CHARGE_TICKS = 11
 MID_CHARGE_TICKS = 8
 
 INSTANT_POWERUP_TYPES = frozenset(
     {"heal", "laser", "railgun", "bomb", "cluster", "burst", "decoy"}
 )
-
-POWERUP_CHANNEL_TICKS: dict[str, int] = {
-    "rapid_fire": 6,
-    "machine_gun": 6,
-    "shield": 8,
-    "wide_shot": 6,
-    "homing": 7,
-    "pierce": 7,
-    "ghost": 7,
-    "freeze": 8,
-    "mirror": 8,
-    "overdrive": 7,
-    "phase_shift": 7,
-}
 
 OFFENSIVE_BUFF_TYPES = frozenset(
     {"rapid_fire", "machine_gun", "homing", "overdrive", "pierce", "wide_shot", "phase_shift"}
@@ -692,79 +676,17 @@ def _charge_release_ticks(
     return 0
 
 
-def _should_activate_powerup(
+def _should_use_powerup(
     state: dict,
     fighter: dict[str, Any],
     enemy: dict[str, Any] | None,
     height: int,
     bullets: list[dict],
-) -> tuple[bool, bool]:
-    """Returns powerup_hold_start, powerup_hold_release."""
-    if not state["settings"].get("powerups_enabled"):
-        return False, False
-    stored = fighter.get("stored_powerup")
-    if not stored or stored in INSTANT_POWERUP_TYPES:
-        return False, False
-
-    if fighter.get("activating_powerup"):
-        ticks = fighter.get("powerup_activation_ticks", 0)
-        required = POWERUP_CHANNEL_TICKS.get(stored, POWERUP_ACTIVATION_TICKS)
-        if ticks >= required:
-            return False, True
-        return False, False
-
-    tick = state["tick"]
-    incoming = _count_incoming_bullets(fighter, height, bullets)
-    shoot_row = _fighter_center(fighter["y"], height)
-
-    if stored == "shield":
-        if fighter.get("hp", 1) <= 2:
-            return True, False
-        if incoming >= 2:
-            return True, False
-        if fighter.get("hp", 1) < fighter.get("max_hp", 3) and incoming >= 1:
-            return True, False
-    elif stored == "freeze" and enemy is not None:
-        travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
-        if travel <= 35:
-            return True, False
-    elif stored == "ghost":
-        if incoming >= 2:
-            return True, False
-        if incoming >= 1 and random.random() < 0.5:
-            return True, False
-    elif stored == "mirror":
-        if incoming >= 1:
-            return True, False
-    elif stored in OFFENSIVE_BUFF_TYPES:
-        offense_bias = float(
-            get_ai_config(state["settings"].get("ai_difficulty"), state).get("offense_bias", 0.5)
-        )
-        if enemy is not None:
-            enemy_center = _fighter_center(enemy["y"], height)
-            if abs(shoot_row - enemy_center) <= 2:
-                return True, False
-            travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
-            if travel <= 25:
-                return True, False
-        if stored == "phase_shift" and incoming >= 1:
-            return True, False
-        if random.random() < 0.15 + offense_bias * 0.2:
-            return True, False
-
-    return False, False
-
-
-def _should_use_instant_powerup(
-    state: dict,
-    fighter: dict[str, Any],
-    enemy: dict[str, Any] | None,
-    height: int,
 ) -> bool:
     if not state["settings"].get("powerups_enabled"):
         return False
     stored = fighter.get("stored_powerup")
-    if not stored or stored not in INSTANT_POWERUP_TYPES:
+    if not stored:
         return False
 
     hp = fighter.get("hp", 1)
@@ -773,29 +695,71 @@ def _should_use_instant_powerup(
     if stored == "heal":
         return hp < max_hp
 
-    if enemy is None:
+    if stored in INSTANT_POWERUP_TYPES:
+        if enemy is None:
+            return False
+
+        shoot_row = _fighter_center(fighter["y"], height)
+        predicted_top = _predicted_enemy_top(state, fighter, enemy, height)
+        gap = _row_gap_to_enemy(shoot_row, predicted_top, height)
+        travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
+
+        if stored in ("laser", "railgun"):
+            return gap <= 1
+
+        if stored in ("bomb", "cluster"):
+            if stored == "bomb" and enemy is not None:
+                enemy_effects = enemy.get("effects", {})
+                if state["tick"] < enemy_effects.get("freeze_until", 0):
+                    return True
+            return gap <= 1 or (gap <= 2 and travel <= 18)
+
+        if stored == "decoy":
+            return random.random() < 0.45
+
+        if stored == "burst":
+            return gap <= 2 or (gap <= 3 and travel <= 22)
+
         return False
 
+    tick = state["tick"]
+    incoming = _count_incoming_bullets(fighter, height, bullets)
     shoot_row = _fighter_center(fighter["y"], height)
-    predicted_top = _predicted_enemy_top(state, fighter, enemy, height)
-    gap = _row_gap_to_enemy(shoot_row, predicted_top, height)
-    travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
 
-    if stored in ("laser", "railgun"):
-        return gap <= 1
-
-    if stored in ("bomb", "cluster"):
-        if stored == "bomb" and enemy is not None:
-            enemy_effects = enemy.get("effects", {})
-            if state["tick"] < enemy_effects.get("freeze_until", 0):
+    if stored == "shield":
+        if fighter.get("hp", 1) <= 2:
+            return True
+        if incoming >= 2:
+            return True
+        if fighter.get("hp", 1) < fighter.get("max_hp", 3) and incoming >= 1:
+            return True
+    elif stored == "freeze" and enemy is not None:
+        travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
+        if travel <= 35:
+            return True
+    elif stored == "ghost":
+        if incoming >= 2:
+            return True
+        if incoming >= 1 and random.random() < 0.5:
+            return True
+    elif stored == "mirror":
+        if incoming >= 1:
+            return True
+    elif stored in OFFENSIVE_BUFF_TYPES:
+        offense_bias = float(
+            get_ai_config(state["settings"].get("ai_difficulty"), state).get("offense_bias", 0.5)
+        )
+        if enemy is not None:
+            enemy_center = _fighter_center(enemy["y"], height)
+            if abs(shoot_row - enemy_center) <= 2:
                 return True
-        return gap <= 1 or (gap <= 2 and travel <= 18)
-
-    if stored == "decoy":
-        return random.random() < 0.45
-
-    if stored == "burst":
-        return gap <= 2 or (gap <= 3 and travel <= 22)
+            travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
+            if travel <= 25:
+                return True
+        if stored == "phase_shift" and incoming >= 1:
+            return True
+        if random.random() < 0.15 + offense_bias * 0.2:
+            return True
 
     return False
 
@@ -805,8 +769,8 @@ def choose_ai_actions(
     player_id: str,
     fighter: dict[str, Any],
     difficulty: str | None = None,
-) -> tuple[str, bool, bool, bool, int, bool, bool, bool]:
-    """Returns move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant."""
+) -> tuple[str, bool, bool, bool, int, bool]:
+    """Returns move, shoot, charge_start, charge_release, charge_ticks, pu_use."""
     cfg = get_ai_config(difficulty, state)
     height = _fighter_height(state)
     bullets = _incoming_bullets(state, player_id, fighter)
@@ -818,16 +782,10 @@ def choose_ai_actions(
     charge_start = False
     charge_release = False
     charge_ticks = 0
-    pu_start = False
-    pu_release = False
-    pu_instant = False
+    pu_use = False
 
-    if _should_use_instant_powerup(state, fighter, enemy, height):
-        return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, True
-
-    pu_start, pu_release = _should_activate_powerup(state, fighter, enemy, height, bullets)
-    if pu_start or pu_release:
-        return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant
+    if _should_use_powerup(state, fighter, enemy, height, bullets):
+        return move, shoot, charge_start, charge_release, charge_ticks, True
 
     if enemy is not None:
         tick = state["tick"]
@@ -849,4 +807,4 @@ def choose_ai_actions(
             elif _effect_active(fighter, tick, "machine_gun_until"):
                 shoot = True
 
-    return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant
+    return move, shoot, charge_start, charge_release, charge_ticks, pu_use

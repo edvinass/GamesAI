@@ -7,13 +7,13 @@ export const duelRules: GameRules = {
     'Join a room with exactly 2 players (or practice solo vs AI).',
     'Pick a match format, mutator, and optional secondary overlay in the lobby.',
     'Move up and down to dodge incoming shots and use cover.',
-    'Shoot or touch center power-ups to collect. Tap E for bombs and lasers; hold E for shields and buffs.',
+    'Shoot or touch center power-ups to collect. Press E to activate stored power-ups.',
     'Win rounds to take the match — first to majority wins.',
   ],
   sections: [
     {
       heading: 'Controls',
-      body: 'Use W/S or arrow keys to move. Tap Space for a quick shot in Quick Duel; hold Space to charge in match modes. Collect orbs by shooting or touching them. Tap E for instant power-ups (bombs, lasers, heal, decoy); hold E briefly for buffs like Shield, Phase Shift, or Machine Gun.',
+      body: 'Use W/S or arrow keys to move. Tap Space for a quick shot in Quick Duel; hold Space to charge in match modes. Collect orbs by shooting or touching them. Press E to activate any stored power-up.',
     },
     {
       heading: 'Health & crits',
@@ -25,7 +25,7 @@ export const duelRules: GameRules = {
     },
     {
       heading: 'Power-ups',
-      body: 'Shoot orbs to collect, then hold E to activate. Machine Gun and Rapid Fire spray fast bullets. Bomb and Cluster launch explosives. Burst fires a 6-round salvo. Laser and Railgun are instant beams — Railgun pierces cover. Pierce shots ignore obstacles. Phase Shift lets you pass through cover briefly. Decoy projects a fake ship to bait homing fire. Shield, Ghost, Mirror, Homing, Wide Shot, Overdrive, Freeze, and Heal round out the arsenal.',
+      body: 'Shoot orbs to collect, then press E to activate. Machine Gun and Rapid Fire spray fast bullets. Bomb and Cluster launch explosives. Burst fires a 6-round salvo. Laser and Railgun are instant beams — Railgun pierces cover. Pierce shots ignore obstacles. Phase Shift lets you pass through cover briefly. Decoy projects a fake ship to bait homing fire. Shield, Ghost, Mirror, Homing, Wide Shot, Overdrive, Freeze, and Heal round out the arsenal.',
     },
     {
       heading: 'Match formats',
@@ -44,7 +44,7 @@ export const duelRules: GameRules = {
     'Strafe vertically while charging to bait predictable shots.',
     'Use obstacles to break line-of-sight and force repositioning.',
     'Move over a power-up to pick it up — you do not have to snipe it.',
-    'Tap E for bombs and lasers; hold E for shields and timed buffs.',
+    'Press E to activate stored power-ups.',
     'In Fog mode, watch bullet rows — they reveal true aim.',
     'Save shield for an all-in push when the arena shrinks.',
     'Ban an opponent’s comfort pick during the pre-match draft.',

@@ -195,8 +195,8 @@ def test_ai_uses_instant_bomb_when_aligned() -> None:
     human["y"] = 10
     ai["stored_powerup"] = "bomb"
 
-    *_, pu_instant = choose_ai_actions(state, "ai", ai)
-    assert pu_instant is True
+    *_, pu_use = choose_ai_actions(state, "ai", ai)[-1:]
+    assert pu_use is True
 
 
 def test_ai_starts_shield_when_low_hp() -> None:
@@ -206,40 +206,22 @@ def test_ai_starts_shield_when_low_hp() -> None:
     ai["hp"] = 1
     ai["stored_powerup"] = "shield"
 
-    *_, pu_start, pu_release, pu_instant = choose_ai_actions(state, "ai", ai)[-4:]
-    assert pu_start is True
-    assert pu_release is False
-    assert pu_instant is False
+    *_, pu_use = choose_ai_actions(state, "ai", ai)[-1:]
+    assert pu_use is True
 
 
-def test_ai_completes_channelled_powerup() -> None:
+def test_ai_uses_powerup_immediately() -> None:
     engine = DuelEngine()
     state = make_state()
     state["settings"]["powerups_enabled"] = True
     ai = state["fighters"]["ai"]
     ai["stored_powerup"] = "shield"
-    ai["activating_powerup"] = True
-    ai["powerup_activation_ticks"] = 8
+    ai["hp"] = 1
 
     state, events = engine.tick(state)
     assert ai["stored_powerup"] is None
     assert ai["effects"]["shield_until"] > state["tick"]
     assert any(e["type"] == "powerup_activated" for e in events)
-
-
-def test_ai_channel_not_reset_mid_activation() -> None:
-    engine = DuelEngine()
-    state = make_state()
-    state["settings"]["powerups_enabled"] = True
-    state["settings"]["ai_reaction_interval_ticks"] = 2
-    ai = state["fighters"]["ai"]
-    ai["stored_powerup"] = "shield"
-    ai["activating_powerup"] = True
-    ai["powerup_activation_ticks"] = 4
-
-    state, _ = engine.tick(state)
-    assert ai["activating_powerup"] is True
-    assert ai["powerup_activation_ticks"] >= 5
 
 
 def test_ai_uses_heal_when_damaged() -> None:
@@ -250,8 +232,8 @@ def test_ai_uses_heal_when_damaged() -> None:
     ai["max_hp"] = 3
     ai["stored_powerup"] = "heal"
 
-    *_, pu_instant = choose_ai_actions(state, "ai", ai)
-    assert pu_instant is True
+    *_, pu_use = choose_ai_actions(state, "ai", ai)[-1:]
+    assert pu_use is True
 
 
 def test_ai_machine_gun_spams_shots() -> None:
@@ -277,10 +259,8 @@ def test_ai_activates_freeze_in_range() -> None:
     ai["x"] = 40
     human["x"] = 10
 
-    *_, pu_start, pu_release, pu_instant = choose_ai_actions(state, "ai", ai)[-4:]
-    assert pu_start is True
-    assert pu_release is False
-    assert pu_instant is False
+    *_, pu_use = choose_ai_actions(state, "ai", ai)[-1:]
+    assert pu_use is True
 
 
 def test_ai_moves_toward_powerup() -> None:
@@ -311,10 +291,8 @@ def test_ai_starts_offensive_buff_when_engaging() -> None:
     human["y"] = 10
     ai["stored_powerup"] = "overdrive"
 
-    *_, pu_start, pu_release, pu_instant = choose_ai_actions(state, "ai", ai)[-4:]
-    assert pu_start is True
-    assert pu_release is False
-    assert pu_instant is False
+    *_, pu_use = choose_ai_actions(state, "ai", ai)[-1:]
+    assert pu_use is True
 
 
 def test_ai_charges_when_aligned_and_safe() -> None:

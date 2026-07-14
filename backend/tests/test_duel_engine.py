@@ -320,16 +320,7 @@ def test_powerup_activation(engine: DuelEngine, state: dict) -> None:
     pid = player["id"]
     state["fighters"][pid]["stored_powerup"] = "shield"
 
-    state, _ = engine.apply_action(state, {"type": "powerup_hold_start"}, player)
-    fighter = state["fighters"][pid]
-    assert fighter["activating_powerup"] is True
-    fighter["powerup_activation_ticks"] = 8
-
-    state, events = engine.apply_action(
-        state,
-        {"type": "powerup_hold_release", "powerup_activation_ticks": 8},
-        player,
-    )
+    state, events = engine.apply_action(state, {"type": "powerup_activate"}, player)
     assert state["fighters"][pid]["stored_powerup"] is None
     assert state["fighters"][pid]["effects"]["shield_until"] > state["tick"]
     assert any(e["type"] == "powerup_activated" for e in events)
@@ -528,6 +519,17 @@ def test_powerup_release_without_hold_does_not_activate(engine: DuelEngine, stat
     assert not any(e["type"] == "powerup_activated" for e in events)
 
 
+def test_buff_powerup_activate(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    state["fighters"][pid]["stored_powerup"] = "rapid_fire"
+
+    state, events = engine.apply_action(state, {"type": "powerup_activate"}, player)
+    assert state["fighters"][pid]["stored_powerup"] is None
+    assert state["fighters"][pid]["effects"]["rapid_fire_until"] > state["tick"]
+    assert any(e["type"] == "powerup_activated" for e in events)
+
+
 def test_powerup_release_uses_server_activation_progress(engine: DuelEngine, state: dict) -> None:
     player = state["players"][0]
     pid = player["id"]
@@ -593,7 +595,37 @@ def test_initial_powerup_spawn_is_sooner_than_interval(engine: DuelEngine) -> No
     players = make_players(2)
     state = engine.create_initial_state(players, {"match_format": "best_of_5"})
     first_spawn = state["next_powerup_at_tick"]
-    assert 25 <= first_spawn <= 55
+    assert 15 <= first_spawn <= 40
+
+
+def test_bomb_detonates_on_wall_with_wide_blast(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["powerup_draft_enabled"] = False
+    state["settings"]["best_of"] = 1
+    state["obstacles"] = []
+    state["fighters"]["p0"]["x"] = 2
+    state["fighters"]["p0"]["side"] = "left"
+    state["fighters"]["p1"]["y"] = 10
+    state["fighters"]["p1"]["x"] = 44
+    state["bullets"] = [
+        {
+            "id": 0,
+            "x": 47,
+            "y": 10,
+            "vx": 1,
+            "vy": 0,
+            "owner_id": "p0",
+            "damage": 0,
+            "bounces_remaining": 0,
+            "kind": "bomb",
+        }
+    ]
+
+    state, events = engine.tick(state)
+    assert not state["bullets"]
+    detonation = next(e for e in events if e["type"] == "bomb_detonated")
+    assert detonation["wall_hit"] is True
+    assert detonation["x"] == state["grid_width"] - 1
+    assert state["fighters"]["p1"]["hp"] < state["fighters"]["p1"]["max_hp"]
 
 
 def test_bomb_detonates_on_fighter(engine: DuelEngine, state: dict) -> None:

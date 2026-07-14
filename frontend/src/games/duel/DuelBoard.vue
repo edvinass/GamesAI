@@ -7,9 +7,7 @@ import {
   POWERUP_TIER_LABELS,
   canUseStoredPowerup,
   formatPowerupSeconds,
-  isInstantPowerup,
   listActivePowerupEffects,
-  powerupChannelTicks,
   powerupTier,
   powerupUseHint,
 } from './powerupMeta'
@@ -40,12 +38,10 @@ import {
 import {
   isColorblindMode,
   isHitStopEnabled,
-  isAutoReleasePowerupEnabled,
   loadShakeIntensity,
   saveShakeIntensity,
   setColorblindMode,
   setHitStopEnabled,
-  setAutoReleasePowerupEnabled,
   hasSeenDangerLegend,
   markDangerLegendSeen,
 } from './visualPrefs'
@@ -143,9 +139,6 @@ const playerRows = computed(() =>
 const heldMove = ref<'up' | 'down' | null>(null)
 const charging = ref(false)
 const chargeTicks = ref(0)
-const activatingPowerup = ref(false)
-const powerupActivationTicks = ref(0)
-const channelTicksRequired = computed(() => powerupChannelTicks(storedPowerup.value))
 const canUsePowerup = computed(() =>
   canUseStoredPowerup(
     storedPowerup.value,
@@ -153,18 +146,10 @@ const canUsePowerup = computed(() =>
     myFighter.value?.max_hp ?? 3,
   ),
 )
-const powerupReady = computed(
-  () =>
-    activatingPowerup.value &&
-    (powerupActivationTicks.value >= channelTicksRequired.value ||
-      (myFighter.value?.powerup_activation_ticks ?? 0) >= channelTicksRequired.value),
-)
 const localChargeInterval = ref<ReturnType<typeof setInterval> | null>(null)
-const localPowerupInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const hpPulseId = ref<string | null>(null)
 const powerupNotice = ref<{ text: string; tone: 'info' | 'success' | 'warn' } | null>(null)
 let powerupNoticeTimer: ReturnType<typeof setTimeout> | null = null
-let autoReleaseTimer: ReturnType<typeof setTimeout> | null = null
 const lastSeenPowerupKey = ref('')
 const lastStoredPowerup = ref<string | null>(null)
 const lastActionStamp = ref('')
@@ -276,8 +261,6 @@ const shrinkSoftWarningActive = computed(() => {
 const showCoachHint = computed(
   () => coachHint.value && props.gameState.phase !== 'finished',
 )
-const autoReleaseEnabled = ref(isAutoReleasePowerupEnabled())
-const autoReleasing = ref(false)
 const showDangerLegend = ref(!hasSeenDangerLegend())
 const bindingCapture = ref<DuelKeybindAction | null>(null)
 const keybindActions = Object.keys(KEYBIND_ACTION_LABELS) as DuelKeybindAction[]
@@ -325,7 +308,7 @@ function updateCoachHint() {
     }
     if (props.gameState.round === 1) {
       if (chargeEnabled.value && powerupsEnabled.value) {
-        coachHint.value = 'Hold Space to charge shots · Hold E to activate power-ups'
+        coachHint.value = 'Hold Space to charge shots · Press E to use power-ups'
       } else if (chargeEnabled.value) {
         coachHint.value = 'Hold Space to charge a spread shot, release to fire'
       } else {
@@ -457,7 +440,6 @@ const storedPowerupHint = computed(() => powerupUseHint(storedPowerup.value, tic
 const storedPowerupDescription = computed(() =>
   storedPowerup.value ? POWERUP_HINTS[storedPowerup.value] ?? '' : '',
 )
-const isInstantStored = computed(() => isInstantPowerup(storedPowerup.value))
 const storedPowerupTier = computed(() => powerupTier(storedPowerup.value))
 const arenaPowerup = computed(() => props.gameState.powerup)
 const arenaPowerupTier = computed(() => powerupTier(arenaPowerup.value?.type))
@@ -522,10 +504,6 @@ function onBindingCaptureKey(e: KeyboardEvent) {
   bindingCapture.value = null
 }
 
-function toggleAutoRelease() {
-  setAutoReleasePowerupEnabled(autoReleaseEnabled.value)
-}
-
 const dangerRows = computed(() => {
   const rows = new Set<number>()
   if (!myFighter.value?.alive) return rows
@@ -560,7 +538,6 @@ function clearHeldInputs() {
     heldMove.value = null
   }
   if (charging.value) releaseCharge()
-  if (activatingPowerup.value) releasePowerupActivation()
 }
 
 function onVisibilityChange() {
@@ -608,72 +585,14 @@ function useStoredPowerup() {
     }
     return
   }
-  if (isInstantStored.value) {
-    emit('action', { type: 'powerup_activate' })
-    return
-  }
-  if (!activatingPowerup.value) startPowerupActivation()
+  emit('action', { type: 'powerup_activate' })
 }
 
-function onPowerupButtonDown(e: MouseEvent | TouchEvent) {
+function onPowerupButtonClick(e: MouseEvent | TouchEvent) {
   e.preventDefault()
-  if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value) return
-  if (isInstantStored.value) {
-    useStoredPowerup()
-    return
-  }
-  if (!canUsePowerup.value) return
-  if (!activatingPowerup.value) startPowerupActivation()
+  unlockAudio()
+  useStoredPowerup()
 }
-
-function onPowerupButtonUp(e: MouseEvent | TouchEvent) {
-  e.preventDefault()
-  if (activatingPowerup.value && !isInstantStored.value) {
-    releasePowerupActivation()
-  }
-}
-
-function startPowerupActivation() {
-  if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value || !canUsePowerup.value) return
-  activatingPowerup.value = true
-  powerupActivationTicks.value = 0
-  emit('action', { type: 'powerup_hold_start' })
-  if (localPowerupInterval.value) clearInterval(localPowerupInterval.value)
-  const required = channelTicksRequired.value
-  localPowerupInterval.value = setInterval(() => {
-    if (activatingPowerup.value) {
-      powerupActivationTicks.value = Math.min(required, powerupActivationTicks.value + 1)
-    }
-  }, tickMs.value)
-}
-
-function releasePowerupActivation() {
-  if (!activatingPowerup.value) return
-  activatingPowerup.value = false
-  if (localPowerupInterval.value) {
-    clearInterval(localPowerupInterval.value)
-    localPowerupInterval.value = null
-  }
-  emit('action', {
-    type: 'powerup_hold_release',
-    powerup_activation_ticks: Math.max(
-      powerupActivationTicks.value,
-      myFighter.value?.powerup_activation_ticks ?? 0,
-    ),
-  })
-  powerupActivationTicks.value = 0
-}
-
-watch(
-  () => myFighter.value?.powerup_activation_ticks,
-  (serverTicks) => {
-    if (!activatingPowerup.value || typeof serverTicks !== 'number') return
-    powerupActivationTicks.value = Math.max(
-      powerupActivationTicks.value,
-      Math.min(channelTicksRequired.value, serverTicks),
-    )
-  },
-)
 
 watch(
   () => myFighter.value?.stored_powerup,
@@ -681,14 +600,6 @@ watch(
     if (stored && stored !== prev) {
       const label = POWERUP_LABELS[stored] ?? stored
       showPowerupNotice(`${label} collected — ${powerupUseHint(stored, tickMs.value)}`, 'success')
-    }
-    if (!stored) {
-      activatingPowerup.value = false
-      powerupActivationTicks.value = 0
-      if (localPowerupInterval.value) {
-        clearInterval(localPowerupInterval.value)
-        localPowerupInterval.value = null
-      }
     }
     lastStoredPowerup.value = stored ?? null
   },
@@ -797,11 +708,6 @@ watch(
       showPowerupNotice(`${POWERUP_LABELS[ptype] ?? ptype} activated!`, 'success')
     } else if (type === 'powerup_blocked' && action.reason === 'max_hp') {
       showPowerupNotice('Heal saved — you are already at full health', 'warn')
-    } else if (type === 'powerup_hold_release' && action.activated === false) {
-      showPowerupNotice(
-        `Hold ${formatBindingLabel(keybinds.value.powerup)} a bit longer (${formatPowerupSeconds(channelTicksRequired.value, tickMs.value)})`,
-        'warn',
-      )
     } else if (type === 'action_rejected') {
       const reason = action.reason as string | undefined
       const messages: Record<string, string> = {
@@ -814,24 +720,6 @@ watch(
     }
   },
 )
-
-watch(powerupReady, (ready) => {
-  if (autoReleaseTimer) {
-    clearTimeout(autoReleaseTimer)
-    autoReleaseTimer = null
-  }
-  autoReleasing.value = false
-  if (ready && activatingPowerup.value && autoReleaseEnabled.value) {
-    autoReleasing.value = true
-    autoReleaseTimer = setTimeout(() => {
-      if (activatingPowerup.value && powerupReady.value) {
-        releasePowerupActivation()
-      }
-      autoReleasing.value = false
-      autoReleaseTimer = null
-    }, 180)
-  }
-})
 
 watch(
   () => props.gameState.phase,
@@ -900,7 +788,6 @@ function onKeyDown(e: KeyboardEvent) {
   }
 
   if (matchesBinding(e.code, keybinds.value.fire) && charging.value) return
-  if (matchesBinding(e.code, keybinds.value.powerup) && activatingPowerup.value) return
 
   if (!canControl.value) {
     if (isInputBinding(e.code)) {
@@ -944,11 +831,7 @@ function onKeyDown(e: KeyboardEvent) {
     powerupsEnabled.value
   ) {
     e.preventDefault()
-    if (isInstantStored.value) {
-      useStoredPowerup()
-    } else if (!activatingPowerup.value && canUsePowerup.value) {
-      startPowerupActivation()
-    }
+    useStoredPowerup()
     return
   }
 }
@@ -972,11 +855,6 @@ function onKeyUp(e: KeyboardEvent) {
     e.preventDefault()
     if (charging.value) releaseCharge()
     return
-  }
-
-  if (matchesBinding(e.code, keybinds.value.powerup) && activatingPowerup.value && !isInstantStored.value) {
-    e.preventDefault()
-    releasePowerupActivation()
   }
 }
 
@@ -1060,9 +938,7 @@ onUnmounted(() => {
   cancelAnimationFrame(animFrame)
   if (countdownTimer) clearInterval(countdownTimer)
   if (localChargeInterval.value) clearInterval(localChargeInterval.value)
-  if (localPowerupInterval.value) clearInterval(localPowerupInterval.value)
   if (powerupNoticeTimer) clearTimeout(powerupNoticeTimer)
-  if (autoReleaseTimer) clearTimeout(autoReleaseTimer)
   renderer.reset()
 })
 </script>
@@ -1123,10 +999,6 @@ onUnmounted(() => {
         <input v-model="hitStopEnabled" type="checkbox" @change="applyVisualPrefs" />
         Hit stop on crits
       </label>
-      <label class="checkbox-label">
-        <input v-model="autoReleaseEnabled" type="checkbox" @change="toggleAutoRelease" />
-        Auto-release power-up when channel completes
-      </label>
       <div class="keybind-list">
         <p class="muted keybind-lead">Click a row, then press a key to rebind. Esc cancels.</p>
         <div v-for="action in keybindActions" :key="action" class="keybind-row">
@@ -1179,7 +1051,7 @@ onUnmounted(() => {
       <div
         v-if="canControl && storedPowerup && powerupsEnabled"
         class="powerup-slot"
-        :class="[`tier-${storedPowerupTier}`, { instant: isInstantStored, activating: activatingPowerup }]"
+        :class="`tier-${storedPowerupTier}`"
         :style="{
           borderColor: POWERUP_COLORS[storedPowerup] ?? '#a855f7',
           boxShadow: `0 8px 28px rgba(0,0,0,0.35), 0 0 24px ${POWERUP_COLORS[storedPowerup] ?? '#a855f7'}33`,
@@ -1201,19 +1073,12 @@ onUnmounted(() => {
           class="powerup-use-btn"
           :class="{ disabled: !canUsePowerup }"
           :disabled="!canUsePowerup"
-          @mousedown="onPowerupButtonDown"
-          @mouseup="onPowerupButtonUp"
-          @mouseleave="onPowerupButtonUp"
-          @touchstart.prevent="onPowerupButtonDown"
-          @touchend.prevent="onPowerupButtonUp"
-          @touchcancel.prevent="onPowerupButtonUp"
+          @click="onPowerupButtonClick"
         >
           {{
             !canUsePowerup && storedPowerup === 'heal'
               ? 'Full HP'
-              : isInstantStored
-                ? `Use [${formatBindingLabel(keybinds.powerup)}]`
-                : `Hold [${formatBindingLabel(keybinds.powerup)}]`
+              : `Use [${formatBindingLabel(keybinds.powerup)}]`
           }}
         </button>
       </div>
@@ -1260,29 +1125,6 @@ onUnmounted(() => {
         />
         <span class="charge-label">
           {{ chargeTicks >= 11 ? 'MAX POWER' : `${chargeTier.label} · ${chargeTier.hint}` }}
-        </span>
-      </div>
-
-      <div v-if="activatingPowerup && canControl && storedPowerup" class="charge-bar powerup-bar">
-        <div
-          class="charge-fill powerup-fill"
-          :class="{ 'charge-full': powerupReady, 'powerup-charging': !powerupReady }"
-          :style="{
-            width: `${(powerupActivationTicks / channelTicksRequired) * 100}%`,
-            background: `linear-gradient(90deg, ${POWERUP_COLORS[storedPowerup] ?? '#a855f7'}, #fff)`,
-          }"
-        />
-        <span class="charge-label powerup-label">
-          {{
-            autoReleasing
-              ? 'Auto-releasing…'
-              : powerupReady
-                ? 'RELEASE!'
-                : `Activating… ${formatPowerupSeconds(
-                    Math.max(0, channelTicksRequired - powerupActivationTicks),
-                    tickMs,
-                  )} left`
-          }}
         </span>
       </div>
 
@@ -1458,14 +1300,9 @@ onUnmounted(() => {
           v-if="storedPowerup && powerupsEnabled"
           type="button"
           class="touch-btn touch-powerup"
-          :aria-label="isInstantStored ? 'Use power-up' : 'Hold to activate power-up'"
+          :aria-label="'Use power-up'"
           :disabled="!canUsePowerup"
-          @touchstart.prevent="onPowerupButtonDown"
-          @touchend.prevent="onPowerupButtonUp"
-          @touchcancel.prevent="onPowerupButtonUp"
-          @mousedown.prevent="onPowerupButtonDown"
-          @mouseup.prevent="onPowerupButtonUp"
-          @mouseleave.prevent="onPowerupButtonUp"
+          @click.prevent="onPowerupButtonClick"
         >
           {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
         </button>
@@ -1534,8 +1371,7 @@ onUnmounted(() => {
       <div class="controls-hint">
         <p v-if="showTouchControls && canControl && storedPowerup && powerupsEnabled">
           <strong>Touch:</strong> Arrows move · ⚡ {{ chargeEnabled ? 'hold to charge' : 'fire' }} ·
-          {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
-          {{ isInstantStored ? 'tap power-up' : 'hold power-up' }}
+          {{ POWERUP_ICONS[storedPowerup] ?? '★' }} tap power-up
         </p>
         <p v-else-if="showTouchControls && canControl && chargeEnabled">
           <strong>Touch:</strong> Use on-screen arrows to move · Hold ⚡ to charge and release to fire
@@ -1545,7 +1381,7 @@ onUnmounted(() => {
         </p>
         <p v-else-if="canControl && chargeEnabled && storedPowerup">
           <strong>Controls:</strong> {{ formatBindingLabel(keybinds.moveUp) }}/{{ formatBindingLabel(keybinds.moveDown) }} move · {{ formatBindingLabel(keybinds.fire) }} charge & fire ·
-          {{ isInstantStored ? `${formatBindingLabel(keybinds.powerup)} to use power-up` : `Hold ${formatBindingLabel(keybinds.powerup)} ~${formatPowerupSeconds(channelTicksRequired, tickMs)} to activate` }}
+          {{ formatBindingLabel(keybinds.powerup) }} to use power-up
         </p>
         <p v-else-if="canControl && chargeEnabled && powerupsEnabled && arenaPowerup">
           <strong>Controls:</strong> {{ formatBindingLabel(keybinds.moveUp) }}/{{ formatBindingLabel(keybinds.moveDown) }} move · {{ formatBindingLabel(keybinds.fire) }} charge & fire · Collect the {{ POWERUP_LABELS[arenaPowerup.type] ?? 'power-up' }} (shoot or touch it)

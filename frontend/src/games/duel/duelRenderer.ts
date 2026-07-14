@@ -412,25 +412,31 @@ export class DuelRenderer {
     if (type === 'bomb_detonated') {
       const bx = Number(action.x ?? 0)
       const by = Number(action.y ?? 0)
+      const wallHit = Boolean(action.wall_hit)
       const cx = offsetX + bx * cell + cell / 2
       const cy = offsetY + by * cell + cell / 2
       this.spawnHitBurst(cx, cy, '#f59e0b', true, false)
-      for (let i = 0; i < 24; i++) {
-        const angle = (Math.PI * 2 * i) / 24 + Math.random() * 0.3
+      if (wallHit) {
+        this.spawnPowerupBurst(cx, cy, '#f59e0b', true)
+      }
+      const particleCount = wallHit ? 36 : 24
+      for (let i = 0; i < particleCount; i++) {
+        const angle = (Math.PI * 2 * i) / particleCount + Math.random() * 0.3
+        const speed = wallHit ? 3 + Math.random() * 5 : 2 + Math.random() * 4
         this.particles.push({
           x: cx,
           y: cy,
-          vx: Math.cos(angle) * (2 + Math.random() * 4),
-          vy: Math.sin(angle) * (2 + Math.random() * 4),
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
           life: 1,
           maxLife: 1,
           color: i % 3 === 0 ? '#ef4444' : '#fbbf24',
-          size: 2 + Math.random() * 3,
+          size: wallHit ? 2.5 + Math.random() * 3.5 : 2 + Math.random() * 3,
           kind: 'spark',
         })
       }
-      this.shakeUntil = Date.now() + 220
-      this.shakeIntensity = 7
+      this.shakeUntil = Date.now() + (wallHit ? 280 : 220)
+      this.shakeIntensity = wallHit ? 10 : 7
       return
     }
 
@@ -624,7 +630,7 @@ export class DuelRenderer {
       powerup,
       now,
       state.tick,
-      state.powerup_lifetime_ticks ?? 100,
+      state.powerup_lifetime_ticks ?? 120,
     )
     this.drawArenaPulses(ctx, now)
     this.drawBullets(ctx, offsetX, offsetY, cell, bullets, now)

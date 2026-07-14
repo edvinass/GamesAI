@@ -4,7 +4,6 @@ import { POWERUP_COLORS, POWERUP_ICONS, POWERUP_LABELS } from './duelRenderer'
 import {
   POWERUP_HINTS,
   POWERUP_TIER_LABELS,
-  isInstantPowerup,
   powerupTier,
   powerupUseHint,
 } from './powerupMeta'
@@ -21,7 +20,6 @@ const entries = computed(() =>
       tier: POWERUP_TIER_LABELS[powerupTier(id)],
       hint: POWERUP_HINTS[id] ?? '',
       use: powerupUseHint(id),
-      instant: isInstantPowerup(id),
     }))
     .filter((entry) => {
       const q = query.value.trim().toLowerCase()
