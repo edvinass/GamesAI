@@ -74,6 +74,7 @@ def test_charge_actions(engine: DuelEngine, state: dict) -> None:
 
     state, _ = engine.apply_action(state, {"type": "charge_start"}, player)
     assert state["fighters"][pid]["charging"] is True
+    state["fighters"][pid]["charge_ticks"] = 10
 
     state, _ = engine.apply_action(
         state, {"type": "release_charge", "charge_ticks": 10}, player
@@ -291,6 +292,7 @@ def test_powerup_activation(engine: DuelEngine, state: dict) -> None:
     state, _ = engine.apply_action(state, {"type": "powerup_hold_start"}, player)
     fighter = state["fighters"][pid]
     assert fighter["activating_powerup"] is True
+    fighter["powerup_activation_ticks"] = 12
 
     state, events = engine.apply_action(
         state,
@@ -433,3 +435,55 @@ def test_match_won_after_enough_rounds(engine: DuelEngine) -> None:
     assert state["phase"] == "finished"
     assert state["winner"] == "p0"
     assert state["round_scores"]["p0"] == 2
+
+
+def test_release_charge_rejects_inflated_client_ticks(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    fighter = state["fighters"][pid]
+    fighter["cooldown_until_tick"] = 0
+
+    state, _ = engine.apply_action(state, {"type": "charge_start"}, player)
+    state, _ = engine.apply_action(
+        state, {"type": "release_charge", "charge_ticks": 15}, player
+    )
+    assert state["fighters"][pid]["charge_ticks"] <= 2
+
+    fighter["pending_shoot"] = True
+    fighter["cooldown_until_tick"] = 0
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 1
+    assert state["bullets"][0]["damage"] == 1
+
+
+def test_powerup_release_without_hold_does_not_activate(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    state["fighters"][pid]["stored_powerup"] = "shield"
+
+    state, events = engine.apply_action(
+        state,
+        {"type": "powerup_hold_release", "powerup_activation_ticks": 12},
+        player,
+    )
+    assert state["fighters"][pid]["stored_powerup"] == "shield"
+    assert state["fighters"][pid]["effects"].get("shield_until", 0) == 0
+    assert not any(e["type"] == "powerup_activated" for e in events)
+
+
+def test_powerup_release_uses_server_activation_progress(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    state["fighters"][pid]["stored_powerup"] = "shield"
+
+    state, _ = engine.apply_action(state, {"type": "powerup_hold_start"}, player)
+    state["fighters"][pid]["powerup_activation_ticks"] = 12
+
+    state, events = engine.apply_action(
+        state,
+        {"type": "powerup_hold_release", "powerup_activation_ticks": 12},
+        player,
+    )
+    assert state["fighters"][pid]["stored_powerup"] is None
+    assert state["fighters"][pid]["effects"]["shield_until"] > state["tick"]
+    assert any(e["type"] == "powerup_activated" for e in events)

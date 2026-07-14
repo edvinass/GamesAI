@@ -27,6 +27,8 @@ const canControl = computed(
 )
 const chargeEnabled = computed(() => props.gameState.match_format !== 'quick_duel')
 const powerupsEnabled = computed(() => props.gameState.match_format !== 'quick_duel')
+const chargeMaxTicks = computed(() => props.gameState.charge_max_ticks ?? 15)
+const tickMs = computed(() => props.gameState.tick_ms || 75)
 const storedPowerup = computed(() => myFighter.value?.stored_powerup ?? null)
 
 const roundsToWin = computed(() => Math.ceil(props.gameState.best_of / 2))
@@ -100,6 +102,21 @@ const dangerRows = computed(() => {
   return rows
 })
 
+function clearHeldInputs() {
+  if (heldMove.value) {
+    sendMove('stop')
+    heldMove.value = null
+  }
+  if (charging.value) releaseCharge()
+  if (activatingPowerup.value) releasePowerupActivation()
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    clearHeldInputs()
+  }
+}
+
 function startNewGame() {
   emit('action', { type: 'start_game' })
 }
@@ -114,7 +131,6 @@ function startPowerupActivation() {
   powerupActivationTicks.value = 0
   emit('action', { type: 'powerup_hold_start' })
   if (localPowerupInterval.value) clearInterval(localPowerupInterval.value)
-  const tickMs = props.gameState.tick_ms || 75
   localPowerupInterval.value = setInterval(() => {
     if (activatingPowerup.value) {
       powerupActivationTicks.value = Math.min(
@@ -122,7 +138,7 @@ function startPowerupActivation() {
         powerupActivationTicks.value + 1,
       )
     }
-  }, tickMs)
+  }, tickMs.value)
 }
 
 function releasePowerupActivation() {
@@ -146,8 +162,10 @@ function startCharge() {
   emit('action', { type: 'charge_start' })
   if (localChargeInterval.value) clearInterval(localChargeInterval.value)
   localChargeInterval.value = setInterval(() => {
-    if (charging.value) chargeTicks.value = Math.min(15, chargeTicks.value + 1)
-  }, 75)
+    if (charging.value) {
+      chargeTicks.value = Math.min(chargeMaxTicks.value, chargeTicks.value + 1)
+    }
+  }, tickMs.value)
 }
 
 function releaseCharge() {
@@ -276,6 +294,8 @@ function animationLoop() {
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('blur', clearHeldInputs)
+  document.addEventListener('visibilitychange', onVisibilityChange)
   if (canvasWrapRef.value) {
     resizeObserver = new ResizeObserver(() => draw(Date.now()))
     resizeObserver.observe(canvasWrapRef.value)
@@ -286,6 +306,8 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('blur', clearHeldInputs)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   resizeObserver?.disconnect()
   cancelAnimationFrame(animFrame)
   if (localChargeInterval.value) clearInterval(localChargeInterval.value)
@@ -308,7 +330,7 @@ onUnmounted(() => {
         <div
           class="charge-fill"
           :class="{ 'charge-full': chargeTicks >= 11 }"
-          :style="{ width: `${(chargeTicks / 15) * 100}%` }"
+          :style="{ width: `${(chargeTicks / chargeMaxTicks) * 100}%` }"
         />
         <span class="charge-label">{{ chargeTicks >= 11 ? 'MAX POWER' : 'Charging…' }}</span>
       </div>

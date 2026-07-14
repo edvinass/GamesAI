@@ -196,6 +196,7 @@ export interface DuelGameState {
   mutator: string
   bullet_speed: number
   tick_ms: number
+  charge_max_ticks: number
   grid_width: number
   grid_height: number
   playable_y_min: number

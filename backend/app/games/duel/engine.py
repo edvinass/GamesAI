@@ -26,6 +26,8 @@ POWERUP_TYPES = (
 
 POWERUP_ACTIVATION_TICKS = 12
 
+CLIENT_PROGRESS_LAG_TICKS = 2
+
 MUTATOR_PRESETS: dict[str, dict[str, Any]] = {
     "classic": {
         "bullet_speed": 2,
@@ -207,6 +209,18 @@ class DuelEngine(GamePlugin):
 
     def _fighter_hp(self, state: dict) -> int:
         return int(state["settings"].get("fighter_hp", 3))
+
+    def _clamp_client_progress(
+        self, server_ticks: int, client_ticks: int | None, max_ticks: int
+    ) -> int:
+        """Use server progress; allow a small client lead for network latency."""
+        server = max(0, min(max_ticks, int(server_ticks)))
+        if client_ticks is None:
+            return server
+        client = max(0, min(max_ticks, int(client_ticks)))
+        if client < server:
+            return server
+        return min(max_ticks, min(client, server + CLIENT_PROGRESS_LAG_TICKS))
 
     def _rounds_to_win(self, state: dict) -> int:
         return (int(state["settings"].get("best_of", 5)) + 1) // 2
@@ -444,20 +458,20 @@ class DuelEngine(GamePlugin):
                 return state, events
             if not fighter.get("stored_powerup"):
                 return state, events
+            was_activating = bool(fighter.get("activating_powerup"))
             fighter["activating_powerup"] = False
-            ticks = max(
-                0,
-                min(
-                    POWERUP_ACTIVATION_TICKS + 3,
-                    int(
-                        action.get(
-                            "powerup_activation_ticks",
-                            fighter.get("powerup_activation_ticks", 0),
-                        )
-                    ),
-                ),
+            server_ticks = int(fighter.get("powerup_activation_ticks", 0))
+            client_ticks = action.get("powerup_activation_ticks")
+            ticks = (
+                self._clamp_client_progress(
+                    server_ticks,
+                    int(client_ticks) if client_ticks is not None else None,
+                    POWERUP_ACTIVATION_TICKS + CLIENT_PROGRESS_LAG_TICKS,
+                )
+                if was_activating
+                else 0
             )
-            activated = ticks >= POWERUP_ACTIVATION_TICKS
+            activated = was_activating and ticks >= POWERUP_ACTIVATION_TICKS
             if activated:
                 self._activate_stored_powerup(state, fighter, player_id, events)
             fighter["powerup_activation_ticks"] = 0
@@ -470,18 +484,20 @@ class DuelEngine(GamePlugin):
             return state, events
 
         if action_type == "release_charge":
-            if not state["settings"].get("charge_shot_enabled"):
-                fighter["pending_shoot"] = True
-            else:
-                fighter["pending_shoot"] = True
-                fighter["charge_ticks"] = max(
-                    0,
-                    min(
-                        int(state["settings"].get("charge_max_ticks", 15)),
-                        int(action.get("charge_ticks", fighter.get("charge_ticks", 0))),
-                    ),
+            charge_max = int(state["settings"].get("charge_max_ticks", 15))
+            if state["settings"].get("charge_shot_enabled"):
+                server_ticks = int(fighter.get("charge_ticks", 0))
+                client_ticks = action.get("charge_ticks")
+                fighter["charge_ticks"] = self._clamp_client_progress(
+                    server_ticks,
+                    int(client_ticks) if client_ticks is not None else None,
+                    charge_max,
                 )
                 fighter["charging"] = False
+            else:
+                fighter["charge_ticks"] = 0
+                fighter["charging"] = False
+            fighter["pending_shoot"] = True
             state["last_action"] = {
                 "type": "release_charge",
                 "player_id": player_id,
@@ -1270,6 +1286,7 @@ class DuelEngine(GamePlugin):
             "mutator": state["settings"].get("mutator", "classic"),
             "bullet_speed": int(state["settings"].get("bullet_speed", 2)),
             "tick_ms": int(state["settings"].get("tick_ms", 75)),
+            "charge_max_ticks": int(state["settings"].get("charge_max_ticks", 15)),
             "grid_width": state["grid_width"],
             "grid_height": state["grid_height"],
             "playable_y_min": state.get("playable_y_min", 0),
