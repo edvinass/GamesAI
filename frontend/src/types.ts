@@ -107,7 +107,14 @@ export interface DuelFighterEffects {
   shield: boolean
   wide_shot: boolean
   ghost_until: number
+  homing_until?: number
+  mirror_until?: number
+  overdrive_shots?: number
+  freeze_until?: number
   ghost_active?: boolean
+  freeze_active?: boolean
+  mirror_active?: boolean
+  homing_active?: boolean
 }
 
 export interface DuelFighter {
@@ -124,6 +131,9 @@ export interface DuelFighter {
   charge_ticks?: number
   cooldown_until_tick: number
   color: string
+  stored_powerup?: string | null
+  activating_powerup?: boolean
+  powerup_activation_ticks?: number
   effects?: DuelFighterEffects
 }
 
@@ -136,6 +146,7 @@ export interface DuelBullet {
   owner_id: string
   damage?: number
   bounces_remaining?: number
+  homing?: boolean
 }
 
 export interface DuelObstacle {
@@ -148,7 +159,17 @@ export interface DuelObstacle {
 export interface DuelPowerup {
   x: number
   y: number
-  type: 'rapid_fire' | 'shield' | 'wide_shot' | 'ghost'
+  type:
+    | 'rapid_fire'
+    | 'shield'
+    | 'wide_shot'
+    | 'ghost'
+    | 'freeze'
+    | 'laser'
+    | 'homing'
+    | 'heal'
+    | 'mirror'
+    | 'overdrive'
 }
 
 export interface DuelLastHit {

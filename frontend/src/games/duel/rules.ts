@@ -7,21 +7,25 @@ export const duelRules: GameRules = {
     'Join a room with exactly 2 players (or practice solo vs AI).',
     'Pick a match format and mutator in the lobby.',
     'Move up and down to dodge incoming shots and use cover.',
-    'Hold Space to charge a stronger shot; release to fire.',
+    'Shoot through center power-ups to collect them, then hold Space to activate.',
     'Win rounds to take the match — first to majority wins.',
   ],
   sections: [
     {
       heading: 'Controls',
-      body: 'Use W/S or arrow keys to move up and down. Hold a direction to keep moving. Tap Space for a quick shot in Quick Duel mode. In match modes, hold Space to charge and release to fire — a full charge fires a fast 3-row spread.',
+      body: 'Use W/S or arrow keys to move up and down. Tap Space for a quick shot in Quick Duel mode. In match modes, hold Space to charge and release to fire. When carrying a power-up, hold Space to activate it and use F to charge your weapon.',
     },
     {
       heading: 'Health & crits',
-      body: 'Fighters have 3 HP in match modes. Body hits deal 1 damage; center-row hits deal 2. Shields from power-ups block the next hit.',
+      body: 'Fighters have 3 HP in match modes. Body hits deal 1 damage; center-row hits deal 2. Shields block the next hit; Heal restores 1 HP.',
     },
     {
       heading: 'Arena',
-      body: 'Center obstacles block movement and bullets (ricochet in Bounce House). After a while the top and bottom rows shrink inward. Shoot through center power-ups to collect rapid fire, shield, wide shot, or ghost.',
+      body: 'Center obstacles block movement and bullets (ricochet in Bounce House). After a while the top and bottom rows shrink inward. Shoot through center power-ups to collect them into your inventory — hold Space to activate when ready.',
+    },
+    {
+      heading: 'Power-ups',
+      body: 'Rapid Fire speeds up shots. Shield blocks one hit. Wide Shot spreads your next volley. Ghost hides you from the enemy. Freeze locks the opponent in place. Laser fires a piercing beam. Homing curves bullets toward your rival. Mirror reflects incoming shots. Overdrive triples your next burst. Heal restores 1 HP.',
     },
     {
       heading: 'Match formats',
@@ -39,7 +43,8 @@ export const duelRules: GameRules = {
   tips: [
     'Strafe vertically while charging to bait predictable shots.',
     'Use obstacles to break line-of-sight and force repositioning.',
-    'Tag center power-ups with a passing shot when safe.',
+    'Tag center power-ups with a passing shot when safe — save Heal and Shield for clutch moments.',
+    'Hold Space to activate a stored power-up; keep shooting with F while you carry one.',
     'In Fog mode, watch bullet rows — they reveal true aim.',
     'Save shield for an all-in push when the arena shrinks.',
   ],

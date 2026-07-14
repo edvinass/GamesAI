@@ -407,12 +407,48 @@ def _should_charge(
     return False, 0
 
 
+def _should_activate_powerup(
+    state: dict,
+    fighter: dict[str, Any],
+    enemy: dict[str, Any] | None,
+    height: int,
+) -> tuple[bool, bool]:
+    """Returns powerup_hold_start, powerup_hold_release."""
+    if not state["settings"].get("powerups_enabled"):
+        return False, False
+    stored = fighter.get("stored_powerup")
+    if not stored:
+        return False, False
+
+    if fighter.get("activating_powerup"):
+        ticks = fighter.get("powerup_activation_ticks", 0) + 1
+        if ticks >= 12:
+            return False, True
+        return True, False
+
+    if stored == "heal" and fighter.get("hp", 1) < fighter.get("max_hp", 3):
+        if random.random() < 0.35:
+            return True, False
+    if stored == "shield" and random.random() < 0.25:
+        return True, False
+    if stored == "freeze" and enemy is not None and random.random() < 0.3:
+        return True, False
+    if stored == "laser" and enemy is not None:
+        shoot_row = _fighter_center(fighter["y"], height)
+        enemy_center = _fighter_center(enemy["y"], height)
+        if abs(shoot_row - enemy_center) <= 1 and random.random() < 0.45:
+            return True, False
+    if stored in ("rapid_fire", "homing", "overdrive") and random.random() < 0.2:
+        return True, False
+    return False, False
+
+
 def choose_ai_actions(
     state: dict,
     player_id: str,
     fighter: dict[str, Any],
-) -> tuple[str, bool, bool, bool, int]:
-    """Returns move, shoot, charge_start, charge_release, charge_ticks."""
+) -> tuple[str, bool, bool, bool, int, bool, bool]:
+    """Returns move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release."""
     height = _fighter_height(state)
     bullets = _incoming_bullets(state, player_id, fighter)
     enemy = _enemy_fighter(state, player_id)
@@ -423,6 +459,12 @@ def choose_ai_actions(
     charge_start = False
     charge_release = False
     charge_ticks = 0
+    pu_start = False
+    pu_release = False
+
+    pu_start, pu_release = _should_activate_powerup(state, fighter, enemy, height)
+    if pu_start or pu_release:
+        return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release
 
     if enemy is not None:
         if fighter.get("charging"):
@@ -433,10 +475,10 @@ def choose_ai_actions(
                 charge_start = True
         else:
             want_charge, ticks = _should_charge(state, fighter, enemy, height, move)
-            if want_charge and random.random() < 0.55:
+            if want_charge and random.random() < 0.55 and not fighter.get("stored_powerup"):
                 charge_start = True
                 charge_ticks = ticks
             elif _should_shoot(state, fighter, enemy, height, move):
                 shoot = True
 
-    return move, shoot, charge_start, charge_release, charge_ticks
+    return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release

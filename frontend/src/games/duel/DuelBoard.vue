@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { Room, DuelGameState } from '@/types'
-import { DuelRenderer } from './duelRenderer'
+import { DuelRenderer, POWERUP_ACTIVATION_TICKS, POWERUP_COLORS, POWERUP_ICONS, POWERUP_LABELS } from './duelRenderer'
 
 const props = defineProps<{
   gameState: DuelGameState
@@ -26,6 +26,8 @@ const canControl = computed(
   () => props.gameState.phase === 'playing' && isAlive.value,
 )
 const chargeEnabled = computed(() => props.gameState.match_format !== 'quick_duel')
+const powerupsEnabled = computed(() => props.gameState.match_format !== 'quick_duel')
+const storedPowerup = computed(() => myFighter.value?.stored_powerup ?? null)
 
 const roundsToWin = computed(() => Math.ceil(props.gameState.best_of / 2))
 
@@ -66,7 +68,10 @@ const playerRows = computed(() =>
 const heldMove = ref<'up' | 'down' | null>(null)
 const charging = ref(false)
 const chargeTicks = ref(0)
+const activatingPowerup = ref(false)
+const powerupActivationTicks = ref(0)
 const localChargeInterval = ref<ReturnType<typeof setInterval> | null>(null)
+const localPowerupInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const hpPulseId = ref<string | null>(null)
 
 const MUTATOR_LABELS: Record<string, string> = {
@@ -101,6 +106,33 @@ function startNewGame() {
 
 function sendMove(direction: 'up' | 'down' | 'stop') {
   emit('action', { type: 'set_move', direction })
+}
+
+function startPowerupActivation() {
+  if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value) return
+  activatingPowerup.value = true
+  powerupActivationTicks.value = 0
+  emit('action', { type: 'powerup_hold_start' })
+  if (localPowerupInterval.value) clearInterval(localPowerupInterval.value)
+  localPowerupInterval.value = setInterval(() => {
+    if (activatingPowerup.value) {
+      powerupActivationTicks.value = Math.min(
+        POWERUP_ACTIVATION_TICKS,
+        powerupActivationTicks.value + 1,
+      )
+    }
+  }, 75)
+}
+
+function releasePowerupActivation() {
+  if (!activatingPowerup.value) return
+  activatingPowerup.value = false
+  if (localPowerupInterval.value) {
+    clearInterval(localPowerupInterval.value)
+    localPowerupInterval.value = null
+  }
+  emit('action', { type: 'powerup_hold_release' })
+  powerupActivationTicks.value = 0
 }
 
 function startCharge() {
@@ -152,11 +184,19 @@ function onKeyDown(e: KeyboardEvent) {
 
   if (e.key === ' ') {
     e.preventDefault()
-    if (chargeEnabled.value) {
+    if (storedPowerup.value && powerupsEnabled.value) {
+      if (!activatingPowerup.value) startPowerupActivation()
+    } else if (chargeEnabled.value) {
       if (!charging.value) startCharge()
     } else {
       quickShoot()
     }
+    return
+  }
+
+  if ((e.key === 'f' || e.key === 'F') && storedPowerup.value && chargeEnabled.value) {
+    e.preventDefault()
+    if (!charging.value) startCharge()
   }
 }
 
@@ -183,7 +223,14 @@ function onKeyUp(e: KeyboardEvent) {
 
   if (e.key === ' ') {
     e.preventDefault()
-    if (charging.value) releaseCharge()
+    if (activatingPowerup.value) releasePowerupActivation()
+    else if (charging.value) releaseCharge()
+    return
+  }
+
+  if ((e.key === 'f' || e.key === 'F') && charging.value) {
+    e.preventDefault()
+    releaseCharge()
   }
 }
 
@@ -237,6 +284,7 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   cancelAnimationFrame(animFrame)
   if (localChargeInterval.value) clearInterval(localChargeInterval.value)
+  if (localPowerupInterval.value) clearInterval(localPowerupInterval.value)
   renderer.reset()
 })
 </script>
@@ -258,6 +306,24 @@ onUnmounted(() => {
           :style="{ width: `${(chargeTicks / 15) * 100}%` }"
         />
         <span class="charge-label">{{ chargeTicks >= 11 ? 'MAX POWER' : 'Charging…' }}</span>
+      </div>
+
+      <div v-if="activatingPowerup && canControl && storedPowerup" class="charge-bar powerup-bar">
+        <div
+          class="charge-fill powerup-fill"
+          :class="{ 'charge-full': powerupActivationTicks >= POWERUP_ACTIVATION_TICKS }"
+          :style="{
+            width: `${(powerupActivationTicks / POWERUP_ACTIVATION_TICKS) * 100}%`,
+            background: POWERUP_COLORS[storedPowerup] ?? '#a855f7',
+          }"
+        />
+        <span class="charge-label powerup-label">
+          {{
+            powerupActivationTicks >= POWERUP_ACTIVATION_TICKS
+              ? 'RELEASE!'
+              : `Activating ${POWERUP_LABELS[storedPowerup] ?? storedPowerup}…`
+          }}
+        </span>
       </div>
 
       <div v-if="gameState.phase === 'countdown'" class="overlay countdown">
@@ -311,12 +377,23 @@ onUnmounted(() => {
             />
           </span>
           <span v-if="row.fighter?.effects?.shield" class="effect-badge shield-pulse">🛡</span>
+          <span
+            v-if="row.id === playerId && row.fighter?.stored_powerup"
+            class="effect-badge stored-powerup"
+            :style="{ color: POWERUP_COLORS[row.fighter.stored_powerup] ?? '#fbbf24' }"
+            :title="POWERUP_LABELS[row.fighter.stored_powerup]"
+          >
+            {{ POWERUP_ICONS[row.fighter.stored_powerup] ?? '★' }}
+          </span>
           <span v-if="!row.fighter?.alive" class="status">out</span>
         </li>
       </ul>
 
       <div class="controls-hint">
-        <p v-if="canControl && chargeEnabled">
+        <p v-if="canControl && chargeEnabled && storedPowerup">
+          <strong>Controls:</strong> W/S or ↑/↓ to move · Hold Space to activate power-up · Hold F to charge & fire
+        </p>
+        <p v-else-if="canControl && chargeEnabled">
           <strong>Controls:</strong> W/S or ↑/↓ to move · Hold Space to charge, release to fire
         </p>
         <p v-else-if="canControl">
@@ -401,6 +478,26 @@ onUnmounted(() => {
 
 .charge-fill.charge-full {
   animation: chargePulse 0.5s ease-in-out infinite alternate;
+}
+
+.powerup-bar {
+  border-color: rgba(168, 85, 247, 0.45);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.25);
+}
+
+.powerup-fill {
+  background: linear-gradient(90deg, #a855f7, #ec4899, #f97316);
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.6);
+}
+
+.powerup-label {
+  color: #c084fc;
+  text-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+}
+
+.stored-powerup {
+  font-weight: 800;
+  animation: shieldPulse 1.4s ease-in-out infinite;
 }
 
 .charge-label {

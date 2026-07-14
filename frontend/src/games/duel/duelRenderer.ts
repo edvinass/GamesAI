@@ -32,19 +32,46 @@ interface Star {
   twinkle: number
 }
 
-const POWERUP_COLORS: Record<string, string> = {
+export const POWERUP_COLORS: Record<string, string> = {
   rapid_fire: '#f97316',
   shield: '#38bdf8',
   wide_shot: '#a855f7',
   ghost: '#94a3b8',
+  freeze: '#67e8f9',
+  laser: '#f43f5e',
+  homing: '#22c55e',
+  heal: '#4ade80',
+  mirror: '#e879f9',
+  overdrive: '#fb923c',
 }
 
-const POWERUP_ICONS: Record<string, string> = {
+export const POWERUP_ICONS: Record<string, string> = {
   rapid_fire: '⚡',
   shield: '◆',
   wide_shot: '▣',
   ghost: '◎',
+  freeze: '❄',
+  laser: '═',
+  homing: '↯',
+  heal: '+',
+  mirror: '⟲',
+  overdrive: '✦',
 }
+
+export const POWERUP_LABELS: Record<string, string> = {
+  rapid_fire: 'Rapid Fire',
+  shield: 'Shield',
+  wide_shot: 'Wide Shot',
+  ghost: 'Ghost',
+  freeze: 'Freeze',
+  laser: 'Laser',
+  homing: 'Homing',
+  heal: 'Heal',
+  mirror: 'Mirror',
+  overdrive: 'Overdrive',
+}
+
+export const POWERUP_ACTIVATION_TICKS = 12
 
 function hexToRgb(hex: string): [number, number, number] {
   const raw = hex.replace('#', '')
@@ -558,7 +585,8 @@ export class DuelRenderer {
       const cx = offsetX + pos.x * cell + cell / 2
       const cy = offsetY + pos.y * cell + cell / 2
       const charged = (bullet.damage ?? 1) >= 2
-      const color = charged ? '#fb7185' : '#fbbf24'
+      const homing = bullet.homing
+      const color = homing ? '#22c55e' : charged ? '#fb7185' : '#fbbf24'
       const dir = bullet.vx >= 0 ? 1 : -1
       const speed = Math.abs(bullet.vx) || 1
       const trailSteps = 4 + speed * 3
@@ -683,6 +711,24 @@ export class DuelRenderer {
         ctx.lineDashOffset = -now * 0.05
         ctx.stroke()
         ctx.setLineDash([])
+      }
+
+      if (fighter.effects?.mirror_active) {
+        const top = offsetY + displayY * cell
+        const height = cell * barCount
+        const pulse = 0.4 + Math.sin(now * 0.008) * 0.25
+        ctx.strokeStyle = rgba('#e879f9', pulse)
+        ctx.lineWidth = Math.max(2, cell * 0.1)
+        ctx.beginPath()
+        ctx.roundRect(offsetX + fighter.x * cell - 3, top - 3, cell + 6, height + 6, cell * 0.25)
+        ctx.stroke()
+      }
+
+      if (fighter.effects?.freeze_active) {
+        const top = offsetY + displayY * cell
+        const height = cell * barCount
+        ctx.fillStyle = rgba('#67e8f9', 0.18 + Math.sin(now * 0.006) * 0.08)
+        ctx.fillRect(offsetX + fighter.x * cell - 1, top, cell + 2, height)
       }
 
       if (isMe && fighter.alive) {
