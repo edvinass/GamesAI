@@ -319,7 +319,12 @@ class RoomService:
         await self.db.refresh(room, ["players"])
         return room
 
-    async def start_game(self, room_id: uuid.UUID, host_id: uuid.UUID) -> tuple[Room, dict]:
+    async def start_game(
+        self,
+        room_id: uuid.UUID,
+        host_id: uuid.UUID,
+        settings_override: dict | None = None,
+    ) -> tuple[Room, dict]:
         room = await self._load_room(room_id)
         if not room:
             raise ValueError("Room not found")
@@ -329,7 +334,11 @@ class RoomService:
             raise ValueError("Game already in progress")
 
         game = get_game(room.game_type)
-        settings = game.validate_settings(room.settings)
+        merged_settings = dict(room.settings or {})
+        if settings_override:
+            merged_settings.update(settings_override)
+            room.settings = merged_settings
+        settings = game.validate_settings(merged_settings)
         if room.game_type in ("poker", "chess", "go") and room.host_player_id:
             settings = {**settings, "host_id": str(room.host_player_id)}
         players_data = [self._player_data(p) for p in room.players]
@@ -374,6 +383,10 @@ class RoomService:
                 p.role = Role(pdata["role"])
 
         state = game.create_initial_state(players_data, settings)
+        if room.game_type == "duel":
+            layout_seed = state.get("settings", {}).get("layout_seed")
+            if layout_seed is not None:
+                room.settings = {**(room.settings or {}), "layout_seed": layout_seed}
         if room.game_state:
             room.game_state.state = state
             room.game_state.version = 1

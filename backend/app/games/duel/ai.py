@@ -7,7 +7,7 @@ FULL_CHARGE_TICKS = 11
 MID_CHARGE_TICKS = 8
 
 INSTANT_POWERUP_TYPES = frozenset(
-    {"heal", "laser", "railgun", "bomb", "cluster", "burst"}
+    {"heal", "laser", "railgun", "bomb", "cluster", "burst", "decoy"}
 )
 
 POWERUP_CHANNEL_TICKS: dict[str, int] = {
@@ -21,17 +21,18 @@ POWERUP_CHANNEL_TICKS: dict[str, int] = {
     "freeze": 8,
     "mirror": 8,
     "overdrive": 7,
+    "phase_shift": 7,
 }
 
 OFFENSIVE_BUFF_TYPES = frozenset(
-    {"rapid_fire", "machine_gun", "homing", "overdrive", "pierce", "wide_shot"}
+    {"rapid_fire", "machine_gun", "homing", "overdrive", "pierce", "wide_shot", "phase_shift"}
 )
 
 DEFENSIVE_BUFF_TYPES = frozenset({"shield", "ghost", "mirror"})
 
 MOVE_OPTIONS = ("up", "down", "stop")
 
-AI_DIFFICULTIES = ("easy", "medium", "hard")
+AI_DIFFICULTIES = ("easy", "medium", "hard", "pro")
 
 DIFFICULTY_CONFIG: dict[str, dict[str, float | int]] = {
     "easy": {
@@ -55,6 +56,20 @@ DIFFICULTY_CONFIG: dict[str, dict[str, float | int]] = {
         "dodge_weight": 1.25,
         "charge_rate": 0.85,
     },
+    "pro": {
+        "reaction_interval": 1,
+        "move_interval": 1,
+        "mistake_rate": 0.0,
+        "dodge_weight": 1.4,
+        "charge_rate": 0.95,
+    },
+}
+
+PERSONALITY_MODIFIERS: dict[str, dict[str, float]] = {
+    "balanced": {"dodge_weight": 1.0, "charge_rate": 1.0, "offense_bias": 0.5},
+    "aggressive": {"dodge_weight": 0.75, "charge_rate": 1.2, "offense_bias": 0.85},
+    "turtle": {"dodge_weight": 1.35, "charge_rate": 0.7, "offense_bias": 0.25},
+    "trickster": {"dodge_weight": 1.0, "charge_rate": 0.9, "offense_bias": 0.6},
 }
 
 
@@ -66,8 +81,20 @@ def normalize_ai_difficulty(value: str | None) -> str:
     return "medium"
 
 
-def get_ai_config(difficulty: str | None) -> dict[str, float | int]:
-    return DIFFICULTY_CONFIG[normalize_ai_difficulty(difficulty)]
+def get_ai_config(difficulty: str | None, state: dict | None = None) -> dict[str, float | int]:
+    cfg = dict(DIFFICULTY_CONFIG[normalize_ai_difficulty(difficulty)])
+    if state:
+        personality = str(state.get("settings", {}).get("ai_personality", "balanced")).lower()
+        mods = PERSONALITY_MODIFIERS.get(personality, PERSONALITY_MODIFIERS["balanced"])
+        cfg["dodge_weight"] = float(cfg["dodge_weight"]) * float(mods["dodge_weight"])
+        cfg["charge_rate"] = min(1.0, float(cfg["charge_rate"]) * float(mods["charge_rate"]))
+        cfg["offense_bias"] = float(mods["offense_bias"])
+        settings = state.get("settings", {})
+        if "ai_move_interval_ticks" in settings:
+            cfg["move_interval"] = int(settings["ai_move_interval_ticks"])
+        if "ai_reaction_interval_ticks" in settings:
+            cfg["reaction_interval"] = int(settings["ai_reaction_interval_ticks"])
+    return cfg
 
 
 def _fighter_height(state: dict) -> int:
@@ -515,7 +542,11 @@ def _should_shoot(
     enemy: dict[str, Any],
     height: int,
     move_direction: str,
+    cfg: dict[str, float | int] | None = None,
 ) -> bool:
+    ai_cfg = cfg or get_ai_config(state["settings"].get("ai_difficulty"), state)
+    offense_bias = float(ai_cfg.get("offense_bias", 0.5))
+    difficulty = normalize_ai_difficulty(state["settings"].get("ai_difficulty"))
     tick = state["tick"]
     if tick < fighter.get("cooldown_until_tick", 0):
         return False
@@ -556,9 +587,17 @@ def _should_shoot(
     if travel <= 20:
         if _shot_aligns_with_enemy(shoot_row, predicted_top, height):
             return True
+    if difficulty == "pro" and travel <= 28:
+        lead_top = _predict_enemy_top(enemy, height, state["grid_height"], 2, min_y, max_y)
+        if _shot_aligns_with_enemy(shoot_row, lead_top, height):
+            return True
 
     gap = _row_gap_to_enemy(shoot_row, enemy["y"], height)
     if gap <= 1:
+        return True
+    if gap <= 2 and offense_bias >= 0.55:
+        return True
+    if difficulty == "pro" and gap <= 2 and travel <= 18:
         return True
 
     if _has_offensive_buff(fighter, tick) and gap <= 2:
@@ -585,6 +624,8 @@ def _should_charge(
 ) -> tuple[bool, int]:
     ai_cfg = cfg or get_ai_config("medium")
     charge_rate = float(ai_cfg.get("charge_rate", 0.65))
+    offense_bias = float(ai_cfg.get("offense_bias", 0.5))
+    difficulty = normalize_ai_difficulty(state["settings"].get("ai_difficulty"))
     if not state["settings"].get("charge_shot_enabled"):
         return False, 0
     tick = state["tick"]
@@ -604,12 +645,18 @@ def _should_charge(
     enemy_low_hp = enemy.get("hp", 3) <= 2
 
     if gap == 0:
+        if difficulty == "pro" and enemy.get("hp", 3) <= 1:
+            return True, FULL_CHARGE_TICKS
+        if offense_bias >= 0.7:
+            return True, FULL_CHARGE_TICKS
         return True, FULL_CHARGE_TICKS
     if gap <= 1:
         if relaxed_safe and (enemy_low_hp or random.random() < charge_rate):
             return True, FULL_CHARGE_TICKS
         return True, MID_CHARGE_TICKS
-    if _should_shoot(state, fighter, enemy, height, move_direction) and gap <= 2:
+    if difficulty == "pro" and gap <= 2 and relaxed_safe and offense_bias >= 0.5:
+        return True, MID_CHARGE_TICKS
+    if _should_shoot(state, fighter, enemy, height, move_direction, cfg) and gap <= 2:
         if relaxed_safe and random.random() < charge_rate * 0.55:
             return True, FULL_CHARGE_TICKS
         return True, MID_CHARGE_TICKS
@@ -690,6 +737,9 @@ def _should_activate_powerup(
         if incoming >= 1:
             return True, False
     elif stored in OFFENSIVE_BUFF_TYPES:
+        offense_bias = float(
+            get_ai_config(state["settings"].get("ai_difficulty"), state).get("offense_bias", 0.5)
+        )
         if enemy is not None:
             enemy_center = _fighter_center(enemy["y"], height)
             if abs(shoot_row - enemy_center) <= 2:
@@ -697,7 +747,9 @@ def _should_activate_powerup(
             travel = _travel_ticks_to_enemy(fighter, enemy, int(state["settings"].get("bullet_speed", 1)))
             if travel <= 25:
                 return True, False
-        if random.random() < 0.25:
+        if stored == "phase_shift" and incoming >= 1:
+            return True, False
+        if random.random() < 0.15 + offense_bias * 0.2:
             return True, False
 
     return False, False
@@ -733,7 +785,14 @@ def _should_use_instant_powerup(
         return gap <= 1
 
     if stored in ("bomb", "cluster"):
+        if stored == "bomb" and enemy is not None:
+            enemy_effects = enemy.get("effects", {})
+            if state["tick"] < enemy_effects.get("freeze_until", 0):
+                return True
         return gap <= 1 or (gap <= 2 and travel <= 18)
+
+    if stored == "decoy":
+        return random.random() < 0.45
 
     if stored == "burst":
         return gap <= 2 or (gap <= 3 and travel <= 22)
@@ -748,7 +807,7 @@ def choose_ai_actions(
     difficulty: str | None = None,
 ) -> tuple[str, bool, bool, bool, int, bool, bool, bool]:
     """Returns move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant."""
-    cfg = get_ai_config(difficulty)
+    cfg = get_ai_config(difficulty, state)
     height = _fighter_height(state)
     bullets = _incoming_bullets(state, player_id, fighter)
     enemy = _enemy_fighter(state, player_id)
@@ -785,7 +844,7 @@ def choose_ai_actions(
             if want_charge:
                 charge_start = True
                 charge_ticks = ticks
-            elif _should_shoot(state, fighter, enemy, height, move):
+            elif _should_shoot(state, fighter, enemy, height, move, cfg):
                 shoot = True
             elif _effect_active(fighter, tick, "machine_gun_until"):
                 shoot = True

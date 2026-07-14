@@ -5,7 +5,7 @@ export interface Player {
   role: 'spymaster' | 'operative' | null
   is_ai: boolean
   is_connected: boolean
-  ai_difficulty?: 'easy' | 'normal' | 'medium' | 'hard'
+  ai_difficulty?: 'easy' | 'normal' | 'medium' | 'hard' | 'pro'
 }
 
 export interface Room {
@@ -113,6 +113,7 @@ export interface DuelFighterEffects {
   mirror_until?: number
   overdrive_until?: number
   freeze_until?: number
+  phase_shift_until?: number
   ghost_active?: boolean
   freeze_active?: boolean
   mirror_active?: boolean
@@ -163,6 +164,7 @@ export interface DuelObstacle {
   y: number
   w: number
   h: number
+  vy?: number
 }
 
 export interface DuelPowerup {
@@ -185,7 +187,31 @@ export interface DuelPowerup {
     | 'bomb'
     | 'cluster'
     | 'burst'
+    | 'phase_shift'
+    | 'decoy'
   despawn_at_tick?: number
+}
+
+export interface DuelDecoy {
+  player_id: string
+  y: number
+  until_tick?: number
+  side?: 'left' | 'right'
+}
+
+export interface DuelEventLogEntry {
+  tick: number
+  message: string
+  kind: 'info' | 'success' | 'warn'
+}
+
+export interface DuelStatBlock {
+  damage_dealt: number
+  damage_taken: number
+  crits: number
+  powerups_used: number
+  hazard_ticks: number
+  perfect_rounds?: number
 }
 
 export interface DuelLastHit {
@@ -197,7 +223,7 @@ export interface DuelLastHit {
 }
 
 export interface DuelGameState {
-  phase: 'countdown' | 'playing' | 'round_over' | 'finished'
+  phase: 'powerup_draft' | 'countdown' | 'playing' | 'round_over' | 'finished'
   countdown_ends_at: string | null
   tick: number
   round: number
@@ -206,6 +232,10 @@ export interface DuelGameState {
   best_of: number
   match_format: string
   mutator: string
+  mutator_secondary?: string
+  arena_theme?: string
+  training_drill?: string
+  tutorial_mode?: boolean
   powerups_enabled: boolean
   effect_duration_ticks?: number
   powerup_lifetime_ticks?: number
@@ -220,11 +250,19 @@ export interface DuelGameState {
   shrink_start_tick?: number
   shrink_interval_ticks?: number
   hazard_damage?: number
+  hazard_damage_interval_ticks?: number
+  layout_seed?: number | null
+  fog?: boolean
   fighter_height: number
   obstacles: DuelObstacle[]
   fighters: Record<string, DuelFighter>
   bullets: DuelBullet[]
   powerup: DuelPowerup | null
+  decoys?: DuelDecoy[]
+  event_log?: DuelEventLogEntry[]
+  round_stats?: Record<string, DuelStatBlock>
+  match_stats?: Record<string, DuelStatBlock>
+  powerup_bans?: Record<string, string>
   players: Player[]
   winner: string | null
   win_reason: string | null

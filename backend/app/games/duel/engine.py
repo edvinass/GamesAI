@@ -28,6 +28,8 @@ POWERUP_TYPES = (
     "bomb",
     "cluster",
     "burst",
+    "phase_shift",
+    "decoy",
 )
 
 POWERUP_ACTIVATION_TICKS = 8
@@ -45,6 +47,8 @@ POWERUP_EFFECT_DURATIONS: dict[str, int] = {
     "homing": 80,
     "mirror": 75,
     "overdrive": 65,
+    "phase_shift": 60,
+    "decoy": 70,
 }
 
 POWERUP_CHANNEL_TICKS: dict[str, int] = {
@@ -58,6 +62,7 @@ POWERUP_CHANNEL_TICKS: dict[str, int] = {
     "freeze": 8,
     "mirror": 8,
     "overdrive": 7,
+    "phase_shift": 7,
 }
 
 INSTANT_POWERUP_TYPES = frozenset(
@@ -68,6 +73,7 @@ INSTANT_POWERUP_TYPES = frozenset(
         "bomb",
         "cluster",
         "burst",
+        "decoy",
     }
 )
 
@@ -89,7 +95,15 @@ POWERUP_SPAWN_WEIGHTS: dict[str, int] = {
     "laser": 4,
     "railgun": 3,
     "cluster": 4,
+    "phase_shift": 4,
+    "decoy": 5,
 }
+
+STACKABLE_SECONDARY_MUTATORS = frozenset({"fog", "chaos"})
+QUICK_DUEL_LOADOUTS = frozenset(POWERUP_TYPES)
+TRAINING_DRILLS = frozenset({"none", "dodge_only", "aim_trainer", "powerup_sandbox"})
+AI_PERSONALITIES = frozenset({"balanced", "aggressive", "turtle", "trickster"})
+ARENA_THEMES = frozenset({"classic", "neon", "asteroid", "crt"})
 
 CLIENT_PROGRESS_LAG_TICKS = 2
 
@@ -161,6 +175,16 @@ MATCH_FORMAT_PRESETS: dict[str, dict[str, Any]] = {
         "charge_shot_enabled": True,
         "round_countdown_sec": 3,
     },
+    "best_of_7": {
+        "best_of": 7,
+        "fighter_hp": 3,
+        "powerups_enabled": True,
+        "shrinking_arena": True,
+        "obstacles_enabled": True,
+        "charge_shot_enabled": True,
+        "round_countdown_sec": 3,
+        "side_swap_every_n_rounds": 2,
+    },
 }
 
 
@@ -193,6 +217,17 @@ class DuelEngine(GamePlugin):
             "charge_max_ticks": 15,
             "effect_duration_ticks": 80,
             "ai_difficulty": "medium",
+            "ai_personality": "balanced",
+            "mutator_secondary": "none",
+            "quick_duel_loadout": "none",
+            "obstacle_rotation": False,
+            "bounce_self_damage": False,
+            "layout_seed": None,
+            "training_drill": "none",
+            "tutorial_mode": False,
+            "arena_theme": "classic",
+            "powerup_draft_enabled": True,
+            "sudden_death_after_round": 3,
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -237,9 +272,59 @@ class DuelEngine(GamePlugin):
         difficulty = str(merged.get("ai_difficulty", "medium")).lower()
         if difficulty == "normal":
             difficulty = "medium"
-        if difficulty not in ("easy", "medium", "hard"):
+        if difficulty not in ("easy", "medium", "hard", "pro"):
             difficulty = "medium"
         merged["ai_difficulty"] = difficulty
+
+        personality = str(merged.get("ai_personality", "balanced")).lower()
+        if personality not in AI_PERSONALITIES:
+            personality = "balanced"
+        merged["ai_personality"] = personality
+
+        secondary = str(merged.get("mutator_secondary", "none")).lower()
+        if secondary == "none" or secondary not in STACKABLE_SECONDARY_MUTATORS:
+            secondary = "none"
+        merged["mutator_secondary"] = secondary
+
+        loadout = str(merged.get("quick_duel_loadout", "none")).lower()
+        if loadout == "none" or loadout not in QUICK_DUEL_LOADOUTS:
+            loadout = "none"
+        merged["quick_duel_loadout"] = loadout
+
+        merged["obstacle_rotation"] = bool(merged.get("obstacle_rotation", False))
+        merged["bounce_self_damage"] = bool(merged.get("bounce_self_damage", False))
+        merged["tutorial_mode"] = bool(merged.get("tutorial_mode", False))
+
+        theme = str(merged.get("arena_theme", "classic")).lower()
+        if theme not in ARENA_THEMES:
+            theme = "classic"
+        merged["arena_theme"] = theme
+
+        drill = str(merged.get("training_drill", "none")).lower()
+        if drill not in TRAINING_DRILLS:
+            drill = "none"
+        merged["training_drill"] = drill
+
+        seed = merged.get("layout_seed")
+        if seed is not None and seed != "":
+            try:
+                merged["layout_seed"] = int(seed)
+            except (TypeError, ValueError):
+                merged["layout_seed"] = None
+        else:
+            merged["layout_seed"] = None
+
+        merged["ai_move_interval_ticks"] = max(
+            1, min(4, int(merged.get("ai_move_interval_ticks", 2)))
+        )
+        merged["ai_reaction_interval_ticks"] = max(
+            1, min(4, int(merged.get("ai_reaction_interval_ticks", 2)))
+        )
+
+        merged["powerup_draft_enabled"] = bool(merged.get("powerup_draft_enabled", True))
+        merged["sudden_death_after_round"] = max(
+            2, min(6, int(merged.get("sudden_death_after_round", 3)))
+        )
 
         format_preset = MATCH_FORMAT_PRESETS[match_format]
         mutator_preset = MUTATOR_PRESETS[mutator]
@@ -252,6 +337,9 @@ class DuelEngine(GamePlugin):
         )
         merged["charge_shot_enabled"] = format_preset["charge_shot_enabled"]
         merged["round_countdown_sec"] = format_preset["round_countdown_sec"]
+        merged["side_swap_every_n_rounds"] = int(
+            format_preset.get("side_swap_every_n_rounds", 0)
+        )
         merged["bullet_speed"] = mutator_preset["bullet_speed"]
         merged["ricochet_bounces"] = mutator_preset["ricochet_bounces"]
         merged["fog"] = mutator_preset["fog"]
@@ -264,6 +352,32 @@ class DuelEngine(GamePlugin):
             merged["shoot_cooldown_ticks"] = mutator_preset["shoot_cooldown_ticks"]
         elif mutator == "bounce_house":
             merged["obstacles_enabled"] = True
+            merged["bounce_self_damage"] = merged.get("bounce_self_damage", True)
+
+        if secondary == "fog":
+            merged["fog"] = True
+        elif secondary == "chaos":
+            merged["bullet_speed"] = min(3, int(merged["bullet_speed"]) + 1)
+            merged["shoot_cooldown_ticks"] = max(
+                4, int(merged.get("shoot_cooldown_ticks", 10)) - 2
+            )
+            merged["max_bullets_per_player"] = min(
+                8, int(merged["max_bullets_per_player"]) + 2
+            )
+
+        if loadout != "none" and match_format == "quick_duel":
+            merged["powerups_enabled"] = True
+
+        if drill == "powerup_sandbox":
+            merged["powerups_enabled"] = True
+            merged["powerup_interval_ticks"] = 40
+            merged["shrinking_arena"] = False
+        elif drill == "dodge_only":
+            merged["powerups_enabled"] = False
+            merged["charge_shot_enabled"] = False
+        elif drill == "aim_trainer":
+            merged["powerups_enabled"] = False
+            merged["shrinking_arena"] = False
 
         return merged
 
@@ -327,24 +441,59 @@ class DuelEngine(GamePlugin):
         min_server = min(POWERUP_ACTIVATION_MIN_SERVER_TICKS, required_ticks)
         return int(client_ticks) >= required_ticks and server_ticks >= min_server
 
+    def _effective_shrink_interval(self, state: dict) -> int:
+        settings = state["settings"]
+        interval = int(settings.get("shrink_interval_ticks", 80))
+        sudden_after = int(settings.get("sudden_death_after_round", 3))
+        if int(state.get("round", 1)) >= sudden_after:
+            interval = max(20, interval // 2)
+        return interval
+
+    def _should_enter_powerup_draft(self, settings: dict) -> bool:
+        return (
+            settings.get("powerup_draft_enabled")
+            and settings.get("powerups_enabled")
+            and int(settings.get("best_of", 1)) > 1
+        )
+
+    def _begin_powerup_draft(self, state: dict) -> None:
+        state["powerup_bans"] = {}
+        state["phase"] = "powerup_draft"
+        state["countdown_ends_at"] = None
+
     def _rounds_to_win(self, state: dict) -> int:
         return (int(state["settings"].get("best_of", 5)) + 1) // 2
 
-    def _generate_obstacles(self, grid_width: int, grid_height: int, count: int, fighter_height: int) -> list[dict]:
+    def _layout_rng(self, settings: dict, salt: int = 0) -> random.Random:
+        seed = settings.get("layout_seed")
+        if seed is None:
+            return random.Random()
+        return random.Random(int(seed) + int(salt))
+
+    def _generate_obstacles(
+        self,
+        grid_width: int,
+        grid_height: int,
+        count: int,
+        fighter_height: int,
+        settings: dict | None = None,
+        salt: int = 0,
+    ) -> list[dict]:
         if count <= 0:
             return []
+        rng = self._layout_rng(settings or {}, salt)
         obstacles: list[dict] = []
         center_x = grid_width // 2
         attempts = 0
         while len(obstacles) < count and attempts < 80:
             attempts += 1
-            w = random.choice([1, 2])
-            h = random.choice([1, 2])
-            x = random.randint(center_x - 4, center_x + 2)
-            y = random.randint(2, grid_height - h - 2)
+            w = rng.choice([1, 2])
+            h = rng.choice([1, 2])
+            x = rng.randint(center_x - 4, center_x + 2)
+            y = rng.randint(2, grid_height - h - 2)
             if x <= 3 or x >= grid_width - 5:
                 continue
-            candidate = {"x": x, "y": y, "w": w, "h": h}
+            candidate = {"x": x, "y": y, "w": w, "h": h, "vy": 0}
             if any(self._obstacles_overlap(candidate, existing) for existing in obstacles):
                 continue
             spawn_clear = True
@@ -423,6 +572,7 @@ class DuelEngine(GamePlugin):
                     "homing_until": 0,
                     "mirror_until": 0,
                     "overdrive_until": 0,
+                    "phase_shift_until": 0,
                 },
                 "burst_shots_remaining": 0,
                 "burst_next_at_tick": 0,
@@ -430,6 +580,40 @@ class DuelEngine(GamePlugin):
             if not self._fighter_overlaps_obstacle(candidate, fighter_height, obstacles):
                 return candidate
             y += 1
+        for fallback_y in range(playable_y_min, min(max_y, playable_y_max - fighter_height + 1) + 1):
+            candidate = {
+                "x": x,
+                "y": fallback_y,
+                "side": side,
+                "alive": True,
+                "hp": fighter_hp,
+                "max_hp": fighter_hp,
+                "move_direction": "stop",
+                "pending_shoot": False,
+                "charging": False,
+                "charge_ticks": 0,
+                "cooldown_until_tick": 0,
+                "color": FIGHTER_COLORS[index % len(FIGHTER_COLORS)],
+                "stored_powerup": None,
+                "activating_powerup": False,
+                "powerup_activation_ticks": 0,
+                "effects": {
+                    "rapid_fire_until": 0,
+                    "machine_gun_until": 0,
+                    "shield_until": 0,
+                    "wide_shot_until": 0,
+                    "pierce_until": 0,
+                    "ghost_until": 0,
+                    "homing_until": 0,
+                    "mirror_until": 0,
+                    "overdrive_until": 0,
+                    "phase_shift_until": 0,
+                },
+                "burst_shots_remaining": 0,
+                "burst_next_at_tick": 0,
+            }
+            if not self._fighter_overlaps_obstacle(candidate, fighter_height, obstacles):
+                return candidate
         return {
             "x": x,
             "y": max(playable_y_min, min(max_y, (grid_height - fighter_height) // 2)),
@@ -456,6 +640,7 @@ class DuelEngine(GamePlugin):
                 "homing_until": 0,
                 "mirror_until": 0,
                 "overdrive_until": 0,
+                "phase_shift_until": 0,
             },
             "burst_shots_remaining": 0,
             "burst_next_at_tick": 0,
@@ -464,15 +649,84 @@ class DuelEngine(GamePlugin):
     def _initial_round_scores(self, players: list[dict]) -> dict[str, int]:
         return {player["id"]: 0 for player in players}
 
+    def _empty_match_stats(self, players: list[dict]) -> dict[str, dict[str, int]]:
+        template = {
+            "damage_dealt": 0,
+            "damage_taken": 0,
+            "crits": 0,
+            "powerups_used": 0,
+            "hazard_ticks": 0,
+            "perfect_rounds": 0,
+        }
+        return {player["id"]: dict(template) for player in players}
+
+    def _empty_round_stats(self, players: list[dict]) -> dict[str, dict[str, int]]:
+        template = {
+            "damage_dealt": 0,
+            "damage_taken": 0,
+            "crits": 0,
+            "powerups_used": 0,
+            "hazard_ticks": 0,
+        }
+        return {player["id"]: dict(template) for player in players}
+
+    def _append_event_log(self, state: dict, message: str, *, kind: str = "info") -> None:
+        log = state.setdefault("event_log", [])
+        log.append({"tick": state.get("tick", 0), "message": message, "kind": kind})
+        if len(log) > 30:
+            del log[:-30]
+
+    def _banned_powerup_types(self, state: dict) -> set[str]:
+        bans = state.get("powerup_bans", {})
+        return {ptype for ptype in bans.values() if ptype}
+
+    def _start_countdown(self, state: dict, seconds: int | None = None) -> None:
+        sec = seconds if seconds is not None else int(state["settings"].get("countdown_sec", 3))
+        state["countdown_ends_at"] = (
+            datetime.now(timezone.utc) + timedelta(seconds=sec)
+        ).isoformat()
+
+    def _update_match_stats(
+        self,
+        state: dict,
+        actor_id: str,
+        target_id: str,
+        *,
+        damage: int = 0,
+        crit: bool = False,
+        kind: str = "hit",
+    ) -> None:
+        round_stats = state.setdefault(
+            "round_stats", self._empty_round_stats(state.get("players", []))
+        )
+        match_stats = state.setdefault(
+            "match_stats", self._empty_match_stats(state.get("players", []))
+        )
+        for bucket in (round_stats, match_stats):
+            if actor_id in bucket and kind == "hit" and damage > 0:
+                bucket[actor_id]["damage_dealt"] += damage
+            if target_id in bucket and kind == "hit" and damage > 0:
+                bucket[target_id]["damage_taken"] += damage
+            if actor_id in bucket and crit:
+                bucket[actor_id]["crits"] += 1
+            if actor_id in bucket and kind == "powerup":
+                bucket[actor_id]["powerups_used"] += 1
+            if target_id in bucket and kind == "hazard":
+                bucket[target_id]["hazard_ticks"] += 1
+
     def create_initial_state(self, players: list[dict], settings: dict) -> dict:
         settings = self.validate_settings(settings)
+        if settings.get("layout_seed") is None:
+            settings["layout_seed"] = random.randint(1, 2_000_000_000)
         grid_width = settings["grid_width"]
         grid_height = settings["grid_height"]
         fighter_height = settings["fighter_height"]
         fighter_hp = settings["fighter_hp"]
 
         obstacle_count = settings["obstacle_count"] if settings["obstacles_enabled"] else 0
-        obstacles = self._generate_obstacles(grid_width, grid_height, obstacle_count, fighter_height)
+        obstacles = self._generate_obstacles(
+            grid_width, grid_height, obstacle_count, fighter_height, settings, salt=1
+        )
 
         playable_y_min = 0
         playable_y_max = grid_height - 1
@@ -500,17 +754,35 @@ class DuelEngine(GamePlugin):
             )
 
         countdown_sec = settings["countdown_sec"]
-        countdown_ends_at = (
-            datetime.now(timezone.utc) + timedelta(seconds=countdown_sec)
-        ).isoformat()
+        use_draft = self._should_enter_powerup_draft(settings)
+        initial_phase = "powerup_draft" if use_draft else "countdown"
+        countdown_ends_at = None
+        if not use_draft:
+            countdown_ends_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=countdown_sec)
+            ).isoformat()
+
+        loadout = settings.get("quick_duel_loadout", "none")
+        if loadout and loadout != "none":
+            for fighter in fighters.values():
+                fighter["stored_powerup"] = loadout
+
+        drill = settings.get("training_drill", "none")
+        if drill == "aim_trainer":
+            for fighter in fighters.values():
+                fighter["move_direction"] = "stop"
 
         return {
-            "phase": "countdown",
+            "phase": initial_phase,
             "countdown_ends_at": countdown_ends_at,
             "tick": 0,
             "round": 1,
             "round_scores": self._initial_round_scores(normalized_players),
             "round_winner": None,
+            "match_stats": self._empty_match_stats(normalized_players),
+            "powerup_bans": {},
+            "decoys": [],
+            "event_log": [],
             "grid_width": grid_width,
             "grid_height": grid_height,
             "playable_y_min": playable_y_min,
@@ -527,6 +799,7 @@ class DuelEngine(GamePlugin):
             "win_reason": None,
             "last_action": None,
             "last_hit": None,
+            "round_stats": self._empty_round_stats(normalized_players),
         }
 
     def apply_action(
@@ -534,6 +807,31 @@ class DuelEngine(GamePlugin):
     ) -> tuple[dict, list[dict]]:
         action_type = action.get("type")
         events: list[dict] = []
+
+        if state["phase"] == "powerup_draft":
+            if action_type == "ban_powerup":
+                ptype = action.get("powerup_type")
+                if ptype not in POWERUP_TYPES:
+                    return state, events
+                player_id = player["id"]
+                bans = state.setdefault("powerup_bans", {})
+                if player_id in bans:
+                    return state, events
+                bans[player_id] = ptype
+                state["last_action"] = {
+                    "type": "powerup_banned",
+                    "player_id": player_id,
+                    "powerup_type": ptype,
+                }
+                nickname = player.get("nickname", "Player")
+                self._append_event_log(state, f"{nickname} banned {ptype.replace('_', ' ')}")
+                if len(bans) >= len(state["players"]):
+                    if state.pop("pending_round_reset", False):
+                        self._reset_round(state)
+                    state["phase"] = "countdown"
+                    self._start_countdown(state)
+                return state, events
+            return state, events
 
         if state["phase"] != "playing":
             return state, events
@@ -547,6 +845,9 @@ class DuelEngine(GamePlugin):
             direction = action.get("direction")
             if direction not in MOVE_DIRECTIONS:
                 return state, events
+            drill = state["settings"].get("training_drill", "none")
+            if drill == "aim_trainer" and not player.get("is_ai"):
+                return state, events
             fighter["move_direction"] = direction
             state["last_action"] = {
                 "type": "set_move",
@@ -556,6 +857,8 @@ class DuelEngine(GamePlugin):
             return state, events
 
         if action_type == "charge_start":
+            if state["settings"].get("training_drill") == "dodge_only":
+                return state, events
             if not state["settings"].get("charge_shot_enabled"):
                 return state, events
             if state["tick"] < fighter.get("cooldown_until_tick", 0):
@@ -631,6 +934,8 @@ class DuelEngine(GamePlugin):
             return state, events
 
         if action_type == "release_charge":
+            if state["settings"].get("training_drill") == "dodge_only":
+                return state, events
             charge_max = int(state["settings"].get("charge_max_ticks", 15))
             if state["settings"].get("charge_shot_enabled"):
                 server_ticks = int(fighter.get("charge_ticks", 0))
@@ -653,6 +958,8 @@ class DuelEngine(GamePlugin):
             return state, events
 
         if action_type == "shoot":
+            if state["settings"].get("training_drill") == "dodge_only":
+                return state, events
             fighter["pending_shoot"] = True
             fighter["charge_ticks"] = 0
             fighter["charging"] = False
@@ -678,7 +985,7 @@ class DuelEngine(GamePlugin):
             difficulty = normalize_ai_difficulty(
                 player.get("ai_difficulty") or state["settings"].get("ai_difficulty")
             )
-            cfg = get_ai_config(difficulty)
+            cfg = get_ai_config(difficulty, state)
             reaction_interval = int(cfg["reaction_interval"])
             rethink = reaction_interval <= 1 or state["tick"] % reaction_interval == 0
 
@@ -724,6 +1031,9 @@ class DuelEngine(GamePlugin):
     def _is_frozen(self, fighter: dict, tick: int) -> bool:
         return tick < fighter.get("effects", {}).get("freeze_until", 0)
 
+    def _is_phase_shifted(self, fighter: dict, tick: int) -> bool:
+        return tick < fighter.get("effects", {}).get("phase_shift_until", 0)
+
     def _move_fighter(
         self,
         fighter: dict,
@@ -749,7 +1059,8 @@ class DuelEngine(GamePlugin):
             return
 
         candidate = {**fighter, "y": new_y}
-        if not self._fighter_overlaps_obstacle(candidate, fighter_height, obstacles):
+        ignore_obstacles = self._is_phase_shifted(fighter, tick)
+        if ignore_obstacles or not self._fighter_overlaps_obstacle(candidate, fighter_height, obstacles):
             fighter["y"] = new_y
 
     def _shoot_row(self, fighter: dict, fighter_height: int) -> int:
@@ -833,6 +1144,9 @@ class DuelEngine(GamePlugin):
 
     def _try_shoot(self, state: dict, fighter: dict, owner_id: str) -> None:
         if not fighter.get("pending_shoot"):
+            return
+        if state["settings"].get("training_drill") == "dodge_only":
+            fighter["pending_shoot"] = False
             return
         tick = state["tick"]
         if tick < fighter.get("cooldown_until_tick", 0):
@@ -951,6 +1265,18 @@ class DuelEngine(GamePlugin):
 
         fighter["hp"] = max(0, fighter.get("hp", 1) - damage)
         self._record_hit(state, target_id, damage, crit, False, hit_y)
+        self._update_match_stats(
+            state, owner_id, target_id, damage=damage, crit=crit, kind="hit"
+        )
+        shooter = next((p for p in state["players"] if p["id"] == owner_id), None)
+        target = next((p for p in state["players"] if p["id"] == target_id), None)
+        if damage > 0 and shooter and target:
+            label = f"{crit and 'Crit! ' or ''}{damage} dmg"
+            self._append_event_log(
+                state,
+                f"{shooter.get('nickname', 'Player')} → {target.get('nickname', 'Player')} ({label})",
+                kind="warn" if crit else "info",
+            )
         events.append(
             {
                 "type": "player_hit",
@@ -1026,29 +1352,59 @@ class DuelEngine(GamePlugin):
             return False
         return True
 
-    def _random_powerup_type(self) -> str:
-        types = POWERUP_TYPES
+    def _random_powerup_type(self, state: dict) -> str:
+        banned = self._banned_powerup_types(state)
+        types = [t for t in POWERUP_TYPES if t not in banned]
+        if not types:
+            types = list(POWERUP_TYPES)
         weights = [POWERUP_SPAWN_WEIGHTS.get(t, 8) for t in types]
+        settings = state.get("settings", {})
+        if settings.get("layout_seed") is not None:
+            rng = self._layout_rng(settings, salt=state.get("tick", 0) + len(types))
+            return rng.choices(types, weights=weights, k=1)[0]
         return random.choices(types, weights=weights, k=1)[0]
 
+    def _trailing_player_id(self, state: dict) -> str | None:
+        fighters = state.get("fighters", {})
+        scores = state.get("round_scores", {})
+        if not fighters:
+            return None
+        ranked = []
+        for pid, fighter in fighters.items():
+            ranked.append((scores.get(pid, 0), fighter.get("hp", 0), pid))
+        ranked.sort()
+        return ranked[0][2] if ranked else None
+
     def _random_powerup_location(self, state: dict) -> dict | None:
+        settings = state["settings"]
         grid_width = state["grid_width"]
         y_min = state.get("playable_y_min", 0)
         y_max = state.get("playable_y_max", state["grid_height"] - 1)
         if y_max < y_min:
             return None
 
-        lifetime = int(state["settings"].get("powerup_lifetime_ticks", 120))
+        lifetime = int(settings.get("powerup_lifetime_ticks", 120))
         despawn_at = state["tick"] + lifetime
+        trailing = self._trailing_player_id(state)
+        trailing_fighter = state["fighters"].get(trailing) if trailing else None
+        bias_x = trailing_fighter["x"] if trailing_fighter else grid_width // 2
+        use_seed = settings.get("layout_seed") is not None
+        rng = self._layout_rng(settings, salt=state["tick"]) if use_seed else None
 
-        for _ in range(60):
-            x = random.randint(3, grid_width - 4)
-            y = random.randint(y_min, y_max)
+        for attempt in range(60):
+            if trailing_fighter and (rng.random() if rng else random.random()) < 0.55:
+                spread = max(4, grid_width // 6)
+                offset = rng.randint(-spread, spread) if rng else random.randint(-spread, spread)
+                x = int(bias_x + offset)
+                x = max(3, min(grid_width - 4, x))
+            else:
+                x = rng.randint(3, grid_width - 4) if rng else random.randint(3, grid_width - 4)
+            y = rng.randint(y_min, y_max) if rng else random.randint(y_min, y_max)
             if self._is_valid_powerup_cell(x, y, state):
                 return {
                     "x": x,
                     "y": y,
-                    "type": self._random_powerup_type(),
+                    "type": self._random_powerup_type(state),
                     "despawn_at_tick": despawn_at,
                 }
         return None
@@ -1067,9 +1423,11 @@ class DuelEngine(GamePlugin):
                 state["powerup"] = None
                 state["next_powerup_at_tick"] = self._schedule_next_powerup_spawn_tick(settings, tick)
                 events.append({"type": "powerup_despawned"})
+                self._append_event_log(state, "Power-up despawned", kind="warn")
             return
 
-        if tick < state.get("next_powerup_at_tick", 0):
+        sandbox = settings.get("training_drill") == "powerup_sandbox"
+        if tick < state.get("next_powerup_at_tick", 0) and not sandbox:
             return
 
         location = self._random_powerup_location(state)
@@ -1081,6 +1439,12 @@ class DuelEngine(GamePlugin):
                 "x": location["x"],
                 "y": location["y"],
             }
+            if not sandbox:
+                state["next_powerup_at_tick"] = self._schedule_next_powerup_spawn_tick(settings, tick)
+            else:
+                state["next_powerup_at_tick"] = tick + 30
+            label = location["type"].replace("_", " ").title()
+            self._append_event_log(state, f"{label} spawned", kind="info")
             events.append(
                 {
                     "type": "powerup_spawned",
@@ -1141,7 +1505,40 @@ class DuelEngine(GamePlugin):
         elif ptype == "burst":
             fighter["burst_shots_remaining"] = 6
             fighter["burst_next_at_tick"] = tick
+        elif ptype == "phase_shift":
+            self._extend_timed_effect(effects, "phase_shift_until", tick, duration)
+        elif ptype == "decoy":
+            grid_height = state["grid_height"]
+            fighter_height = self._fighter_height(state)
+            settings = state["settings"]
+            y_min = state.get("playable_y_min", 0)
+            y_max = max(
+                y_min,
+                state.get("playable_y_max", grid_height - 1) - fighter_height,
+            )
+            if settings.get("layout_seed") is not None:
+                rng = self._layout_rng(settings, salt=tick + len(state.get("decoys", [])))
+                decoy_y = rng.randint(y_min, y_max)
+            else:
+                decoy_y = random.randint(y_min, y_max)
+            decoy_duration = self._powerup_effect_duration("decoy", state)
+            state.setdefault("decoys", []).append(
+                {
+                    "player_id": owner_id,
+                    "y": decoy_y,
+                    "until_tick": tick + decoy_duration,
+                    "side": fighter.get("side"),
+                }
+            )
 
+        self._update_match_stats(state, owner_id, owner_id, kind="powerup")
+        nickname = next(
+            (p.get("nickname", "Player") for p in state["players"] if p["id"] == owner_id),
+            "Player",
+        )
+        self._append_event_log(
+            state, f"{nickname} activated {ptype.replace('_', ' ')}", kind="success"
+        )
         events.append({"type": "powerup_activated", "player_id": owner_id, "powerup_type": ptype})
 
     def _fire_bomb(self, state: dict, fighter: dict, owner_id: str) -> None:
@@ -1342,6 +1739,8 @@ class DuelEngine(GamePlugin):
                 if bullet.get("bounces_remaining", 0) > 0 and bullet.get("vy", 0) == 0:
                     bullet["vy"] = -1 if cy < 0 else 1
                     bullet["bounces_remaining"] -= 1
+                    if state["settings"].get("bounce_self_damage"):
+                        bullet["can_hit_owner"] = True
                     bullet["x"] = cx
                     bullet["y"] = max(0, min(grid_height - 1, cy))
                     return True
@@ -1380,6 +1779,8 @@ class DuelEngine(GamePlugin):
                 if bullet.get("bounces_remaining", 0) > 0:
                     bullet["vx"] *= -1
                     bullet["bounces_remaining"] -= 1
+                    if state["settings"].get("bounce_self_damage"):
+                        bullet["can_hit_owner"] = True
                     return True
                 return False
 
@@ -1389,8 +1790,11 @@ class DuelEngine(GamePlugin):
                 if owner:
                     self._collect_powerup(state, owner, bullet["owner_id"], events)
 
+            can_hit_owner = bullet.get("can_hit_owner", False)
             for pid, fighter in fighters.items():
-                if pid == bullet["owner_id"] or not fighter.get("alive"):
+                if pid == bullet["owner_id"] and not can_hit_owner:
+                    continue
+                if not fighter.get("alive"):
                     continue
                 if cx != fighter["x"]:
                     continue
@@ -1448,7 +1852,7 @@ class DuelEngine(GamePlugin):
         if not settings.get("shrinking_arena"):
             return
         start = int(settings.get("shrink_start_tick", 240))
-        interval = int(settings.get("shrink_interval_ticks", 80))
+        interval = self._effective_shrink_interval(state)
         if state["tick"] < start:
             return
         if (state["tick"] - start) % interval != 0:
@@ -1504,6 +1908,9 @@ class DuelEngine(GamePlugin):
         damage = int(settings.get("hazard_damage", 1))
         if damage <= 0:
             return
+        interval = max(1, int(settings.get("hazard_damage_interval_ticks", 20)))
+        if state["tick"] % interval != 0:
+            return
 
         for pid, fighter in state["fighters"].items():
             if not fighter.get("alive") or not self._fighter_in_hazard(fighter, state):
@@ -1535,6 +1942,45 @@ class DuelEngine(GamePlugin):
             )
             if eliminated:
                 events.append({"type": "player_eliminated", "player_id": pid, "reason": "hazard"})
+            self._update_match_stats(state, pid, pid, kind="hazard")
+
+    def _rotate_obstacles(self, state: dict) -> None:
+        settings = state["settings"]
+        if not settings.get("obstacle_rotation"):
+            return
+        if state["tick"] % 120 != 0:
+            return
+        grid_height = state["grid_height"]
+        min_y = state.get("playable_y_min", 0)
+        max_y = state.get("playable_y_max", grid_height - 1)
+        fighter_height = self._fighter_height(state)
+        obstacles = state.get("obstacles", [])
+        for obstacle in obstacles:
+            vy = int(obstacle.get("vy", 0))
+            if vy == 0:
+                vy = random.choice([-1, 1])
+            next_y = obstacle["y"] + vy
+            if next_y < min_y or next_y + obstacle["h"] - 1 > max_y:
+                vy *= -1
+                next_y = obstacle["y"] + vy
+            candidate = {**obstacle, "y": max(min_y, min(max_y - obstacle["h"] + 1, next_y))}
+            blocked = False
+            for fighter in state["fighters"].values():
+                if fighter.get("alive") and self._fighter_overlaps_obstacle(
+                    {**fighter, "y": fighter["y"]}, fighter_height, [candidate]
+                ):
+                    blocked = True
+                    break
+            if blocked:
+                continue
+            obstacle["y"] = candidate["y"]
+            obstacle["vy"] = vy
+
+    def _cleanup_decoys(self, state: dict) -> None:
+        tick = state["tick"]
+        state["decoys"] = [
+            decoy for decoy in state.get("decoys", []) if int(decoy.get("until_tick", 0)) > tick
+        ]
 
     def _steer_homing_bullet(self, state: dict, bullet: dict) -> None:
         if not bullet.get("homing"):
@@ -1543,21 +1989,32 @@ class DuelEngine(GamePlugin):
         if not owner:
             return
         tick = state["tick"]
-        for pid, fighter in state["fighters"].items():
-            if pid == bullet["owner_id"] or not fighter.get("alive"):
+        target_center: int | None = None
+        for decoy in state.get("decoys", []):
+            if decoy.get("player_id") == bullet["owner_id"]:
                 continue
-            center = fighter["y"] + self._fighter_height(state) // 2
-            effects = fighter.get("effects", {})
-            if tick < effects.get("ghost_until", 0):
-                offset = (hash((pid, tick // 3)) % 5) - 2
-                center += offset
-            if bullet["y"] < center:
-                bullet["vy"] = 1
-            elif bullet["y"] > center:
-                bullet["vy"] = -1
-            else:
-                bullet["vy"] = 0
+            if decoy.get("side") == owner.get("side"):
+                continue
+            target_center = int(decoy["y"]) + 1
+            break
+        if target_center is None:
+            for pid, fighter in state["fighters"].items():
+                if pid == bullet["owner_id"] or not fighter.get("alive"):
+                    continue
+                target_center = fighter["y"] + self._fighter_height(state) // 2
+                effects = fighter.get("effects", {})
+                if tick < effects.get("ghost_until", 0):
+                    offset = (hash((pid, tick // 3)) % 5) - 2
+                    target_center += offset
+                break
+        if target_center is None:
             return
+        if bullet["y"] < target_center:
+            bullet["vy"] = 1
+        elif bullet["y"] > target_center:
+            bullet["vy"] = -1
+        else:
+            bullet["vy"] = 0
 
     def _increment_charging(self, state: dict) -> None:
         max_charge = int(state["settings"].get("charge_max_ticks", 15))
@@ -1577,18 +2034,33 @@ class DuelEngine(GamePlugin):
         grid_height = state["grid_height"]
         fighter_height = self._fighter_height(state)
         fighter_hp = self._fighter_hp(state)
+        round_num = int(state.get("round", 1))
 
         obstacle_count = settings["obstacle_count"] if settings["obstacles_enabled"] else 0
-        state["obstacles"] = self._generate_obstacles(grid_width, grid_height, obstacle_count, fighter_height)
+        state["obstacles"] = self._generate_obstacles(
+            grid_width,
+            grid_height,
+            obstacle_count,
+            fighter_height,
+            settings,
+            salt=round_num,
+        )
         state["playable_y_min"] = 0
         state["playable_y_max"] = grid_height - 1
         state["bullets"] = []
         state["powerup"] = None
+        state["decoys"] = []
         state["next_powerup_at_tick"] = self._schedule_next_powerup_spawn_tick(settings, state["tick"])
         state["last_hit"] = None
         state["round_winner"] = None
+        state["round_stats"] = self._empty_round_stats(state.get("players", []))
 
-        for i, player in enumerate(state["players"]):
+        players = list(state["players"])
+        swap_every = int(settings.get("side_swap_every_n_rounds", 0))
+        if swap_every > 0 and round_num > 1 and round_num % swap_every == 0:
+            players.reverse()
+
+        for i, player in enumerate(players):
             pid = player["id"]
             state["fighters"][pid] = self._spawn_side(
                 i,
@@ -1601,12 +2073,29 @@ class DuelEngine(GamePlugin):
                 state["playable_y_max"],
             )
 
+        loadout = settings.get("quick_duel_loadout", "none")
+        if loadout and loadout != "none":
+            for fighter in state["fighters"].values():
+                fighter["stored_powerup"] = loadout
+
+        if settings.get("training_drill") == "aim_trainer":
+            for fighter in state["fighters"].values():
+                fighter["move_direction"] = "stop"
+
     def _end_round(self, state: dict, round_winner: str | None, events: list[dict]) -> None:
         state["round_winner"] = round_winner
         state["last_hit"] = None
         state["last_action"] = None
         scores = state.setdefault("round_scores", {})
+        round_stats = dict(state.get("round_stats", {}))
         if round_winner:
+            winner_stats = round_stats.get(round_winner, {})
+            if winner_stats.get("damage_taken", 0) == 0:
+                match_stats = state.setdefault(
+                    "match_stats", self._empty_match_stats(state.get("players", []))
+                )
+                if round_winner in match_stats:
+                    match_stats[round_winner]["perfect_rounds"] += 1
             scores[round_winner] = scores.get(round_winner, 0) + 1
             events.append(
                 {
@@ -1614,6 +2103,7 @@ class DuelEngine(GamePlugin):
                     "winner": round_winner,
                     "round_scores": dict(scores),
                     "round": state.get("round", 1),
+                    "round_stats": round_stats,
                 }
             )
 
@@ -1630,17 +2120,43 @@ class DuelEngine(GamePlugin):
                     "winner": None,
                     "round_scores": dict(scores),
                     "round": state.get("round", 1),
+                    "round_stats": round_stats,
                 }
             )
 
-        state["phase"] = "round_over"
         state["round"] = int(state.get("round", 1)) + 1
+
+        if self._should_enter_powerup_draft(state["settings"]):
+            state["pending_round_reset"] = True
+            self._begin_powerup_draft(state)
+            return
+
+        state["phase"] = "round_over"
         self._start_round_countdown(state)
 
     def tick(self, state: dict) -> tuple[dict, list[dict]]:
         events: list[dict] = []
 
         if state["phase"] == "finished":
+            return state, events
+
+        if state["phase"] == "powerup_draft":
+            bans = state.setdefault("powerup_bans", {})
+            for player in state["players"]:
+                pid = player["id"]
+                if pid in bans:
+                    continue
+                if player.get("is_ai"):
+                    choice = random.choice(list(POWERUP_TYPES))
+                    bans[pid] = choice
+                    self._append_event_log(
+                        state,
+                        f"{player.get('nickname', 'AI')} banned {choice.replace('_', ' ')}",
+                    )
+            if len(bans) >= len(state["players"]):
+                state["phase"] = "countdown"
+                self._start_countdown(state)
+            state["tick"] += 1
             return state, events
 
         if state["phase"] == "countdown":
@@ -1670,6 +2186,8 @@ class DuelEngine(GamePlugin):
         self._apply_ai_inputs(state, events)
         self._increment_charging(state)
         self._increment_powerup_activation(state)
+        self._rotate_obstacles(state)
+        self._cleanup_decoys(state)
         self._maybe_shrink_arena(state, events)
         self._apply_hazard_damage(state, events)
         self._maybe_spawn_powerup(state, events)
@@ -1686,11 +2204,13 @@ class DuelEngine(GamePlugin):
                 continue
             player = self._player_by_id(state, pid)
             is_ai = player.get("is_ai") if player else False
+            if state["settings"].get("training_drill") == "aim_trainer" and is_ai:
+                fighter["move_direction"] = "stop"
             if is_ai:
                 difficulty = normalize_ai_difficulty(
                     (player or {}).get("ai_difficulty") or state["settings"].get("ai_difficulty")
                 )
-                move_interval = int(get_ai_config(difficulty)["move_interval"])
+                move_interval = int(get_ai_config(difficulty, state)["move_interval"])
             else:
                 move_interval = 1
             can_move = (
@@ -1757,7 +2277,10 @@ class DuelEngine(GamePlugin):
             effects["wide_shot_active"] = tick < effects.get("wide_shot_until", 0)
             effects["pierce_active"] = tick < effects.get("pierce_until", 0)
             effects["overdrive_active"] = tick < effects.get("overdrive_until", 0)
+            effects["phase_shift_active"] = tick < effects.get("phase_shift_until", 0)
             public["effects"] = effects
+            public["charging"] = bool(fighter.get("charging"))
+            public["charge_ticks"] = int(fighter.get("charge_ticks", 0))
             public["stored_powerup"] = fighter.get("stored_powerup")
             public["activating_powerup"] = fighter.get("activating_powerup", False)
             public["powerup_activation_ticks"] = fighter.get("powerup_activation_ticks", 0)
@@ -1779,6 +2302,10 @@ class DuelEngine(GamePlugin):
             "best_of": state["settings"].get("best_of", 5),
             "match_format": state["settings"].get("match_format", "best_of_5"),
             "mutator": state["settings"].get("mutator", "classic"),
+            "mutator_secondary": state["settings"].get("mutator_secondary", "none"),
+            "arena_theme": state["settings"].get("arena_theme", "classic"),
+            "training_drill": state["settings"].get("training_drill", "none"),
+            "tutorial_mode": bool(state["settings"].get("tutorial_mode")),
             "powerups_enabled": bool(state["settings"].get("powerups_enabled")),
             "effect_duration_ticks": int(state["settings"].get("effect_duration_ticks", 80)),
             "powerup_lifetime_ticks": int(state["settings"].get("powerup_lifetime_ticks", 100)),
@@ -1791,13 +2318,23 @@ class DuelEngine(GamePlugin):
             "playable_y_max": state.get("playable_y_max", state["grid_height"] - 1),
             "shrinking_arena": bool(state["settings"].get("shrinking_arena")),
             "shrink_start_tick": int(state["settings"].get("shrink_start_tick", 240)),
-            "shrink_interval_ticks": int(state["settings"].get("shrink_interval_ticks", 80)),
+            "shrink_interval_ticks": self._effective_shrink_interval(state),
+            "layout_seed": state["settings"].get("layout_seed"),
+            "fog": bool(state["settings"].get("fog")),
             "hazard_damage": int(state["settings"].get("hazard_damage", 1)),
+            "hazard_damage_interval_ticks": int(
+                state["settings"].get("hazard_damage_interval_ticks", 20)
+            ),
             "fighter_height": self._fighter_height(state),
             "obstacles": state.get("obstacles", []),
             "fighters": fighters,
             "bullets": state["bullets"],
             "powerup": state.get("powerup"),
+            "decoys": state.get("decoys", []),
+            "event_log": state.get("event_log", []),
+            "round_stats": state.get("round_stats", {}),
+            "match_stats": state.get("match_stats", {}),
+            "powerup_bans": state.get("powerup_bans", {}),
             "players": state["players"],
             "winner": state.get("winner"),
             "win_reason": state.get("win_reason"),

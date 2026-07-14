@@ -231,6 +231,7 @@ function backToLobby() {
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"
+      @lobby="backToLobby"
     />
 
     <TetrisBoard

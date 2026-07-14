@@ -399,3 +399,20 @@ def test_easy_ai_makes_more_mistakes(monkeypatch) -> None:
 
     move, *_ = choose_ai_actions(state, "ai", ai, "easy")
     assert move in ("up", "down", "stop")
+
+
+def test_ai_settings_override_move_and_reaction_intervals() -> None:
+    from app.games.duel.ai import get_ai_config
+
+    state = make_state()
+    state["settings"]["ai_move_interval_ticks"] = 4
+    state["settings"]["ai_reaction_interval_ticks"] = 3
+    cfg = get_ai_config("hard", state)
+    assert cfg["move_interval"] == 4
+    assert cfg["reaction_interval"] == 3
+
+
+def test_ai_considers_phase_shift_offensive_buff() -> None:
+    from app.games.duel.ai import OFFENSIVE_BUFF_TYPES
+
+    assert "phase_shift" in OFFENSIVE_BUFF_TYPES

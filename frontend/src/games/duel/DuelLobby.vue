@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Room } from '@/types'
+import PowerupEncyclopedia from './PowerupEncyclopedia.vue'
+import { ARENA_THEMES } from './themes'
+import { getDailyChallenge } from './dailyChallenge'
+import { POWERUP_LABELS } from './duelRenderer'
 
 defineProps<{
   room: Room
@@ -16,13 +20,23 @@ const soloPractice = defineModel<boolean>('soloPractice', { required: true })
 const tickMs = defineModel<number>('tickMs', { required: true })
 const matchFormat = defineModel<string>('matchFormat', { required: true })
 const mutator = defineModel<string>('mutator', { required: true })
+const mutatorSecondary = defineModel<string>('mutatorSecondary', { required: true })
 const aiDifficulty = defineModel<string>('aiDifficulty', { required: true })
+const aiPersonality = defineModel<string>('aiPersonality', { required: true })
 const obstacleCount = defineModel<number>('obstacleCount', { required: true })
+const quickDuelLoadout = defineModel<string>('quickDuelLoadout', { required: true })
+const arenaTheme = defineModel<string>('arenaTheme', { required: true })
+const trainingDrill = defineModel<string>('trainingDrill', { required: true })
+const obstacleRotation = defineModel<boolean>('obstacleRotation', { required: true })
+const tutorialMode = defineModel<boolean>('tutorialMode', { required: true })
 
 const emit = defineEmits<{
   addAi: []
   remove: [id: string]
+  applyDaily: []
 }>()
+
+const daily = computed(() => getDailyChallenge())
 
 const speedOptions = [
   { label: 'Fast', value: 50 },
@@ -35,6 +49,7 @@ const matchFormatOptions = [
   { label: 'Quick duel (1 hit)', value: 'quick_duel' },
   { label: 'Best of 3', value: 'best_of_3' },
   { label: 'Best of 5', value: 'best_of_5' },
+  { label: 'Best of 7 (marathon)', value: 'best_of_7' },
 ]
 
 const mutatorOptions = [
@@ -45,13 +60,40 @@ const mutatorOptions = [
   { label: 'Fog', value: 'fog', hint: 'Imprecise enemy position' },
 ]
 
+const secondaryOptions = [
+  { label: 'None', value: 'none' },
+  { label: 'Fog overlay', value: 'fog' },
+  { label: 'Chaos boost', value: 'chaos' },
+]
+
 const difficultyOptions = [
   { label: 'Easy', value: 'easy', hint: 'Slower reactions, more mistakes' },
   { label: 'Medium', value: 'medium', hint: 'Balanced opponent' },
   { label: 'Hard', value: 'hard', hint: 'Fast dodges and charge shots' },
+  { label: 'Pro', value: 'pro', hint: 'Combos, center-row focus, prediction' },
+]
+
+const personalityOptions = [
+  { label: 'Balanced', value: 'balanced' },
+  { label: 'Aggressive', value: 'aggressive' },
+  { label: 'Turtle', value: 'turtle' },
+  { label: 'Trickster', value: 'trickster' },
+]
+
+const drillOptions = [
+  { label: 'None', value: 'none' },
+  { label: 'Dodge only', value: 'dodge_only' },
+  { label: 'Aim trainer', value: 'aim_trainer' },
+  { label: 'Power-up sandbox', value: 'powerup_sandbox' },
+]
+
+const loadoutOptions = [
+  { label: 'None', value: 'none' },
+  ...Object.entries(POWERUP_LABELS).map(([value, label]) => ({ label, value })),
 ]
 
 const obstacleOptions = [0, 1, 2, 3, 4, 5, 6]
+const themeOptions = Object.values(ARENA_THEMES)
 
 const showObstacleSetting = computed(
   () => matchFormat.value !== 'quick_duel' && mutator.value !== 'bounce_house',
@@ -60,10 +102,23 @@ const showObstacleSetting = computed(
 
 <template>
   <div class="duel-lobby">
+    <div v-if="isHost" class="daily-banner card">
+      <div>
+        <strong>{{ daily.label }}</strong>
+        <p class="daily-meta">{{ daily.dateKey }} · {{ daily.matchFormat.replace(/_/g, ' ') }} · {{ daily.obstacleCount }} cover</p>
+      </div>
+      <button type="button" class="btn-secondary" @click="emit('applyDaily')">Use daily</button>
+    </div>
+
     <div v-if="isHost" class="settings-block card">
       <label class="checkbox-label">
         <input v-model="soloPractice" type="checkbox" />
         Solo practice (play against AI)
+      </label>
+
+      <label class="checkbox-label">
+        <input v-model="tutorialMode" type="checkbox" />
+        Tutorial hints (first-round coaching)
       </label>
 
       <div class="setting-row">
@@ -80,6 +135,42 @@ const showObstacleSetting = computed(
         <select v-model="mutator" class="setting-select">
           <option v-for="opt in mutatorOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }} — {{ opt.hint }}
+          </option>
+        </select>
+      </div>
+
+      <div class="setting-row">
+        <span class="setting-label">Secondary mutator</span>
+        <select v-model="mutatorSecondary" class="setting-select">
+          <option v-for="opt in secondaryOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+      </div>
+
+      <div v-if="matchFormat === 'quick_duel'" class="setting-row">
+        <span class="setting-label">Quick duel loadout</span>
+        <select v-model="quickDuelLoadout" class="setting-select">
+          <option v-for="opt in loadoutOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+      </div>
+
+      <div class="setting-row">
+        <span class="setting-label">Training drill</span>
+        <select v-model="trainingDrill" class="setting-select">
+          <option v-for="opt in drillOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+      </div>
+
+      <div class="setting-row">
+        <span class="setting-label">Arena theme</span>
+        <select v-model="arenaTheme" class="setting-select">
+          <option v-for="opt in themeOptions" :key="opt.id" :value="opt.id">
+            {{ opt.label }}
           </option>
         </select>
       </div>
@@ -102,6 +193,15 @@ const showObstacleSetting = computed(
         </select>
       </div>
 
+      <div v-if="soloPractice || room.players.some((p) => p.is_ai)" class="setting-row">
+        <span class="setting-label">AI personality</span>
+        <select v-model="aiPersonality" class="setting-select">
+          <option v-for="opt in personalityOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+      </div>
+
       <div v-if="showObstacleSetting" class="setting-row">
         <span class="setting-label">Cover blocks</span>
         <select v-model.number="obstacleCount" class="setting-select">
@@ -110,7 +210,14 @@ const showObstacleSetting = computed(
           </option>
         </select>
       </div>
+
+      <label v-if="showObstacleSetting" class="checkbox-label">
+        <input v-model="obstacleRotation" type="checkbox" />
+        Drifting cover (slow obstacle rotation)
+      </label>
     </div>
+
+    <PowerupEncyclopedia />
 
     <div v-if="soloPractice" class="solo-notice card">
       <p>
@@ -173,6 +280,19 @@ const showObstacleSetting = computed(
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.daily-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.daily-meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .settings-block {

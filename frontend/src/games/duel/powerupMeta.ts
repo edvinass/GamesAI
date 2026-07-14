@@ -8,6 +8,7 @@ export const INSTANT_POWERUP_TYPES = new Set([
   'bomb',
   'cluster',
   'burst',
+  'decoy',
 ])
 
 export type PowerupTier = 'common' | 'rare' | 'epic'
@@ -29,6 +30,8 @@ export const POWERUP_TIERS: Record<string, PowerupTier> = {
   laser: 'epic',
   railgun: 'epic',
   cluster: 'epic',
+  phase_shift: 'epic',
+  decoy: 'rare',
 }
 
 export const POWERUP_TIER_LABELS: Record<PowerupTier, string> = {
@@ -49,6 +52,7 @@ export const POWERUP_EFFECT_DURATIONS: Record<string, number> = {
   homing: 80,
   mirror: 75,
   overdrive: 65,
+  phase_shift: 60,
 }
 
 /** Hold-to-activate time in ticks — keep in sync with backend POWERUP_CHANNEL_TICKS */
@@ -63,6 +67,7 @@ export const POWERUP_CHANNEL_TICKS: Record<string, number> = {
   freeze: 8,
   mirror: 8,
   overdrive: 7,
+  phase_shift: 7,
 }
 
 export const POWERUP_HINTS: Record<string, string> = {
@@ -82,6 +87,8 @@ export const POWERUP_HINTS: Record<string, string> = {
   bomb: 'Launches an explosive projectile',
   cluster: 'Fires three bombs in a vertical spread',
   burst: 'Unloads a six-shot rapid salvo',
+  phase_shift: 'Pass through cover (not bullets) — ~5s',
+  decoy: 'Spawns a fake silhouette to bait shots',
 }
 
 const BUFF_EFFECT_KEYS = [
@@ -94,6 +101,7 @@ const BUFF_EFFECT_KEYS = [
   ['homing_until', 'homing_active', 'homing', 'Homing'],
   ['mirror_until', 'mirror_active', 'mirror', 'Mirror'],
   ['overdrive_until', 'overdrive_active', 'overdrive', 'Overdrive'],
+  ['phase_shift_until', 'phase_shift_active', 'phase_shift', 'Phase Shift'],
   ['freeze_until', 'freeze_active', 'freeze', 'Frozen'],
 ] as const
 

@@ -193,7 +193,12 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                 })
 
             elif action_type == "start_game":
-                room, state = await service.start_game(room_id, pid)
+                settings_override = {}
+                if "layout_seed" in data and data["layout_seed"] is not None:
+                    settings_override["layout_seed"] = data["layout_seed"]
+                room, state = await service.start_game(
+                    room_id, pid, settings_override=settings_override or None
+                )
                 await manager.broadcast(str(room_id), {
                     "type": "game_started",
                     "room": room_to_dict(room),

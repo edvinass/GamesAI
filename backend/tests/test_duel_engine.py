@@ -44,7 +44,7 @@ def test_lobby_validation(engine: DuelEngine) -> None:
 
 def test_initial_state_spawns_on_sides(engine: DuelEngine) -> None:
     players = make_players(2)
-    game_state = engine.create_initial_state(players, {})
+    game_state = engine.create_initial_state(players, {"match_format": "quick_duel"})
     fighters = game_state["fighters"]
     assert len(fighters) == 2
     left = fighters["p0"]
@@ -52,7 +52,7 @@ def test_initial_state_spawns_on_sides(engine: DuelEngine) -> None:
     assert left["side"] == "left"
     assert right["side"] == "right"
     assert left["x"] < right["x"]
-    assert left["hp"] == 3
+    assert left["hp"] == 1
     assert game_state["phase"] == "countdown"
     assert game_state["round_scores"] == {"p0": 0, "p1": 0}
 
@@ -171,6 +171,7 @@ def test_center_hit_deals_extra_damage(engine: DuelEngine, state: dict) -> None:
 
 
 def test_elimination_ends_round(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["powerup_draft_enabled"] = False
     state["obstacles"] = []
     state["fighters"]["p1"]["hp"] = 1
     state["fighters"]["p1"]["y"] = 5
@@ -680,6 +681,7 @@ def test_railgun_pierces_obstacle(engine: DuelEngine, state: dict) -> None:
 def test_hazard_damage_applies_in_red_zone(engine: DuelEngine, state: dict) -> None:
     state["settings"]["shrinking_arena"] = True
     state["settings"]["hazard_damage"] = 1
+    state["settings"]["hazard_damage_interval_ticks"] = 1
     state["playable_y_min"] = 2
     state["playable_y_max"] = state["grid_height"] - 3
     fighter = state["fighters"]["p0"]
@@ -692,13 +694,34 @@ def test_hazard_damage_applies_in_red_zone(engine: DuelEngine, state: dict) -> N
     assert any(e["type"] == "hazard_damage" for e in events)
 
 
-def test_hazard_damage_on_shrink_tick_without_interval_alignment(engine: DuelEngine, state: dict) -> None:
+def test_hazard_damage_respects_interval(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["shrinking_arena"] = True
+    state["settings"]["hazard_damage"] = 1
+    state["settings"]["hazard_damage_interval_ticks"] = 20
+    state["playable_y_min"] = 2
+    state["playable_y_max"] = state["grid_height"] - 3
+    fighter = state["fighters"]["p0"]
+    fighter["y"] = 0
+    events: list[dict] = []
+
+    state["tick"] = 19
+    engine._apply_hazard_damage(state, events)
+    assert fighter["hp"] == state["fighters"]["p0"]["max_hp"]
+    assert not any(e["type"] == "hazard_damage" for e in events)
+
+    state["tick"] = 20
+    engine._apply_hazard_damage(state, events)
+    assert fighter["hp"] < state["fighters"]["p0"]["max_hp"]
+    assert any(e["type"] == "hazard_damage" for e in events)
+
+
+def test_hazard_damage_on_aligned_interval_tick(engine: DuelEngine, state: dict) -> None:
     state["settings"]["shrinking_arena"] = True
     state["settings"]["hazard_damage"] = 1
     state["settings"]["hazard_damage_interval_ticks"] = 20
     state["settings"]["shrink_start_tick"] = 250
     state["settings"]["shrink_interval_ticks"] = 80
-    state["tick"] = 329
+    state["tick"] = 320
     state["playable_y_min"] = 1
     state["playable_y_max"] = state["grid_height"] - 2
     fighter = state["fighters"]["p0"]
@@ -714,6 +737,7 @@ def test_hazard_damage_on_shrink_tick_without_interval_alignment(engine: DuelEng
 def test_hazard_damage_blocked_by_shield(engine: DuelEngine, state: dict) -> None:
     state["settings"]["shrinking_arena"] = True
     state["settings"]["hazard_damage"] = 1
+    state["settings"]["hazard_damage_interval_ticks"] = 1
     state["playable_y_min"] = 2
     state["playable_y_max"] = state["grid_height"] - 3
     fighter = state["fighters"]["p0"]
@@ -746,3 +770,56 @@ def test_ai_difficulty_attached_to_ai_players(engine: DuelEngine) -> None:
     game_state = engine.create_initial_state(players, {"ai_difficulty": "hard"})
     ai_player = next(p for p in game_state["players"] if p["id"] == "ai")
     assert ai_player["ai_difficulty"] == "hard"
+
+
+def test_layout_seed_produces_deterministic_obstacles(engine: DuelEngine) -> None:
+    players = make_players(2)
+    settings = {"layout_seed": 424242, "obstacles_enabled": True, "obstacle_count": 3}
+    a = engine.create_initial_state(players, settings)
+    b = engine.create_initial_state(players, settings)
+    assert a["obstacles"] == b["obstacles"]
+    assert a["settings"]["layout_seed"] == 424242
+
+
+def test_effective_shrink_interval_halves_after_sudden_death(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["shrinking_arena"] = True
+    state["settings"]["shrink_interval_ticks"] = 80
+    state["settings"]["sudden_death_after_round"] = 3
+    state["round"] = 3
+    assert engine._effective_shrink_interval(state) == 40
+
+    public = engine.get_public_state(state, state["players"][0])
+    assert public["shrink_interval_ticks"] == 40
+
+
+def test_round_end_enters_powerup_draft(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["powerup_draft_enabled"] = True
+    state["settings"]["best_of"] = 5
+    state["settings"]["match_format"] = "best_of_5"
+    events: list[dict] = []
+    engine._end_round(state, "p0", events)
+    assert state["phase"] == "powerup_draft"
+    assert state.get("pending_round_reset") is True
+    assert state["round"] == 2
+
+
+def test_decoy_spawn_uses_seeded_y(engine: DuelEngine, state: dict) -> None:
+    import copy
+
+    state["settings"]["layout_seed"] = 999
+    state["tick"] = 50
+    a = copy.deepcopy(state)
+    b = copy.deepcopy(state)
+    for s in (a, b):
+        fighter = s["fighters"]["p0"]
+        fighter["stored_powerup"] = "decoy"
+        engine._activate_stored_powerup(s, fighter, "p0", [])
+
+    assert a["decoys"][0]["y"] == b["decoys"][0]["y"]
+
+
+def test_aim_trainer_blocks_human_movement(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["training_drill"] = "aim_trainer"
+    player = state["players"][0]
+    state, _ = engine.apply_action(state, {"type": "set_move", "direction": "up"}, player)
+    assert state["fighters"][player["id"]]["move_direction"] != "up"

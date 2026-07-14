@@ -140,10 +140,16 @@ export function playPowerupCollectSound(): void {
   tone(1040, 0.1, { type: 'triangle', volume: 0.08 })
 }
 
-export function playPowerupActivateSound(): void {
-  tone(330, 0.08, { type: 'sawtooth', volume: 0.1 })
-  tone(660, 0.12, { type: 'square', volume: 0.12 })
-  tone(990, 0.16, { type: 'triangle', volume: 0.08 })
+export function playPowerupActivateSound(tier: 'common' | 'rare' | 'epic' = 'common'): void {
+  const scale = tier === 'epic' ? 1.35 : tier === 'rare' ? 1.1 : 1
+  tone(330 * scale, 0.08, { type: 'sawtooth', volume: 0.1 })
+  tone(660 * scale, tier === 'epic' ? 0.18 : 0.12, { type: 'square', volume: 0.12 })
+  if (tier === 'epic') {
+    tone(990, 0.22, { type: 'triangle', volume: 0.1 })
+    tone(1320, 0.16, { type: 'sine', volume: 0.08 })
+  } else if (tier === 'rare') {
+    tone(990, 0.16, { type: 'triangle', volume: 0.08 })
+  }
 }
 
 export function playArenaShrinkSound(): void {

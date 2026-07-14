@@ -1,4 +1,6 @@
 import type { DuelBullet, DuelFighter, DuelGameState, DuelLastHit, DuelObstacle, DuelPowerup } from '@/types'
+import { resolveTheme, type ArenaTheme } from './themes'
+import { isColorblindMode, isHitStopEnabled, loadShakeIntensity } from './visualPrefs'
 
 interface Particle {
   x: number
@@ -68,6 +70,8 @@ export const POWERUP_COLORS: Record<string, string> = {
   bomb: '#f59e0b',
   cluster: '#ef4444',
   burst: '#60a5fa',
+  phase_shift: '#818cf8',
+  decoy: '#cbd5e1',
 }
 
 export const POWERUP_ICONS: Record<string, string> = {
@@ -87,6 +91,8 @@ export const POWERUP_ICONS: Record<string, string> = {
   bomb: '💣',
   cluster: '✸',
   burst: '⋯',
+  phase_shift: '◇',
+  decoy: '◌',
 }
 
 export const POWERUP_LABELS: Record<string, string> = {
@@ -106,6 +112,8 @@ export const POWERUP_LABELS: Record<string, string> = {
   bomb: 'Bomb',
   cluster: 'Cluster',
   burst: 'Burst',
+  phase_shift: 'Phase Shift',
+  decoy: 'Decoy',
 }
 
 export const POWERUP_ACTIVATION_TICKS = 8
@@ -154,6 +162,7 @@ export class DuelRenderer {
   private lastPlayableMax = 999
   private hazardPulseUntil = 0
   private arenaBoundsInitialized = false
+  private theme: ArenaTheme = resolveTheme('classic')
 
   reset() {
     this.particles = []
@@ -217,12 +226,21 @@ export class DuelRenderer {
     this.spawnHitBurst(cx, cy, fighter.color, hit.crit, Boolean(hit.blocked))
 
     if (hit.player_id === viewerId) {
-      this.shakeUntil = Date.now() + 280
-      this.shakeIntensity = hit.blocked ? 4 : 9
+      const shakeScale = loadShakeIntensity()
+      if (shakeScale > 0) {
+        this.shakeUntil = Date.now() + 280
+        this.shakeIntensity = (hit.blocked ? 4 : 9) * shakeScale
+      }
       this.hitFlashUntil = Date.now() + (hit.blocked ? 120 : 220)
+      if (hit.crit && isHitStopEnabled()) {
+        /* brief hit-stop handled via shake timing */
+      }
     } else if (hit.damage > 0) {
-      this.shakeUntil = Date.now() + 140
-      this.shakeIntensity = 5
+      const shakeScale = loadShakeIntensity()
+      if (shakeScale > 0) {
+        this.shakeUntil = Date.now() + 140
+        this.shakeIntensity = 5 * shakeScale
+      }
     }
   }
 
@@ -559,6 +577,7 @@ export class DuelRenderer {
       this.lastPhase = state.phase
     }
 
+    this.theme = resolveTheme(state.arena_theme)
     const {
       grid_width,
       grid_height,
@@ -598,6 +617,7 @@ export class DuelRenderer {
     this.drawArena(ctx, offsetX, offsetY, boardW, boardH, grid_width, grid_height, cell, playable_y_min, playable_y_max, now)
     this.drawSpawnZones(ctx, offsetX, offsetY, boardW, boardH, cell, now)
     this.drawObstacles(ctx, offsetX, offsetY, cell, obstacles, now)
+    this.drawDecoys(ctx, offsetX, offsetY, cell, grid_width, state.decoys ?? [], now)
     this.drawPowerup(
       ctx,
       offsetX,
@@ -610,7 +630,7 @@ export class DuelRenderer {
     )
     this.drawArenaPulses(ctx, now)
     this.drawBullets(ctx, offsetX, offsetY, cell, bullets, now)
-    this.drawFighters(ctx, offsetX, offsetY, boardW, cell, barCount, fighters, viewerId, dangerRows, now)
+    this.drawFighters(ctx, offsetX, offsetY, boardW, cell, barCount, fighters, viewerId, dangerRows, now, state)
     this.drawBeamFlashes(ctx, now)
     this.drawMuzzleFlashes(ctx, cell, now)
     this.drawParticles(ctx)
@@ -622,8 +642,8 @@ export class DuelRenderer {
 
   private drawBackdrop(ctx: CanvasRenderingContext2D, width: number, height: number, now: number) {
     const grad = ctx.createRadialGradient(width * 0.5, height * 0.45, 0, width * 0.5, height * 0.5, Math.max(width, height) * 0.75)
-    grad.addColorStop(0, '#121a2b')
-    grad.addColorStop(1, '#070b12')
+    grad.addColorStop(0, this.theme.backdrop[0])
+    grad.addColorStop(1, this.theme.backdrop[1])
     ctx.fillStyle = grad
     ctx.fillRect(0, 0, width, height)
 
@@ -1030,7 +1050,20 @@ export class DuelRenderer {
       const isBomb = bullet.kind === 'bomb'
       const charged = !isBomb && (bullet.damage ?? 1) >= 2
       const homing = bullet.homing
-      const color = isBomb ? '#f59e0b' : homing ? '#22c55e' : charged ? '#fb7185' : '#fbbf24'
+      const colorblind = isColorblindMode()
+      const color = isBomb
+        ? '#f59e0b'
+        : homing
+          ? colorblind
+            ? '#38bdf8'
+            : '#22c55e'
+          : charged
+            ? colorblind
+              ? '#f472b6'
+              : '#fb7185'
+            : colorblind
+              ? '#fde047'
+              : '#fbbf24'
       const dir = bullet.vx >= 0 ? 1 : -1
       const speed = Math.abs(bullet.vx) || 1
 
@@ -1059,7 +1092,7 @@ export class DuelRenderer {
         const tx = cx - dir * i * cell * 0.18
         const ty = cy - (bullet.vy ?? 0) * i * cell * 0.15
         ctx.strokeStyle = rgba(color, alpha)
-        ctx.lineWidth = Math.max(1, cell * (charged ? 0.12 : 0.08))
+        ctx.lineWidth = Math.max(1, cell * (charged || homing ? 0.16 : 0.08))
         ctx.beginPath()
         ctx.moveTo(tx - dir * cell * 0.22, ty)
         ctx.lineTo(tx + dir * cell * 0.22, ty)
@@ -1137,6 +1170,8 @@ export class DuelRenderer {
     isMe: boolean,
     moving: boolean,
     now: number,
+    state?: DuelGameState,
+    pid?: string,
   ) {
     const color = fighter.color
     const facingRight = fighter.side === 'left'
@@ -1248,6 +1283,51 @@ export class DuelRenderer {
       ctx.arc(nozzleX, cy, cell * 0.07, 0, Math.PI * 2)
       ctx.fill()
     }
+
+    const fogActive =
+      Boolean(state?.fog) ||
+      state?.mutator === 'fog' ||
+      state?.mutator_secondary === 'fog'
+    const showCharge =
+      fighter.charging &&
+      (isMe || (!fogActive && pid !== undefined))
+    if (showCharge && state) {
+      const maxTicks = state.charge_max_ticks ?? 15
+      const ticks = fighter.charge_ticks ?? 0
+      const progress = Math.min(1, ticks / maxTicks)
+      ctx.strokeStyle = rgba('#f472b6', 0.85)
+      ctx.lineWidth = Math.max(2, cell * 0.08)
+      ctx.beginPath()
+      ctx.arc(cx, cy, cell * barCount * 0.55, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2)
+      ctx.stroke()
+    }
+  }
+
+  private drawDecoys(
+    ctx: CanvasRenderingContext2D,
+    offsetX: number,
+    offsetY: number,
+    cell: number,
+    gridWidth: number,
+    decoys: Array<{ player_id: string; y: number; side?: string }>,
+    now: number,
+  ) {
+    for (const decoy of decoys) {
+      const x =
+        decoy.side === 'right'
+          ? offsetX + (gridWidth - 2) * cell
+          : offsetX + cell
+      const top = offsetY + decoy.y * cell
+      const height = cell * 3
+      const pulse = 0.25 + Math.sin(now * 0.01) * 0.15
+      ctx.globalAlpha = pulse
+      ctx.strokeStyle = rgba('#cbd5e1', 0.8)
+      ctx.lineWidth = Math.max(1, cell * 0.08)
+      ctx.setLineDash([5, 4])
+      ctx.strokeRect(x, top, cell, height)
+      ctx.setLineDash([])
+      ctx.globalAlpha = 1
+    }
   }
 
   private drawFighters(
@@ -1261,6 +1341,7 @@ export class DuelRenderer {
     viewerId: string,
     dangerRows: Set<number>,
     now: number,
+    state: DuelGameState,
   ) {
     for (const [pid, fighter] of Object.entries(fighters)) {
       const isMe = pid === viewerId
@@ -1297,6 +1378,8 @@ export class DuelRenderer {
         isMe,
         moving,
         now,
+        state,
+        pid,
       )
 
       if (fighter.effects?.shield_active) {

@@ -16,6 +16,7 @@ import {
 import {
   isSoundMuted,
   playArenaShrinkSound,
+  playHazardTickSound,
   playHitSound,
   playPowerupActivateSound,
   playPowerupCollectSound,
@@ -25,6 +26,10 @@ import {
   setSoundMuted,
   unlockAudio,
 } from './sounds'
+import { loadKeybinds, matchesBinding } from './keybinds'
+import { chargeTierForTicks } from './chargeTiers'
+import { loadMilestones, recordMatchMilestones } from './stats'
+import { resolveTheme } from './themes'
 
 const props = defineProps<{
   gameState: DuelGameState
@@ -34,6 +39,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   action: [data: Record<string, unknown>]
+  lobby: []
 }>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -127,22 +133,43 @@ const coachHint = ref<string | null>(null)
 const lastPlayableMin = ref(0)
 const lastPlayableMax = ref(999)
 const lastRoundPhase = ref('')
-
-const opponent = computed(() =>
-  props.gameState.players.find((p) => p.id !== props.playerId),
+const keybinds = ref(loadKeybinds())
+const predictedMoveDir = ref<'up' | 'down' | null>(null)
+const milestones = ref(loadMilestones())
+const matchPowerupActions = ref<string[]>([])
+const lastHazardSoundTick = ref(-1)
+const isDraftPhase = computed(() => props.gameState.phase === 'powerup_draft')
+const myBan = computed(() => props.gameState.powerup_bans?.[props.playerId] ?? null)
+const eventFeed = computed(() => (props.gameState.event_log ?? []).slice(-8).reverse())
+const roundRecapRows = computed(() =>
+  props.gameState.players.map((p) => ({
+    nickname: p.nickname,
+    stats: props.gameState.round_stats?.[p.id],
+  })),
 )
-const opponentFighter = computed(() =>
-  opponent.value ? props.gameState.fighters[opponent.value.id] : null,
+const chargeTier = computed(() =>
+  chargeTierForTicks(chargeTicks.value, props.gameState.mutator === 'sniper'),
 )
+const draftPowerupOptions = computed(() => Object.keys(POWERUP_LABELS))
+const draftBanSummary = computed(() => {
+  const bans = props.gameState.powerup_bans ?? {}
+  return Object.entries(bans).map(([playerId, ptype]) => {
+    const player = props.gameState.players.find((p) => p.id === playerId)
+    return {
+      nickname: player?.nickname ?? 'Player',
+      label: POWERUP_LABELS[ptype] ?? ptype,
+    }
+  })
+})
+const canvasTheme = computed(() => resolveTheme(props.gameState.arena_theme))
 const incomingBulletCount = computed(() => {
-  const fighter = opponentFighter.value
-  if (!fighter) return 0
-  const fighterX = fighter.x
+  if (!myFighter.value?.alive) return 0
+  const myX = myFighter.value.x
   return props.gameState.bullets.filter((bullet) => {
-    if (bullet.owner_id === opponent.value?.id) return false
+    if (bullet.owner_id === props.playerId) return false
     return (
-      (fighter.side === 'left' && bullet.vx < 0 && bullet.x >= fighterX) ||
-      (fighter.side === 'right' && bullet.vx > 0 && bullet.x <= fighterX)
+      (myFighter.value!.side === 'left' && bullet.vx < 0 && bullet.x >= myX) ||
+      (myFighter.value!.side === 'right' && bullet.vx > 0 && bullet.x <= myX)
     )
   }).length
 })
@@ -178,6 +205,10 @@ function detectTouchControls() {
 }
 
 function updateCoachHint() {
+  if (!props.gameState.tutorial_mode) {
+    coachHint.value = null
+    return
+  }
   if (props.gameState.phase === 'countdown' && props.gameState.round === 1) {
     if (chargeEnabled.value && powerupsEnabled.value) {
       coachHint.value = 'Hold Space to charge shots · Hold E to activate power-ups'
@@ -229,9 +260,30 @@ function playGameSounds() {
         } else if (type === 'powerup_collected') {
           playPowerupCollectSound()
         } else if (type === 'powerup_activated') {
-          playPowerupActivateSound()
+          const ptype = action.powerup_type as string
+          matchPowerupActions.value.push(ptype)
+          playPowerupActivateSound(powerupTier(ptype))
         }
       }
+    }
+  }
+
+  if (
+    myFighter.value?.alive &&
+    props.gameState.shrinking_arena &&
+    props.gameState.phase === 'playing'
+  ) {
+    const inHazard =
+      myFighter.value.y < props.gameState.playable_y_min ||
+      myFighter.value.y + props.gameState.fighter_height - 1 > props.gameState.playable_y_max
+    const hazardInterval = props.gameState.hazard_damage_interval_ticks ?? 20
+    if (
+      inHazard &&
+      props.gameState.tick % hazardInterval === 0 &&
+      props.gameState.tick !== lastHazardSoundTick.value
+    ) {
+      lastHazardSoundTick.value = props.gameState.tick
+      playHazardTickSound()
     }
   }
 
@@ -313,11 +365,27 @@ function onVisibilityChange() {
   }
 }
 
-function startNewGame() {
-  emit('action', { type: 'start_game' })
+function startNewGame(sameSeed = false) {
+  const payload: Record<string, unknown> = { type: 'start_game' }
+  const seed =
+    props.room.settings?.layout_seed ??
+    (props.gameState as { layout_seed?: number }).layout_seed
+  if (sameSeed && seed != null) {
+    payload.layout_seed = seed
+  }
+  emit('action', payload)
+}
+
+function returnToLobby() {
+  emit('lobby')
+}
+
+function banPowerup(type: string) {
+  emit('action', { type: 'ban_powerup', powerup_type: type })
 }
 
 function sendMove(direction: 'up' | 'down' | 'stop') {
+  predictedMoveDir.value = direction === 'stop' ? null : direction
   emit('action', { type: 'set_move', direction })
 }
 
@@ -537,6 +605,30 @@ watch(powerupReady, (ready) => {
   }
 })
 
+watch(
+  () => props.gameState.phase,
+  (phase, prev) => {
+    if (phase === 'finished' && prev !== 'finished') {
+      milestones.value = recordMatchMilestones(
+        props.playerId,
+        props.gameState.match_stats,
+        matchPowerupActions.value,
+      )
+      matchPowerupActions.value = []
+    }
+    if (phase === 'countdown' && prev === 'finished') {
+      matchPowerupActions.value = []
+    }
+  },
+)
+
+watch(
+  () => myFighter.value?.y,
+  () => {
+    predictedMoveDir.value = null
+  },
+)
+
 function startCharge() {
   if (!canControl.value || !chargeEnabled.value) return
   charging.value = true
@@ -568,7 +660,7 @@ function quickShoot() {
 function onKeyDown(e: KeyboardEvent) {
   if (!canControl.value) return
 
-  if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+  if (matchesBinding(e.code, keybinds.value.moveUp)) {
     e.preventDefault()
     if (heldMove.value !== 'up') {
       heldMove.value = 'up'
@@ -577,7 +669,7 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
-  if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+  if (matchesBinding(e.code, keybinds.value.moveDown)) {
     e.preventDefault()
     if (heldMove.value !== 'down') {
       heldMove.value = 'down'
@@ -586,7 +678,7 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
-  if (e.key === ' ') {
+  if (matchesBinding(e.code, keybinds.value.fire)) {
     e.preventDefault()
     if (chargeEnabled.value) {
       if (!charging.value) startCharge()
@@ -597,7 +689,7 @@ function onKeyDown(e: KeyboardEvent) {
   }
 
   if (
-    (e.key === 'e' || e.key === 'E') &&
+    matchesBinding(e.code, keybinds.value.powerup) &&
     storedPowerup.value &&
     powerupsEnabled.value
   ) {
@@ -614,31 +706,25 @@ function onKeyDown(e: KeyboardEvent) {
 function onKeyUp(e: KeyboardEvent) {
   if (!canControl.value) return
 
-  if (
-    (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') &&
-    heldMove.value === 'up'
-  ) {
+  if (matchesBinding(e.code, keybinds.value.moveUp) && heldMove.value === 'up') {
     heldMove.value = null
     sendMove('stop')
     return
   }
 
-  if (
-    (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') &&
-    heldMove.value === 'down'
-  ) {
+  if (matchesBinding(e.code, keybinds.value.moveDown) && heldMove.value === 'down') {
     heldMove.value = null
     sendMove('stop')
     return
   }
 
-  if (e.key === ' ') {
+  if (matchesBinding(e.code, keybinds.value.fire)) {
     e.preventDefault()
     if (charging.value) releaseCharge()
     return
   }
 
-  if ((e.key === 'e' || e.key === 'E') && activatingPowerup.value && !isInstantStored.value) {
+  if (matchesBinding(e.code, keybinds.value.powerup) && activatingPowerup.value && !isInstantStored.value) {
     e.preventDefault()
     releasePowerupActivation()
   }
@@ -667,7 +753,28 @@ function draw(now: number) {
   canvas.style.height = `${displayH}px`
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  renderer.draw(ctx, props.gameState, props.playerId, displayW, displayH, now, dangerRows.value)
+  renderer.draw(ctx, renderStateForFrame(), props.playerId, displayW, displayH, now, dangerRows.value)
+}
+
+function renderStateForFrame(): DuelGameState {
+  const base = props.gameState
+  const fighter = base.fighters[props.playerId]
+  if (!fighter || !predictedMoveDir.value || !canControl.value) return base
+  const minY = base.playable_y_min
+  const maxY = Math.min(
+    base.grid_height - base.fighter_height,
+    base.playable_y_max - base.fighter_height + 1,
+  )
+  const delta = predictedMoveDir.value === 'up' ? -1 : 1
+  const predictedY = Math.max(minY, Math.min(maxY, fighter.y + delta))
+  if (predictedY === fighter.y) return base
+  return {
+    ...base,
+    fighters: {
+      ...base.fighters,
+      [props.playerId]: { ...fighter, y: predictedY, display_y: predictedY },
+    },
+  }
 }
 
 let resizeObserver: ResizeObserver | null = null
@@ -729,7 +836,7 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <div ref="canvasWrapRef" class="canvas-wrap">
+    <div ref="canvasWrapRef" class="canvas-wrap" :style="{ background: canvasTheme.canvasCss }">
       <canvas ref="canvasRef" class="game-canvas" />
 
       <Transition name="powerup-notice">
@@ -830,7 +937,9 @@ onUnmounted(() => {
           :class="{ 'charge-full': chargeTicks >= 11 }"
           :style="{ width: `${(chargeTicks / chargeMaxTicks) * 100}%` }"
         />
-        <span class="charge-label">{{ chargeTicks >= 11 ? 'MAX POWER' : 'Charging…' }}</span>
+        <span class="charge-label">
+          {{ chargeTicks >= 11 ? 'MAX POWER' : `${chargeTier.label} · ${chargeTier.hint}` }}
+        </span>
       </div>
 
       <div v-if="activatingPowerup && canControl && storedPowerup" class="charge-bar powerup-bar">
@@ -854,6 +963,36 @@ onUnmounted(() => {
         </span>
       </div>
 
+      <div v-if="eventFeed.length" class="event-feed" aria-live="polite">
+        <div v-for="(entry, idx) in eventFeed" :key="`${entry.tick}-${idx}`" :class="['feed-line', entry.kind]">
+          {{ entry.message }}
+        </div>
+      </div>
+
+      <div v-if="isDraftPhase && !myBan" class="overlay draft">
+        <span class="overlay-label">Ban a power-up</span>
+        <div class="draft-grid">
+          <button
+            v-for="ptype in draftPowerupOptions"
+            :key="ptype"
+            type="button"
+            class="btn-secondary draft-btn"
+            @click="banPowerup(ptype)"
+          >
+            {{ POWERUP_LABELS[ptype] ?? ptype }}
+          </button>
+        </div>
+      </div>
+
+      <div v-else-if="isDraftPhase" class="overlay draft">
+        <span class="overlay-hint">Waiting for opponent to ban…</span>
+        <ul v-if="draftBanSummary.length" class="draft-bans">
+          <li v-for="ban in draftBanSummary" :key="ban.nickname">
+            {{ ban.nickname }} banned {{ ban.label }}
+          </li>
+        </ul>
+      </div>
+
       <div v-if="gameState.phase === 'countdown'" class="overlay countdown">
         <span class="overlay-value pulse">{{ countdownRemaining ?? '…' }}</span>
         <span class="overlay-label">Get ready!</span>
@@ -863,32 +1002,50 @@ onUnmounted(() => {
         <span class="overlay-label slide-in">Round {{ gameState.round - 1 }} over</span>
         <span v-if="roundWinnerName" class="overlay-value pop-in">{{ roundWinnerName }} wins the round!</span>
         <span v-else class="overlay-value pop-in">Draw — rematch!</span>
+        <div v-if="roundRecapRows.length" class="round-recap">
+          <div v-for="row in roundRecapRows" :key="row.nickname" class="recap-row">
+            <strong>{{ row.nickname }}</strong>
+            <span v-if="row.stats">
+              {{ row.stats.damage_dealt }} dealt · {{ row.stats.damage_taken }} taken ·
+              {{ row.stats.powerups_used }} power-ups · {{ row.stats.hazard_ticks }} hazard ticks
+            </span>
+          </div>
+        </div>
         <span class="overlay-hint">Next round in {{ countdownRemaining ?? '…' }}</span>
       </div>
 
       <div v-else-if="isFinished" class="overlay finished">
         <span class="overlay-label slide-in">Match over</span>
         <span class="overlay-value winner-glow">{{ winnerName }} wins!</span>
-        <button v-if="isHost" type="button" class="btn-primary play-again-btn" @click="startNewGame">
-          Play Again
-        </button>
-        <p v-else class="overlay-hint">Waiting for host to start a new match…</p>
+        <div class="milestones">
+          <p>Career: {{ milestones.matchesPlayed }} matches · {{ milestones.perfectRounds }} perfect rounds · {{ milestones.critsLanded }} crits</p>
+        </div>
+        <div v-if="isHost" class="finished-actions">
+          <button type="button" class="btn-primary play-again-btn" @click="startNewGame(false)">
+            Rematch
+          </button>
+          <button type="button" class="btn-secondary play-again-btn" @click="startNewGame(true)">
+            Same seed rematch
+          </button>
+          <button type="button" class="btn-secondary play-again-btn" @click="returnToLobby">
+            Back to lobby
+          </button>
+        </div>
+        <p v-else class="overlay-hint">Waiting for host…</p>
       </div>
 
       <div v-else-if="!isAlive && gameState.phase === 'playing'" class="overlay eliminated">
         <span class="overlay-label">You were eliminated!</span>
-        <div v-if="opponentFighter" class="spectator-stats">
-          <p>
-            <strong>{{ opponent?.nickname }}</strong>
-            · {{ opponentFighter.hp }}/{{ opponentFighter.max_hp }} HP
+        <div class="spectator-stats spectator-dual">
+          <p v-for="row in playerRows" :key="row.id">
+            <strong>{{ row.nickname }}</strong>
+            · {{ row.fighter?.hp ?? 0 }}/{{ row.fighter?.max_hp ?? 3 }} HP
+            · {{ row.roundWins }} round wins
           </p>
           <p>
-            Arena height {{ playableHeight }} rows
-            <span v-if="gameState.shrinking_arena && shrinkTicksUntil !== null">
-              · shrink in {{ formatPowerupSeconds(shrinkTicksUntil, tickMs) }}
-            </span>
+            Arena {{ playableHeight }} rows · {{ gameState.bullets.length }} bullets
+            <span v-if="incomingBulletCount"> · {{ incomingBulletCount }} incoming</span>
           </p>
-          <p>{{ gameState.bullets.length }} bullets in flight · {{ incomingBulletCount }} threatening {{ opponent?.nickname }}</p>
         </div>
         <span class="overlay-hint">Watch the round continue…</span>
       </div>
@@ -1089,6 +1246,56 @@ onUnmounted(() => {
   font-size: 0.85rem;
   line-height: 1.5;
   color: #cbd5e1;
+}
+
+.event-feed {
+  position: absolute;
+  left: 0.65rem;
+  bottom: 0.65rem;
+  z-index: 3;
+  max-width: min(48%, 320px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  pointer-events: none;
+}
+
+.feed-line {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #cbd5e1;
+}
+
+.feed-line.success { color: #86efac; }
+.feed-line.warn { color: #fca5a5; }
+
+.draft-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+  max-width: 520px;
+}
+
+.round-recap {
+  margin: 0.75rem 0;
+  text-align: left;
+  font-size: 0.82rem;
+}
+
+.finished-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.milestones {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  margin: 0.5rem 0;
 }
 
 .touch-controls {
