@@ -89,7 +89,7 @@ def test_shoot_spawns_bullet(engine: DuelEngine, state: dict) -> None:
 
     state, _ = engine.tick(state)
     assert len(state["bullets"]) == 1
-    assert state["bullets"][0]["vx"] == 1
+    assert state["bullets"][0]["vx"] == 2
     assert state["bullets"][0]["owner_id"] == "p0"
 
 

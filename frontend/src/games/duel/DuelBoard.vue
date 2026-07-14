@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { Room, DuelGameState } from '@/types'
+import { DuelRenderer } from './duelRenderer'
 
 const props = defineProps<{
   gameState: DuelGameState
@@ -14,6 +15,7 @@ const emit = defineEmits<{
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const canvasWrapRef = ref<HTMLElement | null>(null)
+const renderer = new DuelRenderer()
 
 const myFighter = computed(() => props.gameState.fighters[props.playerId])
 const isAlive = computed(() => myFighter.value?.alive ?? false)
@@ -65,8 +67,15 @@ const heldMove = ref<'up' | 'down' | null>(null)
 const charging = ref(false)
 const chargeTicks = ref(0)
 const localChargeInterval = ref<ReturnType<typeof setInterval> | null>(null)
-const hitFlashUntil = ref(0)
-const shakeUntil = ref(0)
+const hpPulseId = ref<string | null>(null)
+
+const MUTATOR_LABELS: Record<string, string> = {
+  classic: 'Classic',
+  chaos: 'Chaos',
+  sniper: 'Sniper',
+  bounce_house: 'Bounce House',
+  fog: 'Fog',
+}
 
 const dangerRows = computed(() => {
   const rows = new Set<number>()
@@ -79,24 +88,12 @@ const dangerRows = computed(() => {
       (myFighter.value.side === 'right' && bullet.vx > 0 && bullet.x <= myX)
     if (!headingToward) continue
     const speed = Math.abs(bullet.vx) || 1
-    const ticks = Math.abs(bullet.x - myX) / speed
-    if (ticks <= 6) rows.add(bullet.y)
+    const approxX = bullet.x + speed * 0.85
+    const ticks = Math.abs(approxX - myX) / speed
+    if (ticks <= 8) rows.add(bullet.y)
   }
   return rows
 })
-
-watch(
-  () => props.gameState.last_hit,
-  (hit) => {
-    if (!hit) return
-    if (hit.player_id === props.playerId) {
-      hitFlashUntil.value = Date.now() + 250
-      shakeUntil.value = Date.now() + 200
-    } else if (hit.damage > 0) {
-      shakeUntil.value = Date.now() + 120
-    }
-  },
-)
 
 function startNewGame() {
   emit('action', { type: 'start_game' })
@@ -190,53 +187,21 @@ function onKeyUp(e: KeyboardEvent) {
   }
 }
 
-const POWERUP_COLORS: Record<string, string> = {
-  rapid_fire: '#f97316',
-  shield: '#38bdf8',
-  wide_shot: '#a855f7',
-  ghost: '#94a3b8',
-}
-
-const MUTATOR_LABELS: Record<string, string> = {
-  classic: 'Classic',
-  chaos: 'Chaos',
-  sniper: 'Sniper',
-  bounce_house: 'Bounce House',
-  fog: 'Fog',
-}
-
-function fighterDisplayY(pid: string, fighter: (typeof props.gameState.fighters)[string]) {
-  if (pid === props.playerId || fighter.display_y == null) return fighter.y
-  return fighter.display_y
-}
-
-function draw() {
+function draw(now: number) {
   const canvas = canvasRef.value
   const wrap = canvasWrapRef.value
   if (!canvas || !wrap) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const {
-    grid_width,
-    grid_height,
-    fighter_height,
-    fighters,
-    bullets,
-    obstacles,
-    powerup,
-    playable_y_min,
-    playable_y_max,
-  } = props.gameState
-  const barCount = fighter_height ?? 3
   const displayW = wrap.clientWidth
   const displayH = wrap.clientHeight
   if (displayW <= 0 || displayH <= 0) return
 
-  const shakeX =
-    Date.now() < shakeUntil.value ? (Math.random() - 0.5) * 6 : 0
-  const shakeY =
-    Date.now() < shakeUntil.value ? (Math.random() - 0.5) * 4 : 0
+  const hit = props.gameState.last_hit
+  if (hit?.player_id) {
+    hpPulseId.value = `${hit.player_id}-${props.gameState.tick}`
+  }
 
   const dpr = window.devicePixelRatio || 1
   canvas.width = Math.floor(displayW * dpr)
@@ -245,180 +210,22 @@ function draw() {
   canvas.style.height = `${displayH}px`
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const cell = Math.min(displayW / grid_width, displayH / grid_height)
-  const boardW = cell * grid_width
-  const boardH = cell * grid_height
-  const offsetX = (displayW - boardW) / 2 + shakeX
-  const offsetY = (displayH - boardH) / 2 + shakeY
-
-  ctx.fillStyle = '#0f1419'
-  ctx.fillRect(0, 0, displayW, displayH)
-
-  if (Date.now() < hitFlashUntil.value) {
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.18)'
-    ctx.fillRect(0, 0, displayW, displayH)
-  }
-
-  ctx.fillRect(offsetX, offsetY, boardW, boardH)
-
-  if (playable_y_min > 0) {
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.22)'
-    ctx.fillRect(offsetX, offsetY, boardW, playable_y_min * cell)
-  }
-  if (playable_y_max < grid_height - 1) {
-    const deadH = (grid_height - 1 - playable_y_max) * cell
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.22)'
-    ctx.fillRect(offsetX, offsetY + (playable_y_max + 1) * cell, boardW, deadH)
-  }
-
-  ctx.strokeStyle = '#1e293b'
-  ctx.lineWidth = 1
-  for (let x = 0; x <= grid_width; x++) {
-    ctx.beginPath()
-    ctx.moveTo(offsetX + x * cell, offsetY)
-    ctx.lineTo(offsetX + x * cell, offsetY + boardH)
-    ctx.stroke()
-  }
-  for (let y = 0; y <= grid_height; y++) {
-    ctx.beginPath()
-    ctx.moveTo(offsetX, offsetY + y * cell)
-    ctx.lineTo(offsetX + boardW, offsetY + y * cell)
-    ctx.stroke()
-  }
-
-  ctx.fillStyle = 'rgba(91, 156, 255, 0.08)'
-  ctx.fillRect(offsetX, offsetY, cell * 2, boardH)
-  ctx.fillRect(offsetX + boardW - cell * 2, offsetY, cell * 2, boardH)
-
-  for (const obstacle of obstacles) {
-    ctx.fillStyle = '#334155'
-    ctx.fillRect(
-      offsetX + obstacle.x * cell,
-      offsetY + obstacle.y * cell,
-      obstacle.w * cell,
-      obstacle.h * cell,
-    )
-    ctx.strokeStyle = '#64748b'
-    ctx.lineWidth = Math.max(1, cell * 0.06)
-    ctx.strokeRect(
-      offsetX + obstacle.x * cell + 1,
-      offsetY + obstacle.y * cell + 1,
-      obstacle.w * cell - 2,
-      obstacle.h * cell - 2,
-    )
-  }
-
-  if (powerup) {
-    const color = POWERUP_COLORS[powerup.type] ?? '#fbbf24'
-    const cx = offsetX + powerup.x * cell + cell / 2
-    const cy = offsetY + powerup.y * cell + cell / 2
-    const pulse = 0.85 + Math.sin(Date.now() / 180) * 0.15
-    ctx.fillStyle = color
-    ctx.globalAlpha = 0.35
-    ctx.beginPath()
-    ctx.arc(cx, cy, cell * 0.55 * pulse, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.globalAlpha = 1
-    ctx.beginPath()
-    ctx.arc(cx, cy, cell * 0.28, 0, Math.PI * 2)
-    ctx.fill()
-  }
-
-  for (const bullet of bullets) {
-    const trailAlpha = 0.35
-    ctx.fillStyle = `rgba(251, 191, 36, ${trailAlpha})`
-    const trailX = offsetX + (bullet.x - bullet.vx * 0.4) * cell + cell / 2
-    const trailY = offsetY + (bullet.y - (bullet.vy ?? 0) * 0.4) * cell + cell / 2
-    ctx.beginPath()
-    ctx.arc(trailX, trailY, cell * 0.22, 0, Math.PI * 2)
-    ctx.fill()
-
-    ctx.fillStyle = bullet.damage && bullet.damage >= 2 ? '#fb7185' : '#fbbf24'
-    const pad = Math.max(2, cell * 0.2)
-    ctx.beginPath()
-    ctx.arc(
-      offsetX + bullet.x * cell + cell / 2,
-      offsetY + bullet.y * cell + cell / 2,
-      cell / 2 - pad,
-      0,
-      Math.PI * 2,
-    )
-    ctx.fill()
-  }
-
-  for (const [pid, fighter] of Object.entries(fighters)) {
-    const isMe = pid === props.playerId
-    const displayY = fighterDisplayY(pid, fighter)
-    const ghosted = fighter.effects?.ghost_active && !isMe
-    const alpha = fighter.alive ? (ghosted ? 0.45 : 1) : 0.35
-    ctx.globalAlpha = alpha
-    const inset = Math.max(1, cell * 0.1)
-    const barGap = Math.max(1, cell * 0.06)
-    const barH = (cell * barCount - barGap * (barCount - 1)) / barCount
-
-    for (let i = 0; i < barCount; i++) {
-      ctx.fillStyle = fighter.color
-      const barY = displayY + i
-      if (dangerRows.value.has(barY) && isMe) {
-        ctx.fillStyle = '#fca5a5'
-      }
-      ctx.fillRect(
-        offsetX + fighter.x * cell + inset,
-        offsetY + barY * cell + (cell - barH) / 2,
-        cell - inset * 2,
-        barH,
-      )
-    }
-
-    if (fighter.effects?.shield) {
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)'
-      ctx.lineWidth = Math.max(2, cell * 0.1)
-      ctx.strokeRect(
-        offsetX + fighter.x * cell,
-        offsetY + displayY * cell,
-        cell,
-        cell * barCount,
-      )
-    }
-
-    if (isMe && fighter.alive) {
-      ctx.strokeStyle = '#fff'
-      ctx.lineWidth = Math.max(1, cell * 0.08)
-      ctx.strokeRect(
-        offsetX + fighter.x * cell + 1,
-        offsetY + displayY * cell + 1,
-        cell - 2,
-        cell * barCount - 2,
-      )
-
-      const aimRow = displayY + Math.floor(barCount / 2)
-      ctx.strokeStyle = 'rgba(255,255,255,0.25)'
-      ctx.setLineDash([cell * 0.3, cell * 0.25])
-      ctx.beginPath()
-      ctx.moveTo(offsetX + fighter.x * cell + cell, offsetY + aimRow * cell + cell / 2)
-      ctx.lineTo(offsetX + boardW, offsetY + aimRow * cell + cell / 2)
-      ctx.stroke()
-      ctx.setLineDash([])
-    }
-    ctx.globalAlpha = 1
-  }
+  renderer.draw(ctx, props.gameState, props.playerId, displayW, displayH, now, dangerRows.value)
 }
 
 let resizeObserver: ResizeObserver | null = null
 let animFrame = 0
 
 function animationLoop() {
-  draw()
+  draw(Date.now())
   animFrame = requestAnimationFrame(animationLoop)
 }
-
-watch(() => props.gameState, draw, { deep: true })
 
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   if (canvasWrapRef.value) {
-    resizeObserver = new ResizeObserver(() => draw())
+    resizeObserver = new ResizeObserver(() => draw(Date.now()))
     resizeObserver.observe(canvasWrapRef.value)
   }
   animFrame = requestAnimationFrame(animationLoop)
@@ -430,6 +237,7 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   cancelAnimationFrame(animFrame)
   if (localChargeInterval.value) clearInterval(localChargeInterval.value)
+  renderer.reset()
 })
 </script>
 
@@ -444,32 +252,36 @@ onUnmounted(() => {
       <canvas ref="canvasRef" class="game-canvas" />
 
       <div v-if="charging && canControl" class="charge-bar">
-        <div class="charge-fill" :style="{ width: `${(chargeTicks / 15) * 100}%` }" />
-        <span class="charge-label">Charging…</span>
+        <div
+          class="charge-fill"
+          :class="{ 'charge-full': chargeTicks >= 11 }"
+          :style="{ width: `${(chargeTicks / 15) * 100}%` }"
+        />
+        <span class="charge-label">{{ chargeTicks >= 11 ? 'MAX POWER' : 'Charging…' }}</span>
       </div>
 
       <div v-if="gameState.phase === 'countdown'" class="overlay countdown">
-        <span class="overlay-value">{{ countdownRemaining ?? '…' }}</span>
+        <span class="overlay-value pulse">{{ countdownRemaining ?? '…' }}</span>
         <span class="overlay-label">Get ready!</span>
       </div>
 
       <div v-else-if="isRoundOver" class="overlay round-over">
-        <span class="overlay-label">Round {{ gameState.round - 1 }} over</span>
-        <span v-if="roundWinnerName" class="overlay-value">{{ roundWinnerName }} wins the round!</span>
-        <span v-else class="overlay-value">Draw — rematch!</span>
+        <span class="overlay-label slide-in">Round {{ gameState.round - 1 }} over</span>
+        <span v-if="roundWinnerName" class="overlay-value pop-in">{{ roundWinnerName }} wins the round!</span>
+        <span v-else class="overlay-value pop-in">Draw — rematch!</span>
         <span class="overlay-hint">Next round in {{ countdownRemaining ?? '…' }}</span>
       </div>
 
       <div v-else-if="isFinished" class="overlay finished">
-        <span class="overlay-label">Match over</span>
-        <span class="overlay-value">{{ winnerName }} wins!</span>
+        <span class="overlay-label slide-in">Match over</span>
+        <span class="overlay-value winner-glow">{{ winnerName }} wins!</span>
         <button v-if="isHost" type="button" class="btn-primary play-again-btn" @click="startNewGame">
           Play Again
         </button>
         <p v-else class="overlay-hint">Waiting for host to start a new match…</p>
       </div>
 
-      <div v-else-if="!isAlive" class="overlay eliminated">
+      <div v-else-if="!isAlive && gameState.phase === 'playing'" class="overlay eliminated">
         <span class="overlay-label">You were eliminated!</span>
         <span class="overlay-hint">Watch the round continue…</span>
       </div>
@@ -481,7 +293,11 @@ onUnmounted(() => {
           v-for="row in playerRows"
           :key="row.id"
           class="player-score-row"
-          :class="{ me: row.id === playerId, dead: !row.fighter?.alive }"
+          :class="{
+            me: row.id === playerId,
+            dead: !row.fighter?.alive,
+            'hp-hit': hpPulseId === `${row.id}-${gameState.tick}`,
+          }"
         >
           <span class="color-dot" :style="{ background: row.fighter?.color ?? '#666' }" />
           <span class="name">{{ row.nickname }}</span>
@@ -491,10 +307,10 @@ onUnmounted(() => {
               v-for="i in row.fighter.max_hp"
               :key="i"
               class="hp-pip"
-              :class="{ spent: i > row.fighter.hp }"
+              :class="{ spent: i > row.fighter.hp, low: row.fighter.hp === 1 && i === 1 }"
             />
           </span>
-          <span v-if="row.fighter?.effects?.shield" class="effect-badge">🛡</span>
+          <span v-if="row.fighter?.effects?.shield" class="effect-badge shield-pulse">🛡</span>
           <span v-if="!row.fighter?.alive" class="status">out</span>
         </li>
       </ul>
@@ -535,11 +351,13 @@ onUnmounted(() => {
 }
 
 .mutator-tag {
-  padding: 0.15rem 0.5rem;
+  padding: 0.15rem 0.55rem;
   border-radius: 999px;
-  background: var(--surface-elevated);
+  background: linear-gradient(135deg, rgba(91, 156, 255, 0.2), rgba(124, 108, 240, 0.2));
+  border: 1px solid rgba(91, 156, 255, 0.25);
   font-size: 0.75rem;
   font-weight: 600;
+  color: var(--accent);
 }
 
 .canvas-wrap {
@@ -548,9 +366,10 @@ onUnmounted(() => {
   min-height: 0;
   width: 100%;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(91, 156, 255, 0.2);
   border-radius: var(--radius);
-  background: #0f1419;
+  background: #070b12;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(91, 156, 255, 0.08);
 }
 
 .game-canvas {
@@ -562,29 +381,39 @@ onUnmounted(() => {
 .charge-bar {
   position: absolute;
   left: 50%;
-  bottom: 0.75rem;
+  bottom: 0.85rem;
   transform: translateX(-50%);
-  width: min(240px, 70%);
-  height: 8px;
+  width: min(260px, 72%);
+  height: 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(251, 191, 36, 0.35);
   overflow: hidden;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.2);
 }
 
 .charge-fill {
   height: 100%;
-  background: linear-gradient(90deg, #fbbf24, #ef4444);
+  background: linear-gradient(90deg, #fbbf24, #f97316, #ef4444);
   transition: width 75ms linear;
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.6);
+}
+
+.charge-fill.charge-full {
+  animation: chargePulse 0.5s ease-in-out infinite alternate;
 }
 
 .charge-label {
   position: absolute;
-  top: -1.35rem;
+  top: -1.4rem;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   color: #fbbf24;
   white-space: nowrap;
+  text-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
 }
 
 .overlay {
@@ -594,10 +423,12 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(3px);
   gap: 0.5rem;
   padding: 1rem;
   text-align: center;
+  animation: overlayIn 0.35s ease-out;
 }
 
 .overlay-value {
@@ -605,9 +436,29 @@ onUnmounted(() => {
   font-weight: 800;
 }
 
+.overlay-value.pulse {
+  animation: countPulse 1s ease-in-out infinite;
+}
+
+.overlay-value.pop-in {
+  animation: popIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.overlay-value.winner-glow {
+  background: linear-gradient(135deg, #fbbf24, #5b9cff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: winnerGlow 2s ease-in-out infinite;
+}
+
 .overlay-label {
   font-size: 1.1rem;
   font-weight: 600;
+}
+
+.overlay-label.slide-in {
+  animation: slideIn 0.4s ease-out;
 }
 
 .overlay-hint {
@@ -617,6 +468,7 @@ onUnmounted(() => {
 
 .play-again-btn {
   margin-top: 0.5rem;
+  animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both;
 }
 
 .player-bar {
@@ -645,6 +497,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.45rem;
   font-size: 0.9rem;
+  transition: transform 0.2s ease;
 }
 
 .player-score-row.me {
@@ -655,11 +508,16 @@ onUnmounted(() => {
   opacity: 0.55;
 }
 
+.player-score-row.hp-hit {
+  animation: hpShake 0.35s ease;
+}
+
 .color-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
 }
 
 .name {
@@ -685,14 +543,27 @@ onUnmounted(() => {
   height: 8px;
   border-radius: 2px;
   background: #22c55e;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+  transition: background 0.25s ease, transform 0.25s ease;
 }
 
 .hp-pip.spent {
   background: #334155;
+  box-shadow: none;
+  transform: scaleY(0.6);
+}
+
+.hp-pip.low {
+  background: #ef4444;
+  animation: lowHpPulse 0.8s ease-in-out infinite;
 }
 
 .effect-badge {
   font-size: 0.85rem;
+}
+
+.shield-pulse {
+  animation: shieldPulse 1.2s ease-in-out infinite;
 }
 
 .status {
@@ -706,6 +577,52 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: var(--text-muted);
   text-align: right;
+}
+
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes countPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.7); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes winnerGlow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.4)); }
+  50% { filter: drop-shadow(0 0 14px rgba(91, 156, 255, 0.6)); }
+}
+
+@keyframes chargePulse {
+  from { box-shadow: 0 0 8px rgba(251, 191, 36, 0.5); }
+  to { box-shadow: 0 0 18px rgba(239, 68, 68, 0.8); }
+}
+
+@keyframes hpShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+@keyframes lowHpPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@keyframes shieldPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
 }
 
 @media (max-width: 640px) {

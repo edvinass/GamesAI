@@ -15,21 +15,21 @@ POWERUP_TYPES = ("rapid_fire", "shield", "wide_shot", "ghost")
 
 MUTATOR_PRESETS: dict[str, dict[str, Any]] = {
     "classic": {
-        "bullet_speed": 1,
+        "bullet_speed": 2,
         "shoot_cooldown_ticks": 10,
         "ricochet_bounces": 0,
         "fog": False,
         "max_bullets_per_player": 12,
     },
     "chaos": {
-        "bullet_speed": 2,
+        "bullet_speed": 3,
         "shoot_cooldown_ticks": 5,
         "ricochet_bounces": 0,
         "fog": False,
         "max_bullets_per_player": 6,
     },
     "sniper": {
-        "bullet_speed": 1,
+        "bullet_speed": 2,
         "shoot_cooldown_ticks": 20,
         "ricochet_bounces": 0,
         "fog": False,
@@ -37,7 +37,7 @@ MUTATOR_PRESETS: dict[str, dict[str, Any]] = {
         "instant_kill": True,
     },
     "bounce_house": {
-        "bullet_speed": 1,
+        "bullet_speed": 2,
         "shoot_cooldown_ticks": 10,
         "ricochet_bounces": 1,
         "fog": False,
@@ -45,7 +45,7 @@ MUTATOR_PRESETS: dict[str, dict[str, Any]] = {
         "obstacles_enabled": True,
     },
     "fog": {
-        "bullet_speed": 1,
+        "bullet_speed": 2,
         "shoot_cooldown_ticks": 10,
         "ricochet_bounces": 0,
         "fog": True,
@@ -778,6 +778,8 @@ class DuelEngine(GamePlugin):
 
     def _end_round(self, state: dict, round_winner: str | None, events: list[dict]) -> None:
         state["round_winner"] = round_winner
+        state["last_hit"] = None
+        state["last_action"] = None
         scores = state.setdefault("round_scores", {})
         if round_winner:
             scores[round_winner] = scores.get(round_winner, 0) + 1
@@ -960,6 +962,8 @@ class DuelEngine(GamePlugin):
             "best_of": state["settings"].get("best_of", 5),
             "match_format": state["settings"].get("match_format", "best_of_5"),
             "mutator": state["settings"].get("mutator", "classic"),
+            "bullet_speed": int(state["settings"].get("bullet_speed", 2)),
+            "tick_ms": int(state["settings"].get("tick_ms", 75)),
             "grid_width": state["grid_width"],
             "grid_height": state["grid_height"],
             "playable_y_min": state.get("playable_y_min", 0),

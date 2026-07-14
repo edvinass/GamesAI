@@ -168,6 +168,8 @@ export interface DuelGameState {
   best_of: number
   match_format: string
   mutator: string
+  bullet_speed: number
+  tick_ms: number
   grid_width: number
   grid_height: number
   playable_y_min: number
