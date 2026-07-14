@@ -6,12 +6,14 @@ import random
 from typing import Any
 
 from app.games.poker.equity import estimate_equity_from_state
+from app.games.poker.ev_solver import choose_ev_action
 from app.games.poker.opponent_model import aggregate_opponent_profile
 
 AI_DIFFICULTIES = ("easy", "medium", "hard")
 
-DIFFICULTY_CONFIG: dict[str, dict[str, float | int]] = {
+DIFFICULTY_CONFIG: dict[str, dict[str, float | int | str]] = {
     "easy": {
+        "strategy": "heuristic",
         "mc_iterations": 200,
         "call_margin": -0.05,
         "raise_threshold": 0.62,
@@ -21,15 +23,7 @@ DIFFICULTY_CONFIG: dict[str, dict[str, float | int]] = {
         "open_equity": 0.42,
     },
     "medium": {
-        "mc_iterations": 400,
-        "call_margin": 0.03,
-        "raise_threshold": 0.58,
-        "value_raise_threshold": 0.68,
-        "bluff_rate": 0.10,
-        "mistake_rate": 0.08,
-        "open_equity": 0.48,
-    },
-    "hard": {
+        "strategy": "heuristic",
         "mc_iterations": 700,
         "call_margin": 0.06,
         "raise_threshold": 0.55,
@@ -38,13 +32,19 @@ DIFFICULTY_CONFIG: dict[str, dict[str, float | int]] = {
         "mistake_rate": 0.02,
         "open_equity": 0.52,
     },
+    "hard": {
+        "strategy": "ev",
+        "mc_iterations": 1200,
+        "ev_iterations": 800,
+        "call_margin": 0.04,
+        "mistake_rate": 0.0,
+    },
 }
 
 
 def normalize_ai_difficulty(value: str | None) -> str:
     if value in DIFFICULTY_CONFIG:
         return value
-    # chess uses "medium"; tetris uses "normal" — accept both aliases
     aliases = {"normal": "medium"}
     normalized = aliases.get(str(value or "").lower(), str(value or "").lower())
     if normalized in DIFFICULTY_CONFIG:
@@ -52,7 +52,7 @@ def normalize_ai_difficulty(value: str | None) -> str:
     return "medium"
 
 
-def get_ai_config(difficulty: str | None) -> dict[str, float | int]:
+def get_ai_config(difficulty: str | None) -> dict[str, float | int | str]:
     return DIFFICULTY_CONFIG[normalize_ai_difficulty(difficulty)]
 
 
@@ -137,9 +137,8 @@ def _facing_3bet_plus(state: dict, to_call: int) -> bool:
 def _re_raise_equity_threshold(
     state: dict,
     to_call: int,
-    cfg: dict[str, float | int],
+    cfg: dict[str, float | int | str],
 ) -> float:
-    """Minimum equity required to re-raise rather than call."""
     base = float(cfg["value_raise_threshold"])
     if _facing_3bet_plus(state, to_call):
         return base + 0.08
@@ -162,7 +161,7 @@ def _pick_raise_amount(
     to_call: int,
     is_bluff: bool,
     position: float,
-    cfg: dict[str, float | int],
+    cfg: dict[str, float | int | str],
 ) -> int | None:
     p = state["players"][player_id]
     legal_raises = _legal_raise_targets(state, player_id)
@@ -189,7 +188,6 @@ def _pick_raise_amount(
         else:
             target = p["bet_this_round"] + int(pot * 0.5)
     elif state["phase"] == "preflop" and _facing_raise(state, to_call):
-        # Preflop re-raises: use multiples of the facing bet to avoid runaway pots.
         multiplier = 3.0 if equity >= float(cfg["value_raise_threshold"]) else 2.5
         target = p["bet_this_round"] + to_call + int(to_call * multiplier)
     else:
@@ -215,7 +213,7 @@ def _should_bluff(
     equity: float,
     to_call: int,
     position: float,
-    cfg: dict[str, float | int],
+    cfg: dict[str, float | int | str],
     opponents: dict[str, float],
 ) -> bool:
     if to_call > 0:
@@ -238,19 +236,16 @@ def _should_bluff(
     return random.random() < bluff_rate
 
 
-def _adjusted_open_equity(cfg: dict[str, float | int], position: float) -> float:
+def _adjusted_open_equity(cfg: dict[str, float | int | str], position: float) -> float:
     base = float(cfg["open_equity"])
     return base - position * 0.12
 
 
-def choose_poker_action(
+def _choose_heuristic_action(
     state: dict,
     player_id: str,
-    difficulty: str | None = None,
+    cfg: dict[str, float | int | str],
 ) -> dict[str, Any]:
-    difficulty = difficulty or state.get("settings", {}).get("ai_difficulty")
-    cfg = get_ai_config(difficulty)
-
     p = state["players"][player_id]
     to_call = _bet_to_call(state, player_id)
     pot_odds = _pot_odds(state, to_call)
@@ -340,3 +335,17 @@ def choose_poker_action(
     if to_call >= p["chips"]:
         return {"type": "all_in"}
     return {"type": "call"}
+
+
+def choose_poker_action(
+    state: dict,
+    player_id: str,
+    difficulty: str | None = None,
+) -> dict[str, Any]:
+    difficulty = difficulty or state.get("settings", {}).get("ai_difficulty")
+    cfg = get_ai_config(difficulty)
+
+    if cfg.get("strategy") == "ev":
+        return choose_ev_action(state, player_id, cfg)
+
+    return _choose_heuristic_action(state, player_id, cfg)

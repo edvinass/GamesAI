@@ -349,6 +349,26 @@ const canAct = computed(
     effectiveCurrentActorId.value === props.gameState.current_actor_id,
 )
 
+const raisePanelOpen = ref(false)
+
+const isWaitingForTurn = computed(
+  () =>
+    !canAct.value && ['preflop', 'flop', 'turn', 'river'].includes(props.gameState.phase),
+)
+
+const showNextHandControl = computed(
+  () =>
+    props.gameState.phase === 'hand_complete' && isHost.value && !props.gameState.winner,
+)
+
+const showControlsDock = computed(
+  () => isWaitingForTurn.value || canAct.value || showNextHandControl.value,
+)
+
+watch(canAct, (active) => {
+  if (!active) raisePanelOpen.value = false
+})
+
 function visibleHoleCount(seatId: string): number {
   return holeCardsRevealed.value[seatId] ?? 0
 }
@@ -549,14 +569,21 @@ const seatPositions = computed(() => {
   const order = props.gameState.seat_order
   const myIndex = order.indexOf(props.playerId)
   const rotated = [...order.slice(myIndex), ...order.slice(0, myIndex)]
+  const count = rotated.length
+  const radiusByCount =
+    count <= 2
+      ? { x: 38, y: 34 }
+      : count <= 4
+        ? { x: 44, y: 40 }
+        : count <= 5
+          ? { x: 42, y: 38 }
+          : { x: 40, y: 36 }
   return rotated.map((id, visualIndex) => {
     const player = props.gameState.players.find((p) => p.id === id)
     const angle = (visualIndex / rotated.length) * 360 + 90
-    const radiusX = 46
-    const radiusY = 42
-    const x = 50 + radiusX * Math.cos((angle * Math.PI) / 180)
-    const y = 50 + radiusY * Math.sin((angle * Math.PI) / 180)
-    return { id, player, x, y, visualIndex }
+    const x = 50 + radiusByCount.x * Math.cos((angle * Math.PI) / 180)
+    const y = 50 + radiusByCount.y * Math.sin((angle * Math.PI) / 180)
+    return { id, player, x, y, visualIndex, playerCount: count }
   })
 })
 
@@ -799,7 +826,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="poker-board">
+  <div class="poker-board" :class="{ 'poker-board--docked': showControlsDock }">
     <div class="status-bar card">
       <div class="status-pills">
         <span class="status-pill status-pill--hand">Hand #{{ gameState.hand_number }}</span>
@@ -909,6 +936,7 @@ onUnmounted(() => {
             dealer: gameState.dealer_player_id === seat.id,
             me: seat.id === playerId,
             winner: winnerSeatIds.has(seat.id),
+            [`seat--players-${seat.playerCount}`]: true,
           }"
           :style="{ left: `${seat.x}%`, top: `${seat.y}%` }"
         >

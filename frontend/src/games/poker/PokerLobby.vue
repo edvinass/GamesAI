@@ -48,8 +48,8 @@ const stakePresets = [
 
 const difficultyOptions = [
   { value: 'easy', label: 'Easy', detail: 'Loose & predictable' },
-  { value: 'medium', label: 'Medium', detail: 'Balanced play' },
-  { value: 'hard', label: 'Hard', detail: 'Equity-driven' },
+  { value: 'medium', label: 'Medium', detail: 'Equity-driven' },
+  { value: 'hard', label: 'Hard', detail: 'EV solver & range play' },
 ] as const
 
 const maxPlayers = computed(() => Number(props.room.settings?.max_players ?? 6))
