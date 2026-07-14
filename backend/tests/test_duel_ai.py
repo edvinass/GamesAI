@@ -183,3 +183,60 @@ def test_ai_shoots_after_moving_into_alignment() -> None:
     move, shoot, *_ = choose_ai_actions(state, "ai", ai)
     assert move == "down"
     assert shoot is True
+
+
+def test_ai_uses_instant_bomb_when_aligned() -> None:
+    state = make_state()
+    state["settings"]["powerups_enabled"] = True
+    state["settings"]["match_format"] = "best_of_5"
+    ai = state["fighters"]["ai"]
+    human = state["fighters"]["human"]
+    ai["y"] = 10
+    human["y"] = 10
+    ai["stored_powerup"] = "bomb"
+
+    *_, pu_instant = choose_ai_actions(state, "ai", ai)
+    assert pu_instant is True
+
+
+def test_ai_starts_shield_when_low_hp() -> None:
+    state = make_state()
+    state["settings"]["powerups_enabled"] = True
+    ai = state["fighters"]["ai"]
+    ai["hp"] = 1
+    ai["stored_powerup"] = "shield"
+
+    *_, pu_start, pu_release, pu_instant = choose_ai_actions(state, "ai", ai)[-4:]
+    assert pu_start is True
+    assert pu_release is False
+    assert pu_instant is False
+
+
+def test_ai_completes_channelled_powerup() -> None:
+    engine = DuelEngine()
+    state = make_state()
+    state["settings"]["powerups_enabled"] = True
+    ai = state["fighters"]["ai"]
+    ai["stored_powerup"] = "shield"
+    ai["activating_powerup"] = True
+    ai["powerup_activation_ticks"] = 8
+
+    state, events = engine.tick(state)
+    assert ai["stored_powerup"] is None
+    assert ai["effects"]["shield_until"] > state["tick"]
+    assert any(e["type"] == "powerup_activated" for e in events)
+
+
+def test_ai_channel_not_reset_mid_activation() -> None:
+    engine = DuelEngine()
+    state = make_state()
+    state["settings"]["powerups_enabled"] = True
+    state["settings"]["ai_reaction_interval_ticks"] = 2
+    ai = state["fighters"]["ai"]
+    ai["stored_powerup"] = "shield"
+    ai["activating_powerup"] = True
+    ai["powerup_activation_ticks"] = 4
+
+    state, _ = engine.tick(state)
+    assert ai["activating_powerup"] is True
+    assert ai["powerup_activation_ticks"] >= 5

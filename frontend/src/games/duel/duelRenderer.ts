@@ -89,7 +89,7 @@ export const POWERUP_LABELS: Record<string, string> = {
   burst: 'Burst',
 }
 
-export const POWERUP_ACTIVATION_TICKS = 12
+export const POWERUP_ACTIVATION_TICKS = 8
 
 function hexToRgb(hex: string): [number, number, number] {
   const raw = hex.replace('#', '')
@@ -620,6 +620,21 @@ export class DuelRenderer {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(POWERUP_ICONS[powerup.type] ?? '★', cx, cy + 1)
+
+    const label = POWERUP_LABELS[powerup.type] ?? powerup.type
+    ctx.font = `600 ${Math.max(9, cell * 0.28)}px system-ui`
+    ctx.fillStyle = rgba(color, 0.95)
+    ctx.fillText(label, cx, cy + cell * 0.72)
+
+    if (powerup.despawn_at_tick != null && tick > 0) {
+      const remaining = Math.max(0, powerup.despawn_at_tick - tick)
+      const progress = Math.max(0, Math.min(1, remaining / 100))
+      ctx.strokeStyle = rgba(color, 0.55)
+      ctx.lineWidth = Math.max(2, cell * 0.08)
+      ctx.beginPath()
+      ctx.arc(cx, cy, cell * 0.38, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress)
+      ctx.stroke()
+    }
   }
 
   private drawBullets(

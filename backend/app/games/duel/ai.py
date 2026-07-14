@@ -1,6 +1,12 @@
 import random
 from typing import Any
 
+POWERUP_ACTIVATION_TICKS = 8
+
+INSTANT_POWERUP_TYPES = frozenset(
+    {"heal", "laser", "railgun", "bomb", "cluster", "burst"}
+)
+
 MOVE_OPTIONS = ("up", "down", "stop")
 
 
@@ -258,10 +264,15 @@ def _score_move(
         if y == max_y and direction == "up":
             score += 90.0
 
-    if powerup and not immediate_danger:
+    if powerup and not fighter.get("stored_powerup") and not immediate_danger:
         center_row = _fighter_center(new_top, height)
-        if abs(center_row - powerup["y"]) <= 1:
-            score += 120.0
+        dist = abs(center_row - powerup["y"])
+        if dist == 0:
+            score += 280.0
+        elif dist <= 1:
+            score += 180.0
+        elif dist <= 2:
+            score += 90.0
 
     return score
 
@@ -375,8 +386,11 @@ def _should_shoot(
         return True
 
     powerup = state.get("powerup")
-    if powerup and abs(shoot_row - powerup["y"]) <= 1:
-        return True
+    if powerup and not fighter.get("stored_powerup"):
+        if abs(shoot_row - powerup["y"]) <= 2:
+            return True
+        if abs(shoot_row - powerup["y"]) <= 4 and random.random() < 0.65:
+            return True
 
     return False
 
@@ -417,43 +431,65 @@ def _should_activate_powerup(
     if not state["settings"].get("powerups_enabled"):
         return False, False
     stored = fighter.get("stored_powerup")
-    if not stored:
+    if not stored or stored in INSTANT_POWERUP_TYPES:
         return False, False
 
     if fighter.get("activating_powerup"):
         ticks = fighter.get("powerup_activation_ticks", 0) + 1
-        if ticks >= 12:
+        if ticks >= POWERUP_ACTIVATION_TICKS:
             return False, True
-        return True, False
+        return False, False
 
-    if stored == "heal" and fighter.get("hp", 1) < fighter.get("max_hp", 3):
+    if stored == "shield":
+        if fighter.get("hp", 1) <= 2:
+            return True, False
         if random.random() < 0.35:
             return True, False
-    if stored == "shield" and random.random() < 0.25:
-        return True, False
-    if stored == "freeze" and enemy is not None and random.random() < 0.3:
-        return True, False
-    if stored == "laser" and enemy is not None:
-        shoot_row = _fighter_center(fighter["y"], height)
-        enemy_center = _fighter_center(enemy["y"], height)
-        if abs(shoot_row - enemy_center) <= 1 and random.random() < 0.45:
+    elif stored == "freeze" and enemy is not None:
+        if random.random() < 0.55:
             return True, False
-    if stored in ("rapid_fire", "machine_gun", "homing", "overdrive", "pierce") and random.random() < 0.2:
-        return True, False
-    if stored in ("bomb", "cluster", "burst", "railgun") and enemy is not None:
-        shoot_row = _fighter_center(fighter["y"], height)
-        enemy_center = _fighter_center(enemy["y"], height)
-        if abs(shoot_row - enemy_center) <= 2 and random.random() < 0.4:
+    elif stored in ("rapid_fire", "machine_gun", "homing", "overdrive", "pierce", "wide_shot", "ghost", "mirror"):
+        if enemy is not None:
+            shoot_row = _fighter_center(fighter["y"], height)
+            enemy_center = _fighter_center(enemy["y"], height)
+            if abs(shoot_row - enemy_center) <= 2:
+                return True, False
+        if random.random() < 0.4:
             return True, False
     return False, False
+
+
+def _should_use_instant_powerup(
+    state: dict,
+    fighter: dict[str, Any],
+    enemy: dict[str, Any] | None,
+    height: int,
+) -> bool:
+    if not state["settings"].get("powerups_enabled"):
+        return False
+    stored = fighter.get("stored_powerup")
+    if not stored or stored not in INSTANT_POWERUP_TYPES:
+        return False
+    if stored == "heal":
+        return fighter.get("hp", 1) < fighter.get("max_hp", 3)
+    if enemy is None:
+        return stored in ("heal",)
+    shoot_row = _fighter_center(fighter["y"], height)
+    enemy_center = _fighter_center(enemy["y"], height)
+    aligned = abs(shoot_row - enemy_center) <= 2
+    if stored in ("laser", "railgun", "bomb", "cluster"):
+        return aligned or random.random() < 0.35
+    if stored == "burst":
+        return aligned or random.random() < 0.5
+    return random.random() < 0.25
 
 
 def choose_ai_actions(
     state: dict,
     player_id: str,
     fighter: dict[str, Any],
-) -> tuple[str, bool, bool, bool, int, bool, bool]:
-    """Returns move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release."""
+) -> tuple[str, bool, bool, bool, int, bool, bool, bool]:
+    """Returns move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant."""
     height = _fighter_height(state)
     bullets = _incoming_bullets(state, player_id, fighter)
     enemy = _enemy_fighter(state, player_id)
@@ -466,10 +502,14 @@ def choose_ai_actions(
     charge_ticks = 0
     pu_start = False
     pu_release = False
+    pu_instant = False
+
+    if _should_use_instant_powerup(state, fighter, enemy, height):
+        return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, True
 
     pu_start, pu_release = _should_activate_powerup(state, fighter, enemy, height)
     if pu_start or pu_release:
-        return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release
+        return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant
 
     if enemy is not None:
         if fighter.get("charging"):
@@ -486,4 +526,4 @@ def choose_ai_actions(
             elif _should_shoot(state, fighter, enemy, height, move):
                 shoot = True
 
-    return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release
+    return move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant

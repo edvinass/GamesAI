@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, DuelGameState } from '@/types'
-import { DuelRenderer, POWERUP_ACTIVATION_TICKS, POWERUP_COLORS, POWERUP_ICONS, POWERUP_LABELS } from './duelRenderer'
+import { DuelRenderer, POWERUP_COLORS, POWERUP_ICONS, POWERUP_LABELS } from './duelRenderer'
+import {
+  POWERUP_ACTIVATION_TICKS,
+  POWERUP_HINTS,
+  isInstantPowerup,
+  powerupUseHint,
+} from './powerupMeta'
 
 const props = defineProps<{
   gameState: DuelGameState
@@ -81,6 +87,19 @@ const powerupReady = computed(
 const localChargeInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const localPowerupInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const hpPulseId = ref<string | null>(null)
+const powerupNotice = ref<{ text: string; tone: 'info' | 'success' | 'warn' } | null>(null)
+let powerupNoticeTimer: ReturnType<typeof setTimeout> | null = null
+let autoReleaseTimer: ReturnType<typeof setTimeout> | null = null
+const lastSeenPowerupKey = ref('')
+const lastStoredPowerup = ref<string | null>(null)
+const lastActionStamp = ref('')
+
+const storedPowerupHint = computed(() => powerupUseHint(storedPowerup.value))
+const storedPowerupDescription = computed(() =>
+  storedPowerup.value ? POWERUP_HINTS[storedPowerup.value] ?? '' : '',
+)
+const isInstantStored = computed(() => isInstantPowerup(storedPowerup.value))
+const arenaPowerup = computed(() => props.gameState.powerup)
 
 const MUTATOR_LABELS: Record<string, string> = {
   classic: 'Classic',
@@ -131,6 +150,24 @@ function sendMove(direction: 'up' | 'down' | 'stop') {
   emit('action', { type: 'set_move', direction })
 }
 
+function showPowerupNotice(text: string, tone: 'info' | 'success' | 'warn' = 'info') {
+  powerupNotice.value = { text, tone }
+  if (powerupNoticeTimer) clearTimeout(powerupNoticeTimer)
+  powerupNoticeTimer = setTimeout(() => {
+    powerupNotice.value = null
+    powerupNoticeTimer = null
+  }, 2800)
+}
+
+function useStoredPowerup() {
+  if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value) return
+  if (isInstantStored.value) {
+    emit('action', { type: 'powerup_activate' })
+    return
+  }
+  if (!activatingPowerup.value) startPowerupActivation()
+}
+
 function startPowerupActivation() {
   if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value) return
   activatingPowerup.value = true
@@ -177,7 +214,11 @@ watch(
 
 watch(
   () => myFighter.value?.stored_powerup,
-  (stored) => {
+  (stored, prev) => {
+    if (stored && stored !== prev) {
+      const label = POWERUP_LABELS[stored] ?? stored
+      showPowerupNotice(`${label} collected — ${powerupUseHint(stored)}`, 'success')
+    }
     if (!stored) {
       activatingPowerup.value = false
       powerupActivationTicks.value = 0
@@ -186,8 +227,55 @@ watch(
         localPowerupInterval.value = null
       }
     }
+    lastStoredPowerup.value = stored ?? null
   },
 )
+
+watch(
+  () => arenaPowerup.value,
+  (orb) => {
+    if (!orb || !powerupsEnabled.value) return
+    const key = `${orb.x}:${orb.y}:${orb.type}:${props.gameState.tick}`
+    if (key === lastSeenPowerupKey.value) return
+    lastSeenPowerupKey.value = key
+    const label = POWERUP_LABELS[orb.type] ?? orb.type
+    showPowerupNotice(`${label} spawned — shoot or touch to collect`, 'info')
+  },
+)
+
+watch(
+  () => props.gameState.last_action,
+  (action) => {
+    if (!action) return
+    const stamp = JSON.stringify(action)
+    if (stamp === lastActionStamp.value) return
+    lastActionStamp.value = stamp
+    const type = action.type as string
+    const pid = action.player_id as string | undefined
+    if (pid !== props.playerId) return
+    if (type === 'powerup_activated') {
+      const ptype = action.powerup_type as string
+      showPowerupNotice(`${POWERUP_LABELS[ptype] ?? ptype} activated!`, 'success')
+    } else if (type === 'powerup_hold_release' && action.activated === false) {
+      showPowerupNotice('Hold E a bit longer to activate', 'warn')
+    }
+  },
+)
+
+watch(powerupReady, (ready) => {
+  if (autoReleaseTimer) {
+    clearTimeout(autoReleaseTimer)
+    autoReleaseTimer = null
+  }
+  if (ready && activatingPowerup.value) {
+    autoReleaseTimer = setTimeout(() => {
+      if (activatingPowerup.value && powerupReady.value) {
+        releasePowerupActivation()
+      }
+      autoReleaseTimer = null
+    }, 180)
+  }
+})
 
 function startCharge() {
   if (!canControl.value || !chargeEnabled.value) return
@@ -254,7 +342,12 @@ function onKeyDown(e: KeyboardEvent) {
     powerupsEnabled.value
   ) {
     e.preventDefault()
-    if (!activatingPowerup.value) startPowerupActivation()
+    if (isInstantStored.value) {
+      emit('action', { type: 'powerup_activate' })
+    } else if (!activatingPowerup.value) {
+      startPowerupActivation()
+    }
+    return
   }
 }
 
@@ -285,7 +378,7 @@ function onKeyUp(e: KeyboardEvent) {
     return
   }
 
-  if ((e.key === 'e' || e.key === 'E') && activatingPowerup.value) {
+  if ((e.key === 'e' || e.key === 'E') && activatingPowerup.value && !isInstantStored.value) {
     e.preventDefault()
     releasePowerupActivation()
   }
@@ -346,6 +439,8 @@ onUnmounted(() => {
   cancelAnimationFrame(animFrame)
   if (localChargeInterval.value) clearInterval(localChargeInterval.value)
   if (localPowerupInterval.value) clearInterval(localPowerupInterval.value)
+  if (powerupNoticeTimer) clearTimeout(powerupNoticeTimer)
+  if (autoReleaseTimer) clearTimeout(autoReleaseTimer)
   renderer.reset()
 })
 </script>
@@ -359,6 +454,39 @@ onUnmounted(() => {
 
     <div ref="canvasWrapRef" class="canvas-wrap">
       <canvas ref="canvasRef" class="game-canvas" />
+
+      <Transition name="powerup-notice">
+        <div
+          v-if="powerupNotice && gameState.phase === 'playing'"
+          class="powerup-notice"
+          :class="powerupNotice.tone"
+        >
+          {{ powerupNotice.text }}
+        </div>
+      </Transition>
+
+      <div
+        v-if="canControl && storedPowerup && powerupsEnabled"
+        class="powerup-slot"
+        :style="{ borderColor: POWERUP_COLORS[storedPowerup] ?? '#a855f7' }"
+      >
+        <span class="powerup-slot-icon" :style="{ color: POWERUP_COLORS[storedPowerup] }">
+          {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
+        </span>
+        <div class="powerup-slot-copy">
+          <strong>{{ POWERUP_LABELS[storedPowerup] ?? storedPowerup }}</strong>
+          <span>{{ storedPowerupDescription }}</span>
+          <span class="powerup-slot-hint">{{ storedPowerupHint }}</span>
+        </div>
+        <button type="button" class="powerup-use-btn" @click="useStoredPowerup">
+          {{ isInstantStored ? 'Use [E]' : 'Hold [E]' }}
+        </button>
+      </div>
+
+      <div v-if="canControl && powerupsEnabled && arenaPowerup && !storedPowerup" class="powerup-callout">
+        <span class="callout-dot" :style="{ background: POWERUP_COLORS[arenaPowerup.type] }" />
+        {{ POWERUP_LABELS[arenaPowerup.type] ?? arenaPowerup.type }} in arena
+      </div>
 
       <div v-if="charging && canControl" class="charge-bar">
         <div
@@ -461,7 +589,11 @@ onUnmounted(() => {
 
       <div class="controls-hint">
         <p v-if="canControl && chargeEnabled && storedPowerup">
-          <strong>Controls:</strong> W/S or ↑/↓ to move · Space to charge & fire · Hold E until the bar fills to activate power-up
+          <strong>Controls:</strong> W/S move · Space charge & fire ·
+          {{ isInstantStored ? 'E to use power-up' : 'Hold E to activate power-up' }}
+        </p>
+        <p v-else-if="canControl && chargeEnabled && powerupsEnabled && arenaPowerup">
+          <strong>Controls:</strong> W/S move · Space charge & fire · Collect the {{ POWERUP_LABELS[arenaPowerup.type] ?? 'power-up' }} (shoot or touch it)
         </p>
         <p v-else-if="canControl && chargeEnabled">
           <strong>Controls:</strong> W/S or ↑/↓ to move · Hold Space to charge, release to fire
@@ -523,6 +655,132 @@ onUnmounted(() => {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.powerup-notice {
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  max-width: min(92%, 420px);
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: center;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.powerup-notice.info {
+  background: rgba(15, 23, 42, 0.82);
+  color: #cbd5e1;
+}
+
+.powerup-notice.success {
+  background: rgba(6, 78, 59, 0.82);
+  color: #a7f3d0;
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+.powerup-notice.warn {
+  background: rgba(120, 53, 15, 0.82);
+  color: #fde68a;
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.powerup-notice-enter-active,
+.powerup-notice-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.powerup-notice-enter-from,
+.powerup-notice-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-8px);
+}
+
+.powerup-slot {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  max-width: min(88%, 320px);
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  background: rgba(8, 12, 20, 0.82);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.powerup-slot-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.powerup-slot-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.powerup-slot-copy strong {
+  font-size: 0.82rem;
+  color: #f8fafc;
+}
+
+.powerup-slot-hint {
+  color: #c084fc;
+}
+
+.powerup-use-btn {
+  flex-shrink: 0;
+  padding: 0.35rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  background: rgba(168, 85, 247, 0.18);
+  color: #e9d5ff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.powerup-use-btn:hover {
+  background: rgba(168, 85, 247, 0.3);
+}
+
+.powerup-callout {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(8, 12, 20, 0.78);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fde68a;
+}
+
+.callout-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
 }
 
 .charge-bar {

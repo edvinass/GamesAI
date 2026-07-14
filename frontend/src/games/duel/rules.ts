@@ -7,13 +7,13 @@ export const duelRules: GameRules = {
     'Join a room with exactly 2 players (or practice solo vs AI).',
     'Pick a match format and mutator in the lobby.',
     'Move up and down to dodge incoming shots and use cover.',
-    'Shoot through center power-ups to collect them, then hold Space to activate.',
+    'Shoot or touch center power-ups to collect. Tap E for bombs and lasers; hold E for shields and buffs.',
     'Win rounds to take the match — first to majority wins.',
   ],
   sections: [
     {
       heading: 'Controls',
-      body: 'Use W/S or arrow keys to move up and down. Tap Space for a quick shot in Quick Duel mode. In match modes, hold Space to charge and release to fire. When carrying a power-up, hold E to activate it — Space still fires your weapon.',
+      body: 'Use W/S or arrow keys to move. Tap Space for a quick shot in Quick Duel; hold Space to charge in match modes. Collect orbs by shooting or touching them. Tap E for instant power-ups (bombs, lasers, heal); hold E briefly for buffs like Shield or Machine Gun.',
     },
     {
       heading: 'Health & crits',
@@ -43,8 +43,8 @@ export const duelRules: GameRules = {
   tips: [
     'Strafe vertically while charging to bait predictable shots.',
     'Use obstacles to break line-of-sight and force repositioning.',
-    'Tag power-ups with a passing shot before they despawn — they blink faster when about to vanish.',
-    'Hold E to activate a stored power-up; keep shooting with Space anytime.',
+    'Move over a power-up to pick it up — you do not have to snipe it.',
+    'Tap E for bombs and lasers; hold E for shields and timed buffs.',
     'In Fog mode, watch bullet rows — they reveal true aim.',
     'Save shield for an all-in push when the arena shrinks.',
   ],

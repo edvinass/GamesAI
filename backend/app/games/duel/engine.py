@@ -30,8 +30,19 @@ POWERUP_TYPES = (
     "burst",
 )
 
-POWERUP_ACTIVATION_TICKS = 12
-POWERUP_ACTIVATION_MIN_SERVER_TICKS = 8
+POWERUP_ACTIVATION_TICKS = 8
+POWERUP_ACTIVATION_MIN_SERVER_TICKS = 5
+
+INSTANT_POWERUP_TYPES = frozenset(
+    {
+        "heal",
+        "laser",
+        "railgun",
+        "bomb",
+        "cluster",
+        "burst",
+    }
+)
 
 CLIENT_PROGRESS_LAG_TICKS = 2
 
@@ -472,10 +483,25 @@ class DuelEngine(GamePlugin):
             state["last_action"] = {"type": "charge_start", "player_id": player_id}
             return state, events
 
+        if action_type == "powerup_activate":
+            if not state["settings"].get("powerups_enabled"):
+                return state, events
+            ptype = fighter.get("stored_powerup")
+            if not ptype or ptype not in INSTANT_POWERUP_TYPES:
+                return state, events
+            self._activate_stored_powerup(state, fighter, player_id, events)
+            state["last_action"] = {
+                "type": "powerup_activated",
+                "player_id": player_id,
+                "powerup_type": ptype,
+            }
+            return state, events
+
         if action_type == "powerup_hold_start":
             if not state["settings"].get("powerups_enabled"):
                 return state, events
-            if not fighter.get("stored_powerup"):
+            ptype = fighter.get("stored_powerup")
+            if not ptype or ptype in INSTANT_POWERUP_TYPES:
                 return state, events
             fighter["activating_powerup"] = True
             fighter["powerup_activation_ticks"] = 0
@@ -545,7 +571,8 @@ class DuelEngine(GamePlugin):
     def _player_by_id(self, state: dict, player_id: str) -> dict | None:
         return next((p for p in state["players"] if p["id"] == player_id), None)
 
-    def _apply_ai_inputs(self, state: dict) -> None:
+    def _apply_ai_inputs(self, state: dict, events: list[dict] | None = None) -> None:
+        ai_events = events if events is not None else []
         reaction_interval = int(state["settings"].get("ai_reaction_interval_ticks", 2))
         rethink = reaction_interval <= 1 or state["tick"] % reaction_interval == 0
 
@@ -556,19 +583,32 @@ class DuelEngine(GamePlugin):
             fighter = state["fighters"].get(pid)
             if not fighter or not fighter.get("alive"):
                 continue
+
+            stored = fighter.get("stored_powerup")
+            if fighter.get("activating_powerup") and stored and stored not in INSTANT_POWERUP_TYPES:
+                if int(fighter.get("powerup_activation_ticks", 0)) >= POWERUP_ACTIVATION_TICKS:
+                    fighter["activating_powerup"] = False
+                    self._activate_stored_powerup(state, fighter, pid, ai_events)
+                    fighter["powerup_activation_ticks"] = 0
+                    continue
+
             if not rethink:
                 continue
-            move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release = choose_ai_actions(
+
+            move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant = choose_ai_actions(
                 state, pid, fighter
             )
             fighter["move_direction"] = move
-            if pu_start:
+            if pu_instant:
+                ptype = fighter.get("stored_powerup")
+                if ptype in INSTANT_POWERUP_TYPES:
+                    self._activate_stored_powerup(state, fighter, pid, ai_events)
+            elif pu_start and not fighter.get("activating_powerup"):
                 fighter["activating_powerup"] = True
                 fighter["powerup_activation_ticks"] = 0
             elif pu_release:
                 fighter["activating_powerup"] = False
-                if fighter.get("powerup_activation_ticks", 0) >= POWERUP_ACTIVATION_TICKS:
-                    self._activate_stored_powerup(state, fighter, pid, [])
+                self._activate_stored_powerup(state, fighter, pid, ai_events)
                 fighter["powerup_activation_ticks"] = 0
             elif charge_start:
                 fighter["charging"] = True
@@ -798,6 +838,11 @@ class DuelEngine(GamePlugin):
         ptype = powerup["type"]
         fighter["stored_powerup"] = ptype
         events.append({"type": "powerup_collected", "player_id": owner_id, "powerup_type": ptype})
+        state["last_action"] = {
+            "type": "powerup_collected",
+            "player_id": owner_id,
+            "powerup_type": ptype,
+        }
         state["powerup"] = None
         state["next_powerup_at_tick"] = self._schedule_next_powerup_spawn_tick(state["settings"], state["tick"])
 
@@ -811,6 +856,22 @@ class DuelEngine(GamePlugin):
         else:
             delay = base + random.randint(-jitter, jitter)
         return from_tick + max(25, delay)
+
+    def _try_fighter_pickup_powerups(self, state: dict, events: list[dict]) -> None:
+        powerup = state.get("powerup")
+        if not powerup:
+            return
+        px, py = powerup["x"], powerup["y"]
+        fighter_height = self._fighter_height(state)
+        for pid, fighter in state["fighters"].items():
+            if not fighter.get("alive") or fighter.get("stored_powerup"):
+                continue
+            if fighter["x"] != px:
+                continue
+            top = fighter["y"]
+            if top <= py < top + fighter_height:
+                self._collect_powerup(state, fighter, pid, events)
+                return
 
     def _powerup_in_red_zone(self, y: int, state: dict) -> bool:
         y_min = state.get("playable_y_min", 0)
@@ -1393,7 +1454,7 @@ class DuelEngine(GamePlugin):
             state["tick"] += 1
             return state, events
 
-        self._apply_ai_inputs(state)
+        self._apply_ai_inputs(state, events)
         self._increment_charging(state)
         self._increment_powerup_activation(state)
         self._maybe_shrink_arena(state, events)
@@ -1430,6 +1491,7 @@ class DuelEngine(GamePlugin):
             self._try_shoot(state, fighter, pid)
 
         self._clamp_fighters_to_playable(state)
+        self._try_fighter_pickup_powerups(state, events)
 
         remaining_bullets: list[dict] = []
         for bullet in state["bullets"]:
