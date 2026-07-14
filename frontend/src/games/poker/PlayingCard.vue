@@ -7,8 +7,6 @@ const props = defineProps<{
   faceDown?: boolean
   small?: boolean
   deal?: boolean
-  reveal?: boolean
-  slotIndex?: number
 }>()
 
 const suitSymbol = computed(() => {
@@ -40,32 +38,26 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
 <template>
   <div
     class="playing-card"
-    :class="{ 'playing-card--small': small }"
-    :style="slotIndex != null ? { '--slot-index': slotIndex } : undefined"
+    :class="{
+      'playing-card--small': small,
+      'playing-card--deal': deal,
+    }"
   >
-    <div
-      class="card-motion"
-      :class="{
-        'card-motion--deal': deal,
-        'card-motion--reveal': reveal,
-      }"
-    >
-      <div class="card-inner" :class="{ 'card-inner--face-down': faceDown }">
-        <div class="card-face card-face--front" :class="{ red: isRed, black: !isRed }">
-          <span class="corner corner--tl">
-            <span class="corner__rank">{{ rankDisplay }}</span>
-            <span class="corner__suit">{{ suitSymbol }}</span>
-          </span>
-          <span class="suit suit--center">{{ suitSymbol }}</span>
-          <span class="corner corner--br">
-            <span class="corner__rank">{{ rankDisplay }}</span>
-            <span class="corner__suit">{{ suitSymbol }}</span>
-          </span>
-        </div>
-        <div class="card-face card-face--back">
-          <div class="card-back">
-            <div class="card-back__inner" />
-          </div>
+    <div class="card-inner" :class="{ 'card-inner--face-down': faceDown }">
+      <div class="card-face card-face--front" :class="{ red: isRed, black: !isRed }">
+        <span class="corner corner--tl">
+          <span class="corner__rank">{{ rankDisplay }}</span>
+          <span class="corner__suit">{{ suitSymbol }}</span>
+        </span>
+        <span class="suit suit--center">{{ suitSymbol }}</span>
+        <span class="corner corner--br">
+          <span class="corner__rank">{{ rankDisplay }}</span>
+          <span class="corner__suit">{{ suitSymbol }}</span>
+        </span>
+      </div>
+      <div class="card-face card-face--back">
+        <div class="card-back">
+          <div class="card-back__inner" />
         </div>
       </div>
     </div>
@@ -78,30 +70,16 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
   width: 64px;
   height: 90px;
   perspective: 900px;
-  flex-shrink: 1;
-  min-width: 0;
+  flex-shrink: 0;
 }
 
 .playing-card--small {
   width: 48px;
   height: 68px;
-  max-width: 100%;
 }
 
-.card-motion {
-  width: 100%;
-  height: 100%;
-  transform-style: preserve-3d;
-}
-
-.card-motion--deal {
-  animation: cardDeal 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(var(--slot-index, 0) * 45ms);
-}
-
-.card-motion--reveal {
-  animation: cardReveal 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(var(--slot-index, 0) * 70ms);
+.playing-card--deal {
+  animation: cardDeal 0.35s ease-out;
 }
 
 .card-inner {
@@ -110,7 +88,7 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
   position: relative;
   transform-style: preserve-3d;
   transform: rotateY(0deg);
-  transition: transform 0.65s cubic-bezier(0.4, 0.2, 0.2, 1);
+  transition: transform 0.6s cubic-bezier(0.4, 0.15, 0.2, 1.05);
 }
 
 .card-inner--face-down {
@@ -252,37 +230,13 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
 }
 
 @keyframes cardDeal {
-  0% {
+  from {
     opacity: 0;
-    transform: translateY(-22px) scale(0.72) rotate(-6deg);
-    filter: blur(2px);
+    transform: translateY(-18px) scale(0.78) rotate(-6deg);
   }
-  55% {
-    opacity: 1;
-    filter: blur(0);
-  }
-  78% {
-    transform: translateY(2px) scale(1.04) rotate(1deg);
-  }
-  100% {
+  to {
     opacity: 1;
     transform: translateY(0) scale(1) rotate(0deg);
-    filter: blur(0);
-  }
-}
-
-@keyframes cardReveal {
-  0% {
-    opacity: 0;
-    transform: translateY(20px) scale(0.82);
-  }
-  55% {
-    opacity: 1;
-    transform: translateY(-4px) scale(1.04);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 
@@ -291,8 +245,7 @@ const isRed = computed(() => props.suit === 'hearts' || props.suit === 'diamonds
     transition: none;
   }
 
-  .card-motion--deal,
-  .card-motion--reveal {
+  .playing-card--deal {
     animation: none;
   }
 }

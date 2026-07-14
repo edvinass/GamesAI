@@ -62,10 +62,6 @@ const streetTransitionPending = ref(false)
 const soundMuted = ref(isSoundMuted())
 const suppressSounds = ref(true)
 const reactionCooldown = ref(false)
-const chipFlies = ref<{ id: string; seatId: string }[]>([])
-const potRising = ref(false)
-const burnCardVisible = ref(false)
-const communityPulse = ref(false)
 
 function toggleSound() {
   const next = !soundMuted.value
@@ -322,15 +318,11 @@ function animatePotTo(target: number) {
   if (diff === 0) return
   const steps = Math.min(Math.max(Math.abs(diff), 1), 24)
   const stepMs = 45
-  potRising.value = true
   for (let i = 1; i <= steps; i++) {
     schedule(() => {
       displayedPot.value = Math.round(start + (diff * i) / steps)
     }, i * stepMs)
   }
-  schedule(() => {
-    potRising.value = false
-  }, steps * stepMs + 80)
 }
 
 function holdForAction() {
@@ -387,29 +379,6 @@ function shouldAnimateHoleCard(seatId: string, cardIndex: number): boolean {
   return false
 }
 
-function shouldAnimateCommunityCard(slot: number): boolean {
-  return lastDealtCommunityIndex.value === slot - 1
-}
-
-function chipFlyStyle(seatId: string): Record<string, string> {
-  const seat = seatPositions.value.find((entry) => entry.id === seatId)
-  if (!seat) return {}
-  return {
-    '--start-x': `${seat.x}%`,
-    '--start-y': `${seat.y}%`,
-    left: `${seat.x}%`,
-    top: `${seat.y}%`,
-  }
-}
-
-function triggerChipFly(seatId: string) {
-  const id = `${seatId}-${Date.now()}`
-  chipFlies.value = [...chipFlies.value, { id, seatId }]
-  schedule(() => {
-    chipFlies.value = chipFlies.value.filter((entry) => entry.id !== id)
-  }, 720)
-}
-
 function resetHandAnimations() {
   displayedCommunityCount.value = 0
   holeCardsRevealed.value = {}
@@ -426,10 +395,6 @@ function resetHandAnimations() {
   streetTransitionPending.value = false
   bettingRoundReady.value = false
   displayedPot.value = props.gameState.pot_total
-  chipFlies.value = []
-  potRising.value = false
-  burnCardVisible.value = false
-  communityPulse.value = false
 }
 
 function syncHandStateFromServer() {
@@ -523,7 +488,6 @@ function runHoleCardDealAnimation() {
 
 function finishStreetDeal() {
   streetTransitionPending.value = false
-  communityPulse.value = false
   schedule(() => {
     if (props.gameState.current_actor_id) {
       highlightActor(props.gameState.current_actor_id, TURN_DELAY_MS)
@@ -541,7 +505,6 @@ function animateCommunityCards(targetCount: number) {
 
   const milestones = [3, 4, 5].filter((m) => m > current && m <= targetCount)
   if (milestones.length === 0) {
-    communityPulse.value = true
     let delay = 0
     for (let i = current + 1; i <= targetCount; i++) {
       delay += CARD_REVEAL_MS
@@ -557,7 +520,6 @@ function animateCommunityCards(targetCount: number) {
   }
 
   streetTransitionPending.value = true
-  communityPulse.value = true
   let delay = 0
   let revealedUpTo = current
 
@@ -565,14 +527,7 @@ function animateCommunityCards(targetCount: number) {
     const street = milestone === 3 ? 'flop' : milestone === 4 ? 'turn' : 'river'
     showPhaseBanner(street)
     schedule(() => playSfx(playBurnCard), delay + PHASE_BANNER_MS)
-    delay += PHASE_BANNER_MS
-    schedule(() => {
-      burnCardVisible.value = true
-      schedule(() => {
-        burnCardVisible.value = false
-      }, BURN_CARD_MS)
-    }, delay)
-    delay += BURN_CARD_MS
+    delay += PHASE_BANNER_MS + BURN_CARD_MS
 
     for (let index = revealedUpTo + 1; index <= milestone; index++) {
       delay += CARD_REVEAL_MS
@@ -798,7 +753,6 @@ watch(
 
     if (['call', 'raise', 'all_in'].includes(String(action.type))) {
       betPulseSeats.value = new Set([...betPulseSeats.value, playerId])
-      triggerChipFly(playerId)
       schedule(() => {
         const next = new Set(betPulseSeats.value)
         next.delete(playerId)
@@ -875,15 +829,13 @@ onUnmounted(() => {
     <div class="status-bar card">
       <div class="status-pills">
         <span class="status-pill status-pill--hand">Hand #{{ gameState.hand_number }}</span>
-        <Transition name="phase-pill" mode="out-in">
-          <span :key="phaseLabel" class="status-pill status-pill--phase">{{ phaseLabel }}</span>
-        </Transition>
+        <span class="status-pill status-pill--phase">{{ phaseLabel }}</span>
         <span v-if="dealerPlayer" class="status-pill status-pill--dealer">
           Dealer <strong>{{ dealerPlayer.nickname }}</strong>
         </span>
       </div>
       <div class="status-bar__right">
-        <div class="status-pot" :class="{ 'status-pot--rising': potRising }">
+        <div class="status-pot">
           <span class="status-pot__chip" aria-hidden="true" />
           <span class="status-pot__label">Pot</span>
           <strong class="status-pot__amount">{{ displayedPot }}</strong>
@@ -912,28 +864,7 @@ onUnmounted(() => {
 
         <div class="table-wrap">
           <div class="table-room-glow" aria-hidden="true" />
-          <div
-            class="table-felt"
-            :class="{
-              'table-felt--spotlight': canAct,
-              'table-felt--dealing': streetTransitionPending || communityPulse,
-            }"
-          >
-        <Transition name="burn-flash">
-          <div v-if="burnCardVisible" class="burn-card-flash" aria-hidden="true">
-            <PlayingCard face-down small />
-            <span class="burn-card-flash__label">Burn</span>
-          </div>
-        </Transition>
-
-        <TransitionGroup name="chip-fly" tag="div" class="chip-fly-layer" aria-hidden="true">
-          <div
-            v-for="fly in chipFlies"
-            :key="fly.id"
-            class="chip-fly"
-            :style="chipFlyStyle(fly.seatId)"
-          />
-        </TransitionGroup>
+          <div class="table-felt">
         <Transition name="phase-banner">
           <div v-if="phaseBanner.visible" class="phase-banner">{{ phaseBanner.text }}</div>
         </Transition>
@@ -946,9 +877,6 @@ onUnmounted(() => {
 
         <Transition name="winner-banner">
           <div v-if="winnerCallout" class="winner-overlay" role="status" aria-live="polite">
-            <div class="winner-sparkles" aria-hidden="true">
-              <span v-for="n in 14" :key="n" class="sparkle" :style="{ '--i': n }" />
-            </div>
             <div class="winner-banner" :class="`winner-banner--${winnerCallout.type}`">
               <p class="winner-banner__eyebrow">{{ winnerCallout.eyebrow }}</p>
               <h2 class="winner-banner__title">{{ winnerCallout.title }}</h2>
@@ -973,32 +901,19 @@ onUnmounted(() => {
         </Transition>
 
         <div class="table-center">
-          <div
-            class="community-zone"
-            :class="{ 'community-zone--pulse': communityPulse || streetTransitionPending }"
-          >
+          <div class="community-zone">
             <div class="community">
-            <div
+            <PlayingCard
               v-for="slot in 5"
               :key="`c-${gameState.hand_number}-${slot}`"
-              class="community-slot"
-              :class="{ 'community-slot--live': slot <= displayedCommunityCount }"
-            >
-              <PlayingCard
-                :rank="visibleCommunityCards[slot - 1]?.rank"
-                :suit="visibleCommunityCards[slot - 1]?.suit"
-                :face-down="slot > displayedCommunityCount"
-                :reveal="shouldAnimateCommunityCard(slot)"
-                :slot-index="slot - 1"
-                small
-              />
-            </div>
+              :rank="visibleCommunityCards[slot - 1]?.rank"
+              :suit="visibleCommunityCards[slot - 1]?.suit"
+              :face-down="slot > displayedCommunityCount"
+              small
+            />
             </div>
           </div>
-          <div
-            class="pot-center"
-            :class="{ 'pot-center--pulse': actionHoldActive, 'pot-center--rising': potRising }"
-          >
+          <div class="pot-center" :class="{ 'pot-center--pulse': actionHoldActive }">
             <div class="pot-center__chips" aria-hidden="true">
               <span class="chip-stack" />
               <span class="chip-stack chip-stack--offset" />
@@ -1007,9 +922,7 @@ onUnmounted(() => {
             <span class="pot-center__amount">{{ displayedPot }}</span>
           </div>
         </div>
-          </div>
 
-        <div class="table-seats">
         <div
           v-for="seat in seatPositions"
           :key="seat.id"
@@ -1044,16 +957,7 @@ onUnmounted(() => {
           >
             {{ reaction.emoji }}
           </div>
-          <Transition name="dealer-move">
-            <div
-              v-if="gameState.dealer_player_id === seat.id"
-              :key="`${gameState.hand_number}-${seat.id}-dealer`"
-              class="dealer-chip"
-              title="Dealer"
-            >
-              D
-            </div>
-          </Transition>
+          <div v-if="gameState.dealer_player_id === seat.id" class="dealer-chip" title="Dealer">D</div>
           <div class="seat-info">
             <span class="seat-name">{{ seat.player?.nickname }}</span>
             <span v-if="blindRoles.sb === seat.id" class="blind-badge sb">SB</span>
@@ -1071,23 +975,20 @@ onUnmounted(() => {
                 :suit="seat.player?.hole_cards[cardIndex - 1]?.suit"
                 :face-down="!showHoleCardFaceUp(seat.id)"
                 :deal="shouldAnimateHoleCard(seat.id, cardIndex)"
-                :slot-index="cardIndex - 1"
                 small
               />
             </template>
           </div>
-          <Transition name="hand-desc">
-            <p
-              v-if="
-                seat.player?.hand_description &&
-                showHandDescriptions &&
-                (seat.id === playerId || showdownRevealed.has(seat.id))
-              "
-              class="hand-desc"
-            >
-              {{ seat.player.hand_description }}
-            </p>
-          </Transition>
+          <p
+            v-if="
+              seat.player?.hand_description &&
+              showHandDescriptions &&
+              (seat.id === playerId || showdownRevealed.has(seat.id))
+            "
+            class="hand-desc"
+          >
+            {{ seat.player.hand_description }}
+          </p>
           </div>
         </div>
       </div>
@@ -1131,8 +1032,7 @@ onUnmounted(() => {
         </div>
 
         <div class="controls-dock">
-          <Transition name="action-dock">
-            <div v-if="canAct" class="action-bar card action-bar--your-turn">
+          <div v-if="canAct" class="action-bar card action-bar--your-turn">
             <p class="turn-hint">
               <span class="turn-hint__dot" aria-hidden="true" />
               Your turn
@@ -1203,14 +1103,12 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
-            </div>
-          </Transition>
+          </div>
 
-          <Transition name="action-dock">
-            <div
-              v-if="isWaitingForTurn"
-              class="waiting card waiting--dock"
-            >
+          <div
+            v-else-if="isWaitingForTurn"
+            class="waiting card waiting--dock"
+          >
             <p v-if="dealInProgress">Dealing hole cards…</p>
             <p v-else-if="!bettingRoundReady">Cards dealt — betting begins…</p>
             <p v-else-if="streetTransitionPending">Dealing the {{ phaseLabel.toLowerCase() }}…</p>
@@ -1219,14 +1117,11 @@ onUnmounted(() => {
               Waiting for
               {{ gameState.players.find((p) => p.id === (effectiveCurrentActorId ?? gameState.current_actor_id))?.nickname }}…
             </p>
-            </div>
-          </Transition>
+          </div>
 
-          <Transition name="action-dock">
-            <div v-if="showNextHandControl" class="next-hand card next-hand--dock">
-              <button type="button" class="btn-primary" @click="nextHand">Deal next hand</button>
-            </div>
-          </Transition>
+          <div v-if="showNextHandControl" class="next-hand card next-hand--dock">
+            <button type="button" class="btn-primary" @click="nextHand">Deal next hand</button>
+          </div>
 
           <section class="reactions card" aria-label="Emoji reactions">
             <span class="reactions-label">React</span>
@@ -1384,61 +1279,6 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   color: #ffd700;
   text-shadow: 0 0 20px rgba(255, 215, 0, 0.25);
-  transition: transform 0.25s ease, color 0.25s ease;
-}
-
-.status-pot--rising .status-pot__chip {
-  animation: chipStackBounce 0.55s ease-out;
-}
-
-.status-pot--rising .status-pot__amount {
-  animation: potCountGlow 0.65s ease-out;
-  color: #fff3a0;
-}
-
-@keyframes chipStackBounce {
-  0%,
-  100% {
-    transform: translateY(0) scale(1);
-  }
-  35% {
-    transform: translateY(-4px) scale(1.12);
-  }
-  65% {
-    transform: translateY(1px) scale(0.96);
-  }
-}
-
-@keyframes potCountGlow {
-  0% {
-    transform: scale(1);
-    text-shadow: 0 0 20px rgba(255, 215, 0, 0.25);
-  }
-  40% {
-    transform: scale(1.12);
-    text-shadow: 0 0 28px rgba(255, 215, 0, 0.55);
-  }
-  100% {
-    transform: scale(1);
-    text-shadow: 0 0 20px rgba(255, 215, 0, 0.25);
-  }
-}
-
-.phase-pill-enter-active,
-.phase-pill-leave-active {
-  transition:
-    opacity 0.28s ease,
-    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.phase-pill-enter-from {
-  opacity: 0;
-  transform: translateY(6px) scale(0.92);
-}
-
-.phase-pill-leave-to {
-  opacity: 0;
-  transform: translateY(-6px) scale(0.92);
 }
 
 .sound-toggle {
@@ -1742,196 +1582,6 @@ onUnmounted(() => {
     inset 0 0 50px rgba(0, 0, 0, 0.45),
     0 8px 32px rgba(0, 0, 0, 0.5);
   z-index: 1;
-  transition: box-shadow 0.45s ease, filter 0.45s ease;
-}
-
-.table-seats {
-  position: absolute;
-  inset: 1.25rem;
-  z-index: 3;
-  pointer-events: none;
-}
-
-.table-seats > .seat {
-  pointer-events: auto;
-}
-
-.table-felt--spotlight {
-  box-shadow:
-    inset 0 0 0 10px #4a2f18,
-    inset 0 0 0 12px #6b4423,
-    inset 0 0 0 14px #3d2512,
-    inset 0 0 0 16px #7a5030,
-    inset 0 0 50px rgba(0, 0, 0, 0.45),
-    0 8px 32px rgba(0, 0, 0, 0.5),
-    inset 0 0 80px rgba(255, 215, 0, 0.08);
-  animation: tableSpotlight 2.4s ease-in-out infinite;
-}
-
-.table-felt--dealing {
-  animation: tableDealPulse 1.1s ease-in-out infinite;
-}
-
-@keyframes tableSpotlight {
-  0%,
-  100% {
-    filter: brightness(1);
-  }
-  50% {
-    filter: brightness(1.06);
-  }
-}
-
-@keyframes tableDealPulse {
-  0%,
-  100% {
-    box-shadow:
-      inset 0 0 0 10px #4a2f18,
-      inset 0 0 0 12px #6b4423,
-      inset 0 0 0 14px #3d2512,
-      inset 0 0 0 16px #7a5030,
-      inset 0 0 50px rgba(0, 0, 0, 0.45),
-      0 8px 32px rgba(0, 0, 0, 0.5);
-  }
-  50% {
-    box-shadow:
-      inset 0 0 0 10px #4a2f18,
-      inset 0 0 0 12px #6b4423,
-      inset 0 0 0 14px #3d2512,
-      inset 0 0 0 16px #7a5030,
-      inset 0 0 50px rgba(0, 0, 0, 0.45),
-      0 8px 32px rgba(0, 0, 0, 0.5),
-      inset 0 0 60px rgba(91, 156, 255, 0.12);
-  }
-}
-
-.chip-fly-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 6;
-  overflow: hidden;
-}
-
-.chip-fly {
-  position: absolute;
-  width: 1rem;
-  height: 1rem;
-  margin-left: -0.5rem;
-  margin-top: -0.5rem;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #ffe066 0%, #d4a017 55%, #b8860b 100%);
-  border: 2px dashed rgba(255, 255, 255, 0.55);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-  animation: chipFlyToPot 0.68s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-
-@keyframes chipFlyToPot {
-  0% {
-    left: var(--start-x, 50%);
-    top: var(--start-y, 50%);
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
-  100% {
-    left: 50%;
-    top: 50%;
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.35);
-  }
-}
-
-.chip-fly-enter-active {
-  animation: chipFlyToPot 0.68s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-
-.chip-fly-leave-active {
-  opacity: 0;
-}
-
-.burn-card-flash {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 8;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.35rem;
-  pointer-events: none;
-}
-
-.burn-card-flash__label {
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #ffb4a2;
-  text-shadow: 0 0 12px rgba(255, 100, 60, 0.45);
-}
-
-.burn-flash-enter-active {
-  animation: burnFlashIn 0.38s ease-out;
-}
-
-.burn-flash-leave-active {
-  animation: burnFlashOut 0.32s ease-in forwards;
-}
-
-@keyframes burnFlashIn {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.6) rotate(-12deg);
-    filter: brightness(2);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1) rotate(0deg);
-    filter: brightness(1);
-  }
-}
-
-@keyframes burnFlashOut {
-  to {
-    opacity: 0;
-    transform: translate(-50%, -70%) scale(0.75) rotate(8deg);
-    filter: brightness(0.5) blur(2px);
-  }
-}
-
-.winner-sparkles {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.sparkle {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 50%;
-  background: radial-gradient(circle, #fff9c4 0%, #ffd700 45%, transparent 70%);
-  animation: sparkleBurst 1.8s ease-out infinite;
-  animation-delay: calc(var(--i, 0) * 0.11s);
-  transform: rotate(calc(var(--i, 0) * 25.7deg)) translateY(0);
-}
-
-@keyframes sparkleBurst {
-  0% {
-    opacity: 0;
-    transform: rotate(calc(var(--i, 0) * 25.7deg)) translateY(0) scale(0.2);
-  }
-  20% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: rotate(calc(var(--i, 0) * 25.7deg)) translateY(calc(-4.5rem - var(--i, 0) * 0.15rem)) scale(0.6);
-  }
 }
 
 .table-felt::before {
@@ -1956,64 +1606,6 @@ onUnmounted(() => {
   width: clamp(56px, 5.8vw, 80px);
   height: clamp(80px, 8.2vw, 114px);
   font-size: clamp(1.05rem, 1.25vw, 1.3rem);
-}
-
-/* Hole cards — explicit sizes on desktop; flex-fit on mobile (see media queries) */
-.table-seats .hole-cards :deep(.playing-card) {
-  flex: 0 0 auto;
-  min-width: 0;
-}
-
-.table-seats .hole-cards :deep(.playing-card--small) {
-  width: clamp(56px, 5.8vw, 80px);
-  height: clamp(80px, 8.2vw, 114px);
-  font-size: clamp(1.05rem, 1.25vw, 1.3rem);
-}
-
-.table-seats .hole-cards :deep(.corner__rank) {
-  font-size: clamp(0.9rem, 1.2vw, 1.15rem);
-}
-
-.table-seats .hole-cards :deep(.corner__suit) {
-  font-size: clamp(0.8rem, 1.05vw, 1rem);
-}
-
-.table-seats .hole-cards :deep(.suit--center) {
-  font-size: clamp(1.75rem, 2.4vw, 2.6rem);
-}
-
-@media (min-width: 1024px) {
-  .seat {
-    min-width: clamp(120px, 11vw, 200px);
-    max-width: min(26vw, 220px);
-  }
-
-  .seat--players-6 {
-    min-width: clamp(108px, 10vw, 168px);
-    max-width: min(22vw, 180px);
-  }
-
-  .seat.me .hole-cards :deep(.playing-card--small) {
-    width: clamp(64px, 7vw, 94px);
-    height: clamp(92px, 10vw, 136px);
-    font-size: clamp(1.15rem, 1.45vw, 1.5rem);
-  }
-
-  .seat.me .hole-cards :deep(.corner__rank) {
-    font-size: clamp(1rem, 1.35vw, 1.3rem);
-  }
-
-  .seat.me .hole-cards :deep(.corner__suit) {
-    font-size: clamp(0.9rem, 1.2vw, 1.15rem);
-  }
-
-  .seat.me .hole-cards :deep(.suit--center) {
-    font-size: clamp(2rem, 2.75vw, 3rem);
-  }
-
-  .seat.me .hole-cards {
-    gap: 0.4rem;
-  }
 }
 
 .table-felt :deep(.corner__rank) {
@@ -2046,6 +1638,24 @@ onUnmounted(() => {
   font-size: clamp(1.9rem, 2.6vw, 2.85rem);
 }
 
+.seat.me .hole-cards :deep(.playing-card--small) {
+  width: clamp(64px, 7vw, 94px);
+  height: clamp(92px, 10vw, 136px);
+  font-size: clamp(1.15rem, 1.45vw, 1.5rem);
+}
+
+.seat.me .hole-cards :deep(.corner__rank) {
+  font-size: clamp(1rem, 1.35vw, 1.3rem);
+}
+
+.seat.me .hole-cards :deep(.corner__suit) {
+  font-size: clamp(0.9rem, 1.2vw, 1.15rem);
+}
+
+.seat.me .hole-cards :deep(.suit--center) {
+  font-size: clamp(2rem, 2.75vw, 3rem);
+}
+
 .table-center {
   position: absolute;
   top: 50%;
@@ -2065,55 +1675,11 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.25);
-  transition:
-    box-shadow 0.35s ease,
-    border-color 0.35s ease,
-    transform 0.35s ease;
-}
-
-.community-zone--pulse {
-  animation: communityZonePulse 0.85s ease-out;
-  border-color: rgba(255, 215, 0, 0.22);
-}
-
-@keyframes communityZonePulse {
-  0% {
-    transform: scale(1);
-    box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.25);
-  }
-  35% {
-    transform: scale(1.04);
-    box-shadow:
-      inset 0 2px 12px rgba(0, 0, 0, 0.25),
-      0 0 24px rgba(255, 215, 0, 0.18);
-  }
-  100% {
-    transform: scale(1);
-    box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.25);
-  }
 }
 
 .community {
   display: flex;
   gap: 0.5rem;
-}
-
-.community-slot {
-  flex-shrink: 0;
-  transition: transform 0.3s ease;
-}
-
-.community-slot--live:not(:has(.playing-card--reveal)) {
-  animation: communitySlotSettle 0.4s ease-out;
-}
-
-@keyframes communitySlotSettle {
-  from {
-    transform: translateY(4px);
-  }
-  to {
-    transform: translateY(0);
-  }
 }
 
 .pot-center {
@@ -2179,15 +1745,6 @@ onUnmounted(() => {
   color: #fff3a0;
 }
 
-.pot-center--rising .pot-center__chips {
-  animation: chipStackBounce 0.55s ease-out;
-}
-
-.pot-center--rising .pot-center__amount {
-  animation: potCountGlow 0.65s ease-out;
-  color: #fff3a0;
-}
-
 @keyframes potPulse {
   0% {
     transform: scale(1);
@@ -2210,8 +1767,6 @@ onUnmounted(() => {
   text-align: center;
   min-width: clamp(96px, 10vw, 158px);
   max-width: min(42vw, 158px);
-  container-type: inline-size;
-  container-name: seat;
   transition: filter 0.35s ease, opacity 0.5s ease, transform 0.5s ease;
 }
 
@@ -2477,35 +2032,6 @@ onUnmounted(() => {
   z-index: 3;
 }
 
-.dealer-move-enter-active {
-  animation: dealerChipLand 0.55s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.dealer-move-leave-active {
-  animation: dealerChipLift 0.35s ease-in forwards;
-}
-
-@keyframes dealerChipLand {
-  0% {
-    opacity: 0;
-    transform: scale(0.3) translateY(-16px) rotate(-120deg);
-  }
-  60% {
-    transform: scale(1.15) translateY(2px) rotate(8deg);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1) translateY(0) rotate(0deg);
-  }
-}
-
-@keyframes dealerChipLift {
-  to {
-    opacity: 0;
-    transform: scale(0.4) translateY(-12px) rotate(90deg);
-  }
-}
-
 .blind-badge {
   display: inline-block;
   font-size: 0.62rem;
@@ -2533,79 +2059,12 @@ onUnmounted(() => {
   display: flex;
   gap: 0.35rem;
   justify-content: center;
-  width: 100%;
-  max-width: 100%;
 }
 
 .hand-desc {
   font-size: 0.65rem;
   color: #f0e6c8;
   margin: 0.2rem 0 0;
-}
-
-.hand-desc-enter-active {
-  animation: handDescIn 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.hand-desc-leave-active {
-  animation: handDescIn 0.25s ease-in reverse;
-}
-
-@keyframes handDescIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.92);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.action-dock-enter-active {
-  animation: actionDockIn 0.42s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.action-dock-leave-active {
-  animation: actionDockIn 0.28s ease-in reverse;
-}
-
-@keyframes actionDockIn {
-  from {
-    opacity: 0;
-    transform: translateY(18px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.action-bar--your-turn {
-  border-color: rgba(255, 215, 0, 0.35);
-  box-shadow:
-    var(--shadow),
-    0 0 0 1px rgba(255, 215, 0, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  background: linear-gradient(160deg, rgba(28, 32, 48, 0.98) 0%, rgba(18, 24, 38, 0.98) 100%);
-  animation: yourTurnGlow 2s ease-in-out infinite;
-}
-
-@keyframes yourTurnGlow {
-  0%,
-  100% {
-    box-shadow:
-      var(--shadow),
-      0 0 0 1px rgba(255, 215, 0, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  }
-  50% {
-    box-shadow:
-      var(--shadow),
-      0 0 0 1px rgba(255, 215, 0, 0.22),
-      0 0 20px rgba(255, 215, 0, 0.12),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  }
 }
 
 .action-bar,
@@ -2679,6 +2138,15 @@ onUnmounted(() => {
 .reaction-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.action-bar--your-turn {
+  border-color: rgba(255, 215, 0, 0.35);
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px rgba(255, 215, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: linear-gradient(160deg, rgba(28, 32, 48, 0.98) 0%, rgba(18, 24, 38, 0.98) 100%);
 }
 
 .turn-hint {
@@ -3247,10 +2715,6 @@ onUnmounted(() => {
     inset: 0.85rem;
   }
 
-  .table-seats {
-    inset: 0.85rem;
-  }
-
   .community-zone {
     padding: 0.45rem 0.55rem;
   }
@@ -3282,32 +2746,9 @@ onUnmounted(() => {
     height: clamp(62px, 14vw, 102px);
   }
 
-  .table-seats .hole-cards :deep(.playing-card) {
-    flex: 1 1 0;
-    max-width: calc(50% - 0.175rem);
-  }
-
-  .table-seats .hole-cards :deep(.playing-card--small) {
-    width: 100%;
-    height: auto;
-    aspect-ratio: 24 / 34;
-    font-size: clamp(0.52rem, 12cqw, 0.82rem);
-  }
-
-  .table-seats .hole-cards :deep(.corner__rank) {
-    font-size: 0.9em;
-  }
-
-  .table-seats .hole-cards :deep(.corner__suit) {
-    font-size: 0.82em;
-  }
-
-  .table-seats .hole-cards :deep(.suit--center) {
-    font-size: 1.65em;
-  }
-
-  .hole-cards {
-    gap: 0.25rem;
+  .seat.me .hole-cards :deep(.playing-card--small) {
+    width: clamp(48px, 12vw, 80px);
+    height: clamp(68px, 17vw, 114px);
   }
 
   .phase-banner {
@@ -3358,10 +2799,6 @@ onUnmounted(() => {
     inset: 0.65rem;
   }
 
-  .table-seats {
-    inset: 0.65rem;
-  }
-
   .seat {
     min-width: clamp(78px, 22vw, 112px);
     max-width: min(40vw, 112px);
@@ -3387,22 +2824,6 @@ onUnmounted(() => {
 
   .hand-desc {
     font-size: 0.58rem;
-  }
-
-  .table-seats .hole-cards :deep(.playing-card--small) {
-    font-size: clamp(0.48rem, 13cqw, 0.72rem);
-  }
-
-  .table-seats .hole-cards :deep(.suit--center) {
-    font-size: 1.5em;
-  }
-
-  .hole-cards {
-    gap: 0.2rem;
-  }
-
-  .seat.me {
-    max-width: min(46vw, 120px);
   }
 
   .poker-board--waiting {
@@ -3465,34 +2886,9 @@ onUnmounted(() => {
   .seat.active .seat-info,
   .seat.winner .seat-info,
   .pot-center--pulse .pot-center__amount,
-  .pot-center--rising .pot-center__amount,
-  .pot-center--rising .pot-center__chips,
-  .status-pot--rising .status-pot__amount,
-  .status-pot--rising .status-pot__chip,
   .last-action--pop,
   .seat-reaction,
-  .turn-hint__dot,
-  .table-felt--spotlight,
-  .table-felt--dealing,
-  .community-zone--pulse,
-  .action-bar--your-turn,
-  .sparkle,
-  .chip-fly,
-  .burn-card-flash {
-    animation: none !important;
-  }
-
-  .phase-pill-enter-active,
-  .phase-pill-leave-active,
-  .action-dock-enter-active,
-  .action-dock-leave-active,
-  .hand-desc-enter-active,
-  .hand-desc-leave-active,
-  .dealer-move-enter-active,
-  .dealer-move-leave-active,
-  .burn-flash-enter-active,
-  .burn-flash-leave-active {
-    transition: none !important;
+  .turn-hint__dot {
     animation: none !important;
   }
 
@@ -3500,9 +2896,7 @@ onUnmounted(() => {
   .last-action,
   .pot-center,
   .btn-action,
-  .reaction-btn,
-  .table-felt,
-  .community-zone {
+  .reaction-btn {
     transition: none !important;
   }
 }
