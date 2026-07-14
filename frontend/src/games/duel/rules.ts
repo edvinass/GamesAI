@@ -25,7 +25,7 @@ export const duelRules: GameRules = {
     },
     {
       heading: 'Power-ups',
-      body: 'Rapid Fire, Wide Shot, Homing, Ghost, Mirror, and Overdrive last for several seconds after activation. Shield blocks all hits for the duration. Heal and Laser apply instantly. Freeze affects the opponent for a timed period.',
+      body: 'Shoot orbs to collect, then hold E to activate. Machine Gun and Rapid Fire spray fast bullets. Bomb and Cluster launch explosives. Burst fires a 6-round salvo. Laser and Railgun are instant beams — Railgun pierces cover. Pierce shots ignore obstacles. Shield, Ghost, Mirror, Homing, Wide Shot, Overdrive, Freeze, and Heal round out the arsenal.',
     },
     {
       heading: 'Match formats',

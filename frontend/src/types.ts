@@ -104,8 +104,10 @@ export interface SnakeGameState {
 
 export interface DuelFighterEffects {
   rapid_fire_until: number
+  machine_gun_until?: number
   shield_until?: number
   wide_shot_until?: number
+  pierce_until?: number
   ghost_until: number
   homing_until?: number
   mirror_until?: number
@@ -116,8 +118,10 @@ export interface DuelFighterEffects {
   mirror_active?: boolean
   homing_active?: boolean
   rapid_fire_active?: boolean
+  machine_gun_active?: boolean
   shield_active?: boolean
   wide_shot_active?: boolean
+  pierce_active?: boolean
   overdrive_active?: boolean
 }
 
@@ -151,6 +155,7 @@ export interface DuelBullet {
   damage?: number
   bounces_remaining?: number
   homing?: boolean
+  kind?: 'normal' | 'bomb'
 }
 
 export interface DuelObstacle {
@@ -165,15 +170,21 @@ export interface DuelPowerup {
   y: number
   type:
     | 'rapid_fire'
+    | 'machine_gun'
     | 'shield'
     | 'wide_shot'
+    | 'pierce'
     | 'ghost'
     | 'freeze'
     | 'laser'
+    | 'railgun'
     | 'homing'
     | 'heal'
     | 'mirror'
     | 'overdrive'
+    | 'bomb'
+    | 'cluster'
+    | 'burst'
   despawn_at_tick?: number
 }
 
@@ -194,6 +205,7 @@ export interface DuelGameState {
   best_of: number
   match_format: string
   mutator: string
+  powerups_enabled: boolean
   bullet_speed: number
   tick_ms: number
   charge_max_ticks: number

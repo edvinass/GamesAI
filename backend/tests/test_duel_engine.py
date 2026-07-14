@@ -487,3 +487,110 @@ def test_powerup_release_uses_server_activation_progress(engine: DuelEngine, sta
     assert state["fighters"][pid]["stored_powerup"] is None
     assert state["fighters"][pid]["effects"]["shield_until"] > state["tick"]
     assert any(e["type"] == "powerup_activated" for e in events)
+
+
+def test_powerup_activation_with_realistic_server_lag(engine: DuelEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    state["fighters"][pid]["stored_powerup"] = "shield"
+
+    state, _ = engine.apply_action(state, {"type": "powerup_hold_start"}, player)
+    for _ in range(8):
+        state, _ = engine.tick(state)
+
+    state, events = engine.apply_action(
+        state,
+        {"type": "powerup_hold_release", "powerup_activation_ticks": 12},
+        player,
+    )
+    assert state["fighters"][pid]["stored_powerup"] is None
+    assert any(e["type"] == "powerup_activated" for e in events)
+
+
+def test_initial_powerup_spawn_is_sooner_than_interval(engine: DuelEngine) -> None:
+    players = make_players(2)
+    state = engine.create_initial_state(players, {"match_format": "best_of_5"})
+    first_spawn = state["next_powerup_at_tick"]
+    assert 25 <= first_spawn <= 55
+
+
+def test_bomb_detonates_on_fighter(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = []
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 20
+    state["bullets"] = [
+        {
+            "id": 0,
+            "x": 19,
+            "y": 6,
+            "vx": 1,
+            "vy": 0,
+            "owner_id": "p0",
+            "damage": 0,
+            "bounces_remaining": 0,
+            "kind": "bomb",
+        }
+    ]
+
+    state, events = engine.tick(state)
+    assert not state["bullets"]
+    assert any(e["type"] == "bomb_detonated" for e in events)
+    assert state["fighters"]["p1"]["hp"] < state["fighters"]["p1"]["max_hp"]
+
+
+def test_machine_gun_spawns_fast_bullets(engine: DuelEngine, state: dict) -> None:
+    left = state["fighters"]["p0"]
+    left["effects"]["machine_gun_until"] = state["tick"] + 80
+    left["pending_shoot"] = True
+    left["cooldown_until_tick"] = 0
+
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 1
+    assert state["bullets"][0]["vx"] == 4
+    assert state["bullets"][0]["damage"] == 1
+
+
+def test_pierce_passes_through_obstacle(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = [{"x": 10, "y": 4, "w": 1, "h": 2}]
+    state["fighters"]["p0"]["effects"]["pierce_until"] = state["tick"] + 80
+    state["fighters"]["p0"]["y"] = 5
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 12
+    state["bullets"] = [
+        {"id": 0, "x": 9, "y": 5, "vx": 3, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}
+    ]
+
+    state, events = engine.tick(state)
+    assert any(e["type"] == "player_hit" for e in events)
+
+
+def test_burst_fires_multiple_shots(engine: DuelEngine, state: dict) -> None:
+    state["fighters"]["p0"]["burst_shots_remaining"] = 3
+    state["fighters"]["p0"]["burst_next_at_tick"] = state["tick"]
+
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 1
+    assert state["fighters"]["p0"]["burst_shots_remaining"] == 2
+
+    state, _ = engine.tick(state)
+    state, _ = engine.tick(state)
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 2
+    assert state["fighters"]["p0"]["burst_shots_remaining"] == 1
+
+
+def test_railgun_pierces_obstacle(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = [{"x": 10, "y": 4, "w": 1, "h": 2}]
+    state["fighters"]["p0"]["y"] = 5
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 15
+    events: list[dict] = []
+    engine._activate_stored_powerup(
+        state,
+        {**state["fighters"]["p0"], "stored_powerup": "railgun"},
+        "p0",
+        events,
+    )
+
+    assert any(e["type"] == "player_hit" for e in events)
+    assert state["fighters"]["p1"]["hp"] < state["fighters"]["p1"]["max_hp"]

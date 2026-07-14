@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, DuelGameState } from '@/types'
 import { DuelRenderer, POWERUP_ACTIVATION_TICKS, POWERUP_COLORS, POWERUP_ICONS, POWERUP_LABELS } from './duelRenderer'
 
@@ -26,7 +26,7 @@ const canControl = computed(
   () => props.gameState.phase === 'playing' && isAlive.value,
 )
 const chargeEnabled = computed(() => props.gameState.match_format !== 'quick_duel')
-const powerupsEnabled = computed(() => props.gameState.match_format !== 'quick_duel')
+const powerupsEnabled = computed(() => props.gameState.powerups_enabled ?? props.gameState.match_format !== 'quick_duel')
 const chargeMaxTicks = computed(() => props.gameState.charge_max_ticks ?? 15)
 const tickMs = computed(() => props.gameState.tick_ms || 75)
 const storedPowerup = computed(() => myFighter.value?.stored_powerup ?? null)
@@ -72,6 +72,12 @@ const charging = ref(false)
 const chargeTicks = ref(0)
 const activatingPowerup = ref(false)
 const powerupActivationTicks = ref(0)
+const powerupReady = computed(
+  () =>
+    activatingPowerup.value &&
+    (powerupActivationTicks.value >= POWERUP_ACTIVATION_TICKS ||
+      (myFighter.value?.powerup_activation_ticks ?? 0) >= POWERUP_ACTIVATION_TICKS),
+)
 const localChargeInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const localPowerupInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const hpPulseId = ref<string | null>(null)
@@ -150,10 +156,38 @@ function releasePowerupActivation() {
   }
   emit('action', {
     type: 'powerup_hold_release',
-    powerup_activation_ticks: powerupActivationTicks.value,
+    powerup_activation_ticks: Math.max(
+      powerupActivationTicks.value,
+      myFighter.value?.powerup_activation_ticks ?? 0,
+    ),
   })
   powerupActivationTicks.value = 0
 }
+
+watch(
+  () => myFighter.value?.powerup_activation_ticks,
+  (serverTicks) => {
+    if (!activatingPowerup.value || typeof serverTicks !== 'number') return
+    powerupActivationTicks.value = Math.max(
+      powerupActivationTicks.value,
+      Math.min(POWERUP_ACTIVATION_TICKS, serverTicks),
+    )
+  },
+)
+
+watch(
+  () => myFighter.value?.stored_powerup,
+  (stored) => {
+    if (!stored) {
+      activatingPowerup.value = false
+      powerupActivationTicks.value = 0
+      if (localPowerupInterval.value) {
+        clearInterval(localPowerupInterval.value)
+        localPowerupInterval.value = null
+      }
+    }
+  },
+)
 
 function startCharge() {
   if (!canControl.value || !chargeEnabled.value) return
@@ -338,7 +372,7 @@ onUnmounted(() => {
       <div v-if="activatingPowerup && canControl && storedPowerup" class="charge-bar powerup-bar">
         <div
           class="charge-fill powerup-fill"
-          :class="{ 'charge-full': powerupActivationTicks >= POWERUP_ACTIVATION_TICKS }"
+          :class="{ 'charge-full': powerupReady }"
           :style="{
             width: `${(powerupActivationTicks / POWERUP_ACTIVATION_TICKS) * 100}%`,
             background: POWERUP_COLORS[storedPowerup] ?? '#a855f7',
@@ -346,7 +380,7 @@ onUnmounted(() => {
         />
         <span class="charge-label powerup-label">
           {{
-            powerupActivationTicks >= POWERUP_ACTIVATION_TICKS
+            powerupReady
               ? 'RELEASE!'
               : `Activating ${POWERUP_LABELS[storedPowerup] ?? storedPowerup}…`
           }}
@@ -404,7 +438,9 @@ onUnmounted(() => {
             />
           </span>
           <span v-if="row.fighter?.effects?.rapid_fire_active" class="effect-badge" title="Rapid Fire">⚡</span>
+          <span v-if="row.fighter?.effects?.machine_gun_active" class="effect-badge" title="Machine Gun">🔫</span>
           <span v-if="row.fighter?.effects?.wide_shot_active" class="effect-badge" title="Wide Shot">▣</span>
+          <span v-if="row.fighter?.effects?.pierce_active" class="effect-badge" title="Pierce">➤</span>
           <span v-if="row.fighter?.effects?.overdrive_active" class="effect-badge" title="Overdrive">✦</span>
           <span v-if="row.fighter?.effects?.shield_active" class="effect-badge shield-pulse">🛡</span>
           <span v-if="row.fighter?.effects?.ghost_active" class="effect-badge" title="Ghost">◎</span>

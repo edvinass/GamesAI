@@ -34,41 +34,59 @@ interface Star {
 
 export const POWERUP_COLORS: Record<string, string> = {
   rapid_fire: '#f97316',
+  machine_gun: '#eab308',
   shield: '#38bdf8',
   wide_shot: '#a855f7',
+  pierce: '#14b8a6',
   ghost: '#94a3b8',
   freeze: '#67e8f9',
   laser: '#f43f5e',
+  railgun: '#dc2626',
   homing: '#22c55e',
   heal: '#4ade80',
   mirror: '#e879f9',
   overdrive: '#fb923c',
+  bomb: '#f59e0b',
+  cluster: '#ef4444',
+  burst: '#60a5fa',
 }
 
 export const POWERUP_ICONS: Record<string, string> = {
   rapid_fire: '⚡',
+  machine_gun: '🔫',
   shield: '◆',
   wide_shot: '▣',
+  pierce: '➤',
   ghost: '◎',
   freeze: '❄',
   laser: '═',
+  railgun: '▬',
   homing: '↯',
   heal: '+',
   mirror: '⟲',
   overdrive: '✦',
+  bomb: '💣',
+  cluster: '✸',
+  burst: '⋯',
 }
 
 export const POWERUP_LABELS: Record<string, string> = {
   rapid_fire: 'Rapid Fire',
+  machine_gun: 'Machine Gun',
   shield: 'Shield',
   wide_shot: 'Wide Shot',
+  pierce: 'Pierce',
   ghost: 'Ghost',
   freeze: 'Freeze',
   laser: 'Laser',
+  railgun: 'Railgun',
   homing: 'Homing',
   heal: 'Heal',
   mirror: 'Mirror',
   overdrive: 'Overdrive',
+  bomb: 'Bomb',
+  cluster: 'Cluster',
+  burst: 'Burst',
 }
 
 export const POWERUP_ACTIVATION_TICKS = 12
@@ -192,14 +210,39 @@ export class DuelRenderer {
     const action = state.last_action
     if (!action) return
     const type = action.type as string
-    if (type !== 'shoot' && type !== 'release_charge') return
-    const stamp = `${action.player_id}:${type}:${action.charge_ticks ?? 0}`
+    if (type !== 'shoot' && type !== 'release_charge' && type !== 'bomb_detonated') return
+    const stamp = `${action.player_id}:${type}:${action.charge_ticks ?? 0}:${action.x ?? ''}:${action.y ?? ''}`
     if (stamp === this.lastActionStamp) return
     this.lastActionStamp = stamp
 
     const playerId = action.player_id as string
     const fighter = state.fighters[playerId]
     if (!fighter) return
+
+    if (type === 'bomb_detonated') {
+      const bx = Number(action.x ?? 0)
+      const by = Number(action.y ?? 0)
+      const cx = offsetX + bx * cell + cell / 2
+      const cy = offsetY + by * cell + cell / 2
+      this.spawnHitBurst(cx, cy, '#f59e0b', true, false)
+      for (let i = 0; i < 24; i++) {
+        const angle = (Math.PI * 2 * i) / 24 + Math.random() * 0.3
+        this.particles.push({
+          x: cx,
+          y: cy,
+          vx: Math.cos(angle) * (2 + Math.random() * 4),
+          vy: Math.sin(angle) * (2 + Math.random() * 4),
+          life: 1,
+          maxLife: 1,
+          color: i % 3 === 0 ? '#ef4444' : '#fbbf24',
+          size: 2 + Math.random() * 3,
+          kind: 'spark',
+        })
+      }
+      this.shakeUntil = Date.now() + 220
+      this.shakeIntensity = 7
+      return
+    }
 
     const pose = this.fighterPoses.get(playerId)
     const displayY = pose?.y ?? fighter.display_y ?? fighter.y
@@ -591,11 +634,31 @@ export class DuelRenderer {
       const pos = this.bulletDisplayPos(bullet, now)
       const cx = offsetX + pos.x * cell + cell / 2
       const cy = offsetY + pos.y * cell + cell / 2
-      const charged = (bullet.damage ?? 1) >= 2
+      const isBomb = bullet.kind === 'bomb'
+      const charged = !isBomb && (bullet.damage ?? 1) >= 2
       const homing = bullet.homing
-      const color = homing ? '#22c55e' : charged ? '#fb7185' : '#fbbf24'
+      const color = isBomb ? '#f59e0b' : homing ? '#22c55e' : charged ? '#fb7185' : '#fbbf24'
       const dir = bullet.vx >= 0 ? 1 : -1
       const speed = Math.abs(bullet.vx) || 1
+
+      if (isBomb) {
+        const pulse = 0.85 + Math.sin(now * 0.012 + bullet.id) * 0.15
+        const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, cell * 0.55 * pulse)
+        glow.addColorStop(0, rgba('#fef3c7', 0.95))
+        glow.addColorStop(0.45, rgba('#f59e0b', 0.75))
+        glow.addColorStop(1, rgba('#ef4444', 0))
+        ctx.fillStyle = glow
+        ctx.beginPath()
+        ctx.arc(cx, cy, cell * 0.5 * pulse, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#451a03'
+        ctx.font = `bold ${Math.max(10, cell * 0.38)}px system-ui`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('💣', cx, cy + 1)
+        continue
+      }
+
       const trailSteps = 4 + speed * 3
 
       for (let i = 1; i <= trailSteps; i++) {

@@ -438,8 +438,13 @@ def _should_activate_powerup(
         enemy_center = _fighter_center(enemy["y"], height)
         if abs(shoot_row - enemy_center) <= 1 and random.random() < 0.45:
             return True, False
-    if stored in ("rapid_fire", "homing", "overdrive") and random.random() < 0.2:
+    if stored in ("rapid_fire", "machine_gun", "homing", "overdrive", "pierce") and random.random() < 0.2:
         return True, False
+    if stored in ("bomb", "cluster", "burst", "railgun") and enemy is not None:
+        shoot_row = _fighter_center(fighter["y"], height)
+        enemy_center = _fighter_center(enemy["y"], height)
+        if abs(shoot_row - enemy_center) <= 2 and random.random() < 0.4:
+            return True, False
     return False, False
 
 
