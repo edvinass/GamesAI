@@ -172,14 +172,46 @@ def test_quick_duel_finishes_match_on_hit(engine: DuelEngine) -> None:
 
 def test_shield_blocks_damage(engine: DuelEngine, state: dict) -> None:
     state["obstacles"] = []
-    state["fighters"]["p1"]["effects"]["shield"] = True
+    state["fighters"]["p1"]["effects"]["shield_until"] = state["tick"] + 80
     state["fighters"]["p1"]["y"] = 5
     state["fighters"]["p1"]["x"] = 10
     state["bullets"] = [{"id": 0, "x": 9, "y": 5, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}]
 
     state, events = engine.tick(state)
     assert state["fighters"]["p1"]["hp"] == 3
+    assert state["fighters"]["p1"]["effects"]["shield_until"] > state["tick"]
     assert any(e["type"] == "shield_blocked" for e in events)
+
+
+def test_shield_blocks_multiple_hits_during_duration(engine: DuelEngine, state: dict) -> None:
+    state["obstacles"] = []
+    state["fighters"]["p1"]["effects"]["shield_until"] = state["tick"] + 80
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["x"] = 10
+
+    for x in (9, 9):
+        state["bullets"] = [
+            {"id": 0, "x": x, "y": 5, "vx": 1, "vy": 0, "owner_id": "p0", "damage": 1, "bounces_remaining": 0}
+        ]
+        state, events = engine.tick(state)
+        assert state["fighters"]["p1"]["hp"] == 3
+        assert any(e["type"] == "shield_blocked" for e in events)
+
+
+def test_wide_shot_lasts_for_duration(engine: DuelEngine, state: dict) -> None:
+    left = state["fighters"]["p0"]
+    left["effects"]["wide_shot_until"] = state["tick"] + 80
+    left["pending_shoot"] = True
+    left["cooldown_until_tick"] = 0
+
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 3
+    assert left["effects"]["wide_shot_until"] > state["tick"]
+
+    left["pending_shoot"] = True
+    left["cooldown_until_tick"] = 0
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 6
 
 
 def test_obstacle_blocks_bullet(engine: DuelEngine, state: dict) -> None:
@@ -247,7 +279,7 @@ def test_powerup_collected_by_bullet(engine: DuelEngine, state: dict) -> None:
     state, events = engine.tick(state)
     assert state["powerup"] is None
     assert state["fighters"]["p0"]["stored_powerup"] == "shield"
-    assert state["fighters"]["p0"]["effects"]["shield"] is False
+    assert state["fighters"]["p0"]["effects"].get("shield_until", 0) == 0
     assert any(e["type"] == "powerup_collected" for e in events)
 
 
@@ -260,10 +292,13 @@ def test_powerup_activation(engine: DuelEngine, state: dict) -> None:
     fighter = state["fighters"][pid]
     assert fighter["activating_powerup"] is True
 
-    fighter["powerup_activation_ticks"] = 12
-    state, events = engine.apply_action(state, {"type": "powerup_hold_release"}, player)
+    state, events = engine.apply_action(
+        state,
+        {"type": "powerup_hold_release", "powerup_activation_ticks": 12},
+        player,
+    )
     assert state["fighters"][pid]["stored_powerup"] is None
-    assert state["fighters"][pid]["effects"]["shield"] is True
+    assert state["fighters"][pid]["effects"]["shield_until"] > state["tick"]
     assert any(e["type"] == "powerup_activated" for e in events)
 
 
@@ -285,7 +320,11 @@ def test_heal_powerup(engine: DuelEngine, state: dict) -> None:
     state["fighters"][pid]["powerup_activation_ticks"] = 12
     state["fighters"][pid]["activating_powerup"] = True
 
-    state, events = engine.apply_action(state, {"type": "powerup_hold_release"}, player)
+    state, events = engine.apply_action(
+        state,
+        {"type": "powerup_hold_release", "powerup_activation_ticks": 12},
+        player,
+    )
     assert state["fighters"][pid]["hp"] == 2
     assert any(e["type"] == "powerup_activated" for e in events)
 

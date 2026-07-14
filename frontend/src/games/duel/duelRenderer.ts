@@ -702,7 +702,7 @@ export class DuelRenderer {
         this.drawFighterSegment(ctx, fx, fy, fw, barH, fighter.color, dangerRows.has(barY) && isMe, moving, now)
       }
 
-      if (fighter.effects?.shield) {
+      if (fighter.effects?.shield_active) {
         const top = offsetY + displayY * cell
         const height = cell * barCount
         const shimmer = now * 0.004

@@ -114,6 +114,7 @@ function startPowerupActivation() {
   powerupActivationTicks.value = 0
   emit('action', { type: 'powerup_hold_start' })
   if (localPowerupInterval.value) clearInterval(localPowerupInterval.value)
+  const tickMs = props.gameState.tick_ms || 75
   localPowerupInterval.value = setInterval(() => {
     if (activatingPowerup.value) {
       powerupActivationTicks.value = Math.min(
@@ -121,7 +122,7 @@ function startPowerupActivation() {
         powerupActivationTicks.value + 1,
       )
     }
-  }, 75)
+  }, tickMs)
 }
 
 function releasePowerupActivation() {
@@ -131,7 +132,10 @@ function releasePowerupActivation() {
     clearInterval(localPowerupInterval.value)
     localPowerupInterval.value = null
   }
-  emit('action', { type: 'powerup_hold_release' })
+  emit('action', {
+    type: 'powerup_hold_release',
+    powerup_activation_ticks: powerupActivationTicks.value,
+  })
   powerupActivationTicks.value = 0
 }
 
@@ -376,7 +380,14 @@ onUnmounted(() => {
               :class="{ spent: i > row.fighter.hp, low: row.fighter.hp === 1 && i === 1 }"
             />
           </span>
-          <span v-if="row.fighter?.effects?.shield" class="effect-badge shield-pulse">🛡</span>
+          <span v-if="row.fighter?.effects?.rapid_fire_active" class="effect-badge" title="Rapid Fire">⚡</span>
+          <span v-if="row.fighter?.effects?.wide_shot_active" class="effect-badge" title="Wide Shot">▣</span>
+          <span v-if="row.fighter?.effects?.overdrive_active" class="effect-badge" title="Overdrive">✦</span>
+          <span v-if="row.fighter?.effects?.shield_active" class="effect-badge shield-pulse">🛡</span>
+          <span v-if="row.fighter?.effects?.ghost_active" class="effect-badge" title="Ghost">◎</span>
+          <span v-if="row.fighter?.effects?.mirror_active" class="effect-badge" title="Mirror">⟲</span>
+          <span v-if="row.fighter?.effects?.homing_active" class="effect-badge" title="Homing">↯</span>
+          <span v-if="row.fighter?.effects?.freeze_active" class="effect-badge" title="Frozen">❄</span>
           <span
             v-if="row.id === playerId && row.fighter?.stored_powerup"
             class="effect-badge stored-powerup"
@@ -391,7 +402,7 @@ onUnmounted(() => {
 
       <div class="controls-hint">
         <p v-if="canControl && chargeEnabled && storedPowerup">
-          <strong>Controls:</strong> W/S or ↑/↓ to move · Hold Space to activate power-up · Hold F to charge & fire
+          <strong>Controls:</strong> W/S or ↑/↓ to move · Hold Space until the bar fills to activate · Hold F to charge & fire
         </p>
         <p v-else-if="canControl && chargeEnabled">
           <strong>Controls:</strong> W/S or ↑/↓ to move · Hold Space to charge, release to fire

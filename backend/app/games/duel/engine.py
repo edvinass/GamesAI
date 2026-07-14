@@ -296,12 +296,12 @@ class DuelEngine(GamePlugin):
                 "powerup_activation_ticks": 0,
                 "effects": {
                     "rapid_fire_until": 0,
-                    "shield": False,
-                    "wide_shot": False,
+                    "shield_until": 0,
+                    "wide_shot_until": 0,
                     "ghost_until": 0,
                     "homing_until": 0,
                     "mirror_until": 0,
-                    "overdrive_shots": 0,
+                    "overdrive_until": 0,
                 },
             }
             if not self._fighter_overlaps_obstacle(candidate, fighter_height, obstacles):
@@ -325,12 +325,12 @@ class DuelEngine(GamePlugin):
             "powerup_activation_ticks": 0,
             "effects": {
                 "rapid_fire_until": 0,
-                "shield": False,
-                "wide_shot": False,
+                "shield_until": 0,
+                "wide_shot_until": 0,
                 "ghost_until": 0,
                 "homing_until": 0,
                 "mirror_until": 0,
-                "overdrive_shots": 0,
+                "overdrive_until": 0,
             },
         }
 
@@ -444,17 +444,30 @@ class DuelEngine(GamePlugin):
         if action_type == "powerup_hold_release":
             if not state["settings"].get("powerups_enabled"):
                 return state, events
-            if not fighter.get("activating_powerup"):
+            if not fighter.get("stored_powerup"):
                 return state, events
             fighter["activating_powerup"] = False
-            ticks = int(fighter.get("powerup_activation_ticks", 0))
-            if ticks >= POWERUP_ACTIVATION_TICKS:
+            ticks = max(
+                0,
+                min(
+                    POWERUP_ACTIVATION_TICKS + 3,
+                    int(
+                        action.get(
+                            "powerup_activation_ticks",
+                            fighter.get("powerup_activation_ticks", 0),
+                        )
+                    ),
+                ),
+            )
+            activated = ticks >= POWERUP_ACTIVATION_TICKS
+            if activated:
                 self._activate_stored_powerup(state, fighter, player_id, events)
             fighter["powerup_activation_ticks"] = 0
             state["last_action"] = {
                 "type": "powerup_hold_release",
                 "player_id": player_id,
-                "activated": ticks >= POWERUP_ACTIVATION_TICKS,
+                "activated": activated,
+                "powerup_activation_ticks": ticks,
             }
             return state, events
 
@@ -645,14 +658,11 @@ class DuelEngine(GamePlugin):
         bounces = int(settings.get("ricochet_bounces", 0))
         effects = fighter.get("effects", {})
 
-        if effects.get("wide_shot"):
+        if tick < effects.get("wide_shot_until", 0):
             width = max(width, 3)
-            fighter["effects"]["wide_shot"] = False
 
-        overdrive = int(effects.get("overdrive_shots", 0))
-        if overdrive > 0:
+        if tick < effects.get("overdrive_until", 0):
             width = max(width, 3)
-            effects["overdrive_shots"] = overdrive - 1
 
         center_row = self._shoot_row(fighter, fighter_height)
         rows = self._bullet_rows(center_row, width, state["grid_height"])
@@ -694,9 +704,9 @@ class DuelEngine(GamePlugin):
         crit: bool,
         events: list[dict],
     ) -> bool:
+        tick = state["tick"]
         effects = fighter.get("effects", {})
-        if effects.get("shield"):
-            fighter["effects"]["shield"] = False
+        if tick < effects.get("shield_until", 0):
             events.append({"type": "shield_blocked", "player_id": target_id, "shooter_id": owner_id})
             state["last_hit"] = {"player_id": target_id, "damage": 0, "crit": False, "blocked": True}
             return False
@@ -822,9 +832,9 @@ class DuelEngine(GamePlugin):
         if ptype == "rapid_fire":
             effects["rapid_fire_until"] = tick + duration
         elif ptype == "shield":
-            effects["shield"] = True
+            effects["shield_until"] = tick + duration
         elif ptype == "wide_shot":
-            effects["wide_shot"] = True
+            effects["wide_shot_until"] = tick + duration
         elif ptype == "ghost":
             effects["ghost_until"] = tick + duration
         elif ptype == "homing":
@@ -832,7 +842,7 @@ class DuelEngine(GamePlugin):
         elif ptype == "mirror":
             effects["mirror_until"] = tick + duration
         elif ptype == "overdrive":
-            effects["overdrive_shots"] = 3
+            effects["overdrive_until"] = tick + duration
         elif ptype == "heal":
             fighter["hp"] = min(fighter.get("max_hp", 3), fighter.get("hp", 1) + 1)
         elif ptype == "freeze":
@@ -1234,6 +1244,10 @@ class DuelEngine(GamePlugin):
             effects["freeze_active"] = tick < effects.get("freeze_until", 0)
             effects["mirror_active"] = tick < effects.get("mirror_until", 0)
             effects["homing_active"] = tick < effects.get("homing_until", 0)
+            effects["rapid_fire_active"] = tick < effects.get("rapid_fire_until", 0)
+            effects["shield_active"] = tick < effects.get("shield_until", 0)
+            effects["wide_shot_active"] = tick < effects.get("wide_shot_until", 0)
+            effects["overdrive_active"] = tick < effects.get("overdrive_until", 0)
             public["effects"] = effects
             public["stored_powerup"] = fighter.get("stored_powerup")
             public["activating_powerup"] = fighter.get("activating_powerup", False)

@@ -17,7 +17,7 @@ export const duelRules: GameRules = {
     },
     {
       heading: 'Health & crits',
-      body: 'Fighters have 3 HP in match modes. Body hits deal 1 damage; center-row hits deal 2. Shields block the next hit; Heal restores 1 HP.',
+      body: 'Fighters have 3 HP in match modes. Body hits deal 1 damage; center-row hits deal 2. Active power-ups last several seconds — shields block every hit while active.',
     },
     {
       heading: 'Arena',
@@ -25,7 +25,7 @@ export const duelRules: GameRules = {
     },
     {
       heading: 'Power-ups',
-      body: 'Rapid Fire speeds up shots. Shield blocks one hit. Wide Shot spreads your next volley. Ghost hides you from the enemy. Freeze locks the opponent in place. Laser fires a piercing beam. Homing curves bullets toward your rival. Mirror reflects incoming shots. Overdrive triples your next burst. Heal restores 1 HP.',
+      body: 'Rapid Fire, Wide Shot, Homing, Ghost, Mirror, and Overdrive last for several seconds after activation. Shield blocks all hits for the duration. Heal and Laser apply instantly. Freeze affects the opponent for a timed period.',
     },
     {
       heading: 'Match formats',

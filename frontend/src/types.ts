@@ -104,17 +104,21 @@ export interface SnakeGameState {
 
 export interface DuelFighterEffects {
   rapid_fire_until: number
-  shield: boolean
-  wide_shot: boolean
+  shield_until?: number
+  wide_shot_until?: number
   ghost_until: number
   homing_until?: number
   mirror_until?: number
-  overdrive_shots?: number
+  overdrive_until?: number
   freeze_until?: number
   ghost_active?: boolean
   freeze_active?: boolean
   mirror_active?: boolean
   homing_active?: boolean
+  rapid_fire_active?: boolean
+  shield_active?: boolean
+  wide_shot_active?: boolean
+  overdrive_active?: boolean
 }
 
 export interface DuelFighter {
