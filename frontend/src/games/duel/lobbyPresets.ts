@@ -21,13 +21,14 @@ export const DUEL_LOBBY_PRESETS: DuelLobbyPreset[] = [
       obstacle_count: 2,
       obstacle_rotation: false,
       quick_duel_loadout: 'none',
+      powerup_draft_enabled: false,
       arena_theme: 'classic',
     },
   },
   {
     id: 'ranked',
     label: 'Ranked',
-    description: 'Best of 5 · Power-up draft between rounds',
+    description: 'Best of 5 · Optional power-up ban phase',
     settings: {
       solo_practice: false,
       match_format: 'best_of_5',
@@ -39,6 +40,7 @@ export const DUEL_LOBBY_PRESETS: DuelLobbyPreset[] = [
       obstacle_count: 3,
       obstacle_rotation: true,
       quick_duel_loadout: 'none',
+      powerup_draft_enabled: true,
       arena_theme: 'neon',
     },
   },

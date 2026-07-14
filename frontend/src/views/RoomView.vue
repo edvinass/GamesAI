@@ -165,6 +165,11 @@ const duelTutorialMode = computed({
   set: (val: boolean) => updateSettings({ tutorial_mode: val }),
 })
 
+const duelPowerupDraftEnabled = computed({
+  get: () => Boolean(room.value?.settings?.powerup_draft_enabled),
+  set: (val: boolean) => updateSettings({ powerup_draft_enabled: val }),
+})
+
 const duelAiPersonality = computed({
   get: () => String(room.value?.settings?.ai_personality ?? 'balanced'),
   set: (val: string) => updateSettings({ ai_personality: val }),
@@ -397,6 +402,7 @@ async function copyUrl() {
         v-model:training-drill="duelTrainingDrill"
         v-model:obstacle-rotation="duelObstacleRotation"
         v-model:tutorial-mode="duelTutorialMode"
+        v-model:powerup-draft-enabled="duelPowerupDraftEnabled"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

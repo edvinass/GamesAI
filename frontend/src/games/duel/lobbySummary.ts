@@ -59,6 +59,14 @@ export function formatDuelLobbySummary(room: Room): string[] {
     lines.push('Opening tips enabled')
   }
 
+  if (s.match_format !== 'quick_duel') {
+    lines.push(
+      s.powerup_draft_enabled
+        ? 'Power-up ban phase: on'
+        : 'Power-up ban phase: off',
+    )
+  }
+
   const speed = Number(s.tick_ms ?? 75)
   lines.push(`Speed: ${speed}ms tick`)
 

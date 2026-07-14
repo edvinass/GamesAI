@@ -29,7 +29,7 @@ export const duelRules: GameRules = {
     },
     {
       heading: 'Match formats',
-      body: 'Quick duel is a single 1-HP showdown. Best of 3, 5, and 7 play multiple rounds with full mechanics. Multi-round matches can open with a power-up draft where each player bans one orb type.',
+      body: 'Quick duel is a single 1-HP showdown. Best of 3, 5, and 7 play multiple rounds with full mechanics. Hosts can optionally enable a power-up ban phase where each player removes one orb type between rounds.',
     },
     {
       heading: 'Mutators',
@@ -47,6 +47,6 @@ export const duelRules: GameRules = {
     'Press E to activate stored power-ups.',
     'In Fog mode, watch bullet rows — they reveal true aim.',
     'Save shield for an all-in push when the arena shrinks.',
-    'Ban an opponent’s comfort pick during the pre-match draft.',
+    'Optionally ban an opponent’s comfort pick during the pre-match draft (host setting).',
   ],
 }

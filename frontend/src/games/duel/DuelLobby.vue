@@ -31,6 +31,7 @@ const arenaTheme = defineModel<string>('arenaTheme', { required: true })
 const trainingDrill = defineModel<string>('trainingDrill', { required: true })
 const obstacleRotation = defineModel<boolean>('obstacleRotation', { required: true })
 const tutorialMode = defineModel<boolean>('tutorialMode', { required: true })
+const powerupDraftEnabled = defineModel<boolean>('powerupDraftEnabled', { required: true })
 
 const emit = defineEmits<{
   addAi: []
@@ -105,6 +106,8 @@ const showObstacleSetting = computed(
   () => matchFormat.value !== 'quick_duel' && mutator.value !== 'bounce_house',
 )
 
+const showPowerupDraftSetting = computed(() => matchFormat.value !== 'quick_duel')
+
 function applyPreset(presetId: string) {
   const preset = DUEL_LOBBY_PRESETS.find((p) => p.id === presetId)
   if (!preset) return
@@ -178,6 +181,10 @@ function confirmDaily() {
         <label class="checkbox-label">
           <input v-model="tutorialMode" type="checkbox" />
           Opening tips (phase coaching)
+        </label>
+        <label v-if="showPowerupDraftSetting" class="checkbox-label">
+          <input v-model="powerupDraftEnabled" type="checkbox" />
+          Power-up ban phase (each player removes one orb type between rounds)
         </label>
         <div class="setting-row">
           <span class="setting-label">Match format</span>

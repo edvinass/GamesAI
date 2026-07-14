@@ -365,7 +365,7 @@ def test_timed_effect_extends_instead_of_shortening(engine: DuelEngine, state: d
     fighter["stored_powerup"] = "shield"
     events: list[dict] = []
     engine._activate_stored_powerup(state, fighter, "p0", events)
-    assert fighter["effects"]["shield_until"] >= state["tick"] + 100
+    assert fighter["effects"]["shield_until"] >= state["tick"] + 200
 
 
 def test_heal_powerup(engine: DuelEngine, state: dict) -> None:
@@ -824,6 +824,18 @@ def test_effective_shrink_interval_halves_after_sudden_death(engine: DuelEngine,
 
     public = engine.get_public_state(state, state["players"][0])
     assert public["shrink_interval_ticks"] == 40
+
+
+def test_round_end_skips_draft_when_disabled(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["powerup_draft_enabled"] = False
+    state["settings"]["best_of"] = 5
+    state["settings"]["match_format"] = "best_of_5"
+    state["fighters"]["p0"]["alive"] = False
+    events: list[dict] = []
+    engine._end_round(state, "p1", events)
+    assert state["phase"] != "powerup_draft"
+    assert state["phase"] == "round_over"
+    assert state["round"] == 2
 
 
 def test_round_end_enters_powerup_draft(engine: DuelEngine, state: dict) -> None:

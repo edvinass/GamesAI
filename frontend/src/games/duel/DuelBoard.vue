@@ -448,7 +448,7 @@ const activeBuffs = computed(() =>
     myFighter.value?.effects as Record<string, unknown> | undefined,
     props.gameState.tick,
     tickMs.value,
-    props.gameState.effect_duration_ticks ?? 80,
+    props.gameState.effect_duration_ticks ?? 160,
   ),
 )
 
@@ -459,7 +459,7 @@ function fighterEffects(
     effects,
     props.gameState.tick,
     tickMs.value,
-    props.gameState.effect_duration_ticks ?? 80,
+    props.gameState.effect_duration_ticks ?? 160,
   )
 }
 

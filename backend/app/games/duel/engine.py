@@ -40,18 +40,18 @@ POWERUP_ACTIVATION_TICKS = 8
 
 # Per-power-up effect length (ticks) and channel time before release (ticks).
 POWERUP_EFFECT_DURATIONS: dict[str, int] = {
-    "rapid_fire": 70,
-    "machine_gun": 90,
-    "shield": 100,
-    "wide_shot": 75,
-    "pierce": 70,
-    "ghost": 85,
-    "freeze": 55,
-    "homing": 80,
-    "mirror": 75,
-    "overdrive": 65,
-    "phase_shift": 60,
-    "decoy": 70,
+    "rapid_fire": 140,
+    "machine_gun": 180,
+    "shield": 200,
+    "wide_shot": 150,
+    "pierce": 140,
+    "ghost": 170,
+    "freeze": 110,
+    "homing": 160,
+    "mirror": 150,
+    "overdrive": 130,
+    "phase_shift": 120,
+    "decoy": 140,
 }
 
 POWERUP_CHANNEL_TICKS: dict[str, int] = {
@@ -218,7 +218,7 @@ class DuelEngine(GamePlugin):
             "hazard_damage": 1,
             "hazard_damage_interval_ticks": 20,
             "charge_max_ticks": 15,
-            "effect_duration_ticks": 80,
+            "effect_duration_ticks": 160,
             "ai_difficulty": "medium",
             "ai_personality": "balanced",
             "mutator_secondary": "none",
@@ -229,7 +229,7 @@ class DuelEngine(GamePlugin):
             "training_drill": "none",
             "tutorial_mode": False,
             "arena_theme": "classic",
-            "powerup_draft_enabled": True,
+            "powerup_draft_enabled": False,
             "sudden_death_after_round": 3,
         }
 
@@ -271,7 +271,7 @@ class DuelEngine(GamePlugin):
             8, min(80, int(merged.get("hazard_damage_interval_ticks", 20)))
         )
         merged["charge_max_ticks"] = max(8, min(30, int(merged.get("charge_max_ticks", 15))))
-        merged["effect_duration_ticks"] = max(40, min(200, int(merged.get("effect_duration_ticks", 80))))
+        merged["effect_duration_ticks"] = max(40, min(400, int(merged.get("effect_duration_ticks", 160))))
         difficulty = str(merged.get("ai_difficulty", "medium")).lower()
         if difficulty == "normal":
             difficulty = "medium"
@@ -324,7 +324,7 @@ class DuelEngine(GamePlugin):
             1, min(4, int(merged.get("ai_reaction_interval_ticks", 2)))
         )
 
-        merged["powerup_draft_enabled"] = bool(merged.get("powerup_draft_enabled", True))
+        merged["powerup_draft_enabled"] = bool(merged.get("powerup_draft_enabled", False))
         merged["sudden_death_after_round"] = max(
             2, min(6, int(merged.get("sudden_death_after_round", 3)))
         )
@@ -423,7 +423,7 @@ class DuelEngine(GamePlugin):
 
     def _powerup_effect_duration(self, ptype: str, state: dict) -> int:
         return POWERUP_EFFECT_DURATIONS.get(
-            ptype, int(state["settings"].get("effect_duration_ticks", 80))
+            ptype, int(state["settings"].get("effect_duration_ticks", 160))
         )
 
     def _extend_timed_effect(self, effects: dict, key: str, tick: int, duration: int) -> None:
@@ -2432,7 +2432,7 @@ class DuelEngine(GamePlugin):
             "training_drill": state["settings"].get("training_drill", "none"),
             "tutorial_mode": bool(state["settings"].get("tutorial_mode")),
             "powerups_enabled": bool(state["settings"].get("powerups_enabled")),
-            "effect_duration_ticks": int(state["settings"].get("effect_duration_ticks", 80)),
+            "effect_duration_ticks": int(state["settings"].get("effect_duration_ticks", 160)),
             "powerup_lifetime_ticks": int(state["settings"].get("powerup_lifetime_ticks", 120)),
             "bullet_speed": int(state["settings"].get("bullet_speed", 2)),
             "tick_ms": int(state["settings"].get("tick_ms", 75)),
