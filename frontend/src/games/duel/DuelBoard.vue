@@ -13,6 +13,18 @@ import {
   powerupTier,
   powerupUseHint,
 } from './powerupMeta'
+import {
+  isSoundMuted,
+  playArenaShrinkSound,
+  playHitSound,
+  playPowerupActivateSound,
+  playPowerupCollectSound,
+  playRoundWinSound,
+  playShieldBlockSound,
+  playShootSound,
+  setSoundMuted,
+  unlockAudio,
+} from './sounds'
 
 const props = defineProps<{
   gameState: DuelGameState
@@ -106,6 +118,142 @@ let autoReleaseTimer: ReturnType<typeof setTimeout> | null = null
 const lastSeenPowerupKey = ref('')
 const lastStoredPowerup = ref<string | null>(null)
 const lastActionStamp = ref('')
+const lastHitSoundStamp = ref('')
+const lastActionSoundStamp = ref('')
+const soundMuted = ref(isSoundMuted())
+const playableBoundsInitialized = ref(false)
+const showTouchControls = ref(false)
+const coachHint = ref<string | null>(null)
+const lastPlayableMin = ref(0)
+const lastPlayableMax = ref(999)
+const lastRoundPhase = ref('')
+
+const opponent = computed(() =>
+  props.gameState.players.find((p) => p.id !== props.playerId),
+)
+const opponentFighter = computed(() =>
+  opponent.value ? props.gameState.fighters[opponent.value.id] : null,
+)
+const incomingBulletCount = computed(() => {
+  const fighter = opponentFighter.value
+  if (!fighter) return 0
+  const fighterX = fighter.x
+  return props.gameState.bullets.filter((bullet) => {
+    if (bullet.owner_id === opponent.value?.id) return false
+    return (
+      (fighter.side === 'left' && bullet.vx < 0 && bullet.x >= fighterX) ||
+      (fighter.side === 'right' && bullet.vx > 0 && bullet.x <= fighterX)
+    )
+  }).length
+})
+const playableHeight = computed(
+  () => props.gameState.playable_y_max - props.gameState.playable_y_min + 1,
+)
+const shrinkTicksUntil = computed(() => {
+  if (!props.gameState.shrinking_arena || props.gameState.phase !== 'playing') return null
+  const start = props.gameState.shrink_start_tick ?? 240
+  const interval = props.gameState.shrink_interval_ticks ?? 80
+  if (props.gameState.tick < start) return start - props.gameState.tick
+  const elapsed = props.gameState.tick - start
+  const nextShrink = start + (Math.floor(elapsed / interval) + 1) * interval
+  return Math.max(0, nextShrink - props.gameState.tick)
+})
+const shrinkWarningActive = computed(() => {
+  const until = shrinkTicksUntil.value
+  return until !== null && until <= Math.ceil(2400 / tickMs.value)
+})
+const showCoachHint = computed(
+  () => coachHint.value && (props.gameState.phase === 'playing' || props.gameState.phase === 'countdown'),
+)
+
+function toggleSound() {
+  const next = !soundMuted.value
+  setSoundMuted(next)
+  soundMuted.value = next
+}
+
+function detectTouchControls() {
+  showTouchControls.value =
+    window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900
+}
+
+function updateCoachHint() {
+  if (props.gameState.phase === 'countdown' && props.gameState.round === 1) {
+    if (chargeEnabled.value && powerupsEnabled.value) {
+      coachHint.value = 'Hold Space to charge shots · Hold E to activate power-ups'
+    } else if (chargeEnabled.value) {
+      coachHint.value = 'Hold Space to charge a spread shot, release to fire'
+    } else {
+      coachHint.value = 'W/S or the on-screen arrows move your ship · Space fires'
+    }
+    return
+  }
+  if (props.gameState.phase !== 'playing' || props.gameState.round > 1) {
+    coachHint.value = null
+    return
+  }
+  if (props.gameState.tick < 120) {
+    if (props.gameState.shrinking_arena) {
+      coachHint.value = 'Use cover, then watch the red hazard zones — they deal damage'
+    } else {
+      coachHint.value = 'Center-row hits deal bonus damage'
+    }
+    return
+  }
+  coachHint.value = null
+}
+
+function playGameSounds() {
+  if (soundMuted.value) return
+
+  const hit = props.gameState.last_hit
+  if (hit?.player_id && hit.damage !== undefined) {
+    const stamp = `${hit.player_id}-${props.gameState.tick}-${hit.damage}-${hit.blocked ? 'b' : 'h'}`
+    if (stamp !== lastHitSoundStamp.value) {
+      lastHitSoundStamp.value = stamp
+      if (hit.blocked) playShieldBlockSound()
+      else playHitSound(Boolean(hit.crit))
+    }
+  }
+
+  const action = props.gameState.last_action
+  if (action) {
+    const actionStamp = JSON.stringify(action)
+    if (actionStamp !== lastActionSoundStamp.value) {
+      lastActionSoundStamp.value = actionStamp
+      const type = action.type as string
+      const pid = action.player_id as string | undefined
+      if (pid === props.playerId) {
+        if (type === 'shoot' || type === 'release_charge') {
+          playShootSound(type === 'release_charge' && Number(action.charge_ticks ?? 0) >= 8)
+        } else if (type === 'powerup_collected') {
+          playPowerupCollectSound()
+        } else if (type === 'powerup_activated') {
+          playPowerupActivateSound()
+        }
+      }
+    }
+  }
+
+  if (playableBoundsInitialized.value) {
+    if (
+      props.gameState.shrinking_arena &&
+      (props.gameState.playable_y_min > lastPlayableMin.value ||
+        props.gameState.playable_y_max < lastPlayableMax.value)
+    ) {
+      playArenaShrinkSound()
+    }
+  } else {
+    playableBoundsInitialized.value = true
+  }
+  lastPlayableMin.value = props.gameState.playable_y_min
+  lastPlayableMax.value = props.gameState.playable_y_max
+
+  if (props.gameState.phase === 'round_over' && lastRoundPhase.value === 'playing') {
+    playRoundWinSound()
+  }
+  lastRoundPhase.value = props.gameState.phase
+}
 
 const storedPowerupHint = computed(() => powerupUseHint(storedPowerup.value, tickMs.value))
 const storedPowerupDescription = computed(() =>
@@ -285,6 +433,69 @@ watch(
     const label = POWERUP_LABELS[orb.type] ?? orb.type
     showPowerupNotice(`${label} spawned — shoot or touch to collect`, 'info')
   },
+)
+
+function onTouchMoveUp(e: TouchEvent | MouseEvent) {
+  e.preventDefault()
+  unlockAudio()
+  if (heldMove.value !== 'up') {
+    heldMove.value = 'up'
+    sendMove('up')
+  }
+}
+
+function onTouchMoveDown(e: TouchEvent | MouseEvent) {
+  e.preventDefault()
+  unlockAudio()
+  if (heldMove.value !== 'down') {
+    heldMove.value = 'down'
+    sendMove('down')
+  }
+}
+
+function onTouchMoveStop(e: TouchEvent | MouseEvent) {
+  e.preventDefault()
+  if (heldMove.value) {
+    heldMove.value = null
+    sendMove('stop')
+  }
+}
+
+function onTouchFireDown(e: TouchEvent | MouseEvent) {
+  e.preventDefault()
+  unlockAudio()
+  if (!canControl.value) return
+  if (chargeEnabled.value) {
+    if (!charging.value) startCharge()
+  } else {
+    quickShoot()
+  }
+}
+
+function onTouchFireUp(e: TouchEvent | MouseEvent) {
+  e.preventDefault()
+  if (charging.value) releaseCharge()
+}
+
+watch(
+  () => [
+    props.gameState.tick,
+    props.gameState.last_hit,
+    props.gameState.last_action,
+    props.gameState.phase,
+    props.gameState.playable_y_min,
+    props.gameState.playable_y_max,
+  ],
+  () => {
+    playGameSounds()
+    updateCoachHint()
+  },
+)
+
+watch(
+  () => props.gameState.phase,
+  () => updateCoachHint(),
+  { immediate: true },
 )
 
 watch(
@@ -468,6 +679,11 @@ function animationLoop() {
 }
 
 onMounted(() => {
+  detectTouchControls()
+  lastPlayableMin.value = props.gameState.playable_y_min
+  lastPlayableMax.value = props.gameState.playable_y_max
+  lastRoundPhase.value = props.gameState.phase
+  window.addEventListener('resize', detectTouchControls)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', clearHeldInputs)
@@ -480,6 +696,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', detectTouchControls)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', clearHeldInputs)
@@ -498,11 +715,28 @@ onUnmounted(() => {
   <div class="duel-board">
     <div class="match-bar">
       <span class="match-format">Round {{ gameState.round }} · Best of {{ gameState.best_of }}</span>
+      <span v-if="shrinkWarningActive" class="shrink-warning">
+        Arena shrinks in {{ formatPowerupSeconds(shrinkTicksUntil ?? 0, tickMs) }}
+      </span>
       <span class="mutator-tag">{{ MUTATOR_LABELS[gameState.mutator] ?? gameState.mutator }}</span>
+      <button
+        type="button"
+        class="sound-toggle"
+        :aria-label="soundMuted ? 'Unmute sound' : 'Mute sound'"
+        @click="toggleSound"
+      >
+        {{ soundMuted ? '🔇' : '🔊' }}
+      </button>
     </div>
 
     <div ref="canvasWrapRef" class="canvas-wrap">
       <canvas ref="canvasRef" class="game-canvas" />
+
+      <Transition name="powerup-notice">
+        <div v-if="showCoachHint" class="coach-hint">
+          {{ coachHint }}
+        </div>
+      </Transition>
 
       <Transition name="powerup-notice">
         <div
@@ -643,7 +877,68 @@ onUnmounted(() => {
 
       <div v-else-if="!isAlive && gameState.phase === 'playing'" class="overlay eliminated">
         <span class="overlay-label">You were eliminated!</span>
+        <div v-if="opponentFighter" class="spectator-stats">
+          <p>
+            <strong>{{ opponent?.nickname }}</strong>
+            · {{ opponentFighter.hp }}/{{ opponentFighter.max_hp }} HP
+          </p>
+          <p>
+            Arena height {{ playableHeight }} rows
+            <span v-if="gameState.shrinking_arena && shrinkTicksUntil !== null">
+              · shrink in {{ formatPowerupSeconds(shrinkTicksUntil, tickMs) }}
+            </span>
+          </p>
+          <p>{{ gameState.bullets.length }} bullets in flight · {{ incomingBulletCount }} threatening {{ opponent?.nickname }}</p>
+        </div>
         <span class="overlay-hint">Watch the round continue…</span>
+      </div>
+
+      <div
+        v-if="showTouchControls && canControl"
+        class="touch-controls"
+        aria-label="Touch controls"
+      >
+        <div class="touch-move">
+          <button
+            type="button"
+            class="touch-btn"
+            aria-label="Move up"
+            @touchstart.prevent="onTouchMoveUp"
+            @touchend.prevent="onTouchMoveStop"
+            @touchcancel.prevent="onTouchMoveStop"
+            @mousedown.prevent="onTouchMoveUp"
+            @mouseup.prevent="onTouchMoveStop"
+            @mouseleave.prevent="onTouchMoveStop"
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            class="touch-btn"
+            aria-label="Move down"
+            @touchstart.prevent="onTouchMoveDown"
+            @touchend.prevent="onTouchMoveStop"
+            @touchcancel.prevent="onTouchMoveStop"
+            @mousedown.prevent="onTouchMoveDown"
+            @mouseup.prevent="onTouchMoveStop"
+            @mouseleave.prevent="onTouchMoveStop"
+          >
+            ▼
+          </button>
+        </div>
+        <button
+          type="button"
+          class="touch-btn touch-fire"
+          :aria-label="chargeEnabled ? 'Hold to charge and fire' : 'Fire'"
+          @touchstart.prevent="onTouchFireDown"
+          @touchend.prevent="onTouchFireUp"
+          @touchcancel.prevent="onTouchFireUp"
+          @mousedown.prevent="onTouchFireDown"
+          @mouseup.prevent="onTouchFireUp"
+          @mouseleave.prevent="onTouchFireUp"
+        >
+          {{ chargeEnabled ? '⚡' : '●' }}
+        </button>
       </div>
     </div>
 
@@ -737,6 +1032,113 @@ onUnmounted(() => {
   padding: 0.4rem 0.75rem;
   font-size: 0.85rem;
   color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.shrink-warning {
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fecaca;
+  font-size: 0.75rem;
+  font-weight: 600;
+  animation: shrinkPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes shrinkPulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.sound-toggle {
+  margin-left: auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.65);
+  border-radius: 8px;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.coach-hint {
+  position: absolute;
+  bottom: 0.85rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  max-width: min(92%, 460px);
+  padding: 0.5rem 0.9rem;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: center;
+  color: #dbeafe;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(91, 156, 255, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.spectator-stats {
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #cbd5e1;
+}
+
+.touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0.75rem;
+}
+
+.touch-move {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  pointer-events: auto;
+}
+
+.touch-btn {
+  width: 3.1rem;
+  height: 3.1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(8, 12, 20, 0.72);
+  color: #e2e8f0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  touch-action: none;
+  user-select: none;
+}
+
+.touch-btn:active,
+.touch-fire:active {
+  transform: scale(0.96);
+  background: rgba(91, 156, 255, 0.28);
+}
+
+.touch-fire {
+  pointer-events: auto;
+  align-self: flex-end;
+  width: 4rem;
+  height: 4rem;
+  border-radius: 999px;
+  font-size: 1.35rem;
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fde68a;
 }
 
 .mutator-tag {

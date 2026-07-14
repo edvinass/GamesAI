@@ -71,7 +71,7 @@ export const POWERUP_HINTS: Record<string, string> = {
   shield: 'Blocks all damage — ~8s',
   wide_shot: 'Three-row spread on every shot — ~6s',
   pierce: 'Shots pass through cover and fighters — ~5s',
-  ghost: 'Enemies see a faint, jittery silhouette — ~6s',
+  ghost: 'Enemies see a faint silhouette — homing shots drift off target',
   freeze: 'Stops opponent movement — ~4s',
   laser: 'Instant beam down your aim row (stops at cover)',
   railgun: 'Piercing beam through cover — heavy damage',

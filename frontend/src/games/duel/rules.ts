@@ -21,7 +21,7 @@ export const duelRules: GameRules = {
     },
     {
       heading: 'Arena',
-      body: 'Center obstacles block movement and bullets (ricochet in Bounce House). After a while the top and bottom rows shrink inward — the red hazard zones. Power-ups spawn at random safe spots in the arena, linger for a short time, then vanish until the next cooldown.',
+      body: 'Center obstacles block movement and bullets (ricochet in Bounce House). After a while the top and bottom rows shrink inward — red hazard zones deal damage over time. Power-ups spawn at random safe spots in the arena, linger for a short time, then vanish until the next cooldown.',
     },
     {
       heading: 'Power-ups',

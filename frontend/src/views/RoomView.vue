@@ -129,6 +129,11 @@ const duelMutator = computed({
   set: (val: string) => updateSettings({ mutator: val }),
 })
 
+const duelObstacleCount = computed({
+  get: () => Number(room.value?.settings?.obstacle_count ?? 3),
+  set: (val: number) => updateSettings({ obstacle_count: val }),
+})
+
 const baseDropTicks = computed({
   get: () => Number(room.value?.settings?.base_drop_ticks ?? 20),
   set: (val: number) => updateSettings({ base_drop_ticks: val }),
@@ -332,6 +337,8 @@ async function copyUrl() {
         v-model:tick-ms="tickMs"
         v-model:match-format="duelMatchFormat"
         v-model:mutator="duelMutator"
+        v-model:ai-difficulty="aiDifficulty"
+        v-model:obstacle-count="duelObstacleCount"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

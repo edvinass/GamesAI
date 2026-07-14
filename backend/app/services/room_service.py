@@ -197,7 +197,7 @@ class RoomService:
             )
             self.db.add(player)
             await self.db.flush()
-            if room.game_type in ("tetris", "poker"):
+            if room.game_type in ("tetris", "poker", "duel"):
                 settings = dict(room.settings or {})
                 difficulties = dict(settings.get("ai_difficulties") or {})
                 default = "normal" if room.game_type == "tetris" else str(

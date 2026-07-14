@@ -675,3 +675,74 @@ def test_railgun_pierces_obstacle(engine: DuelEngine, state: dict) -> None:
 
     assert any(e["type"] == "player_hit" for e in events)
     assert state["fighters"]["p1"]["hp"] < state["fighters"]["p1"]["max_hp"]
+
+
+def test_hazard_damage_applies_in_red_zone(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["shrinking_arena"] = True
+    state["settings"]["hazard_damage"] = 1
+    state["playable_y_min"] = 2
+    state["playable_y_max"] = state["grid_height"] - 3
+    fighter = state["fighters"]["p0"]
+    fighter["y"] = 0
+    hp_before = fighter["hp"]
+
+    state, events = engine.tick(state)
+
+    assert fighter["hp"] < hp_before
+    assert any(e["type"] == "hazard_damage" for e in events)
+
+
+def test_hazard_damage_on_shrink_tick_without_interval_alignment(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["shrinking_arena"] = True
+    state["settings"]["hazard_damage"] = 1
+    state["settings"]["hazard_damage_interval_ticks"] = 20
+    state["settings"]["shrink_start_tick"] = 250
+    state["settings"]["shrink_interval_ticks"] = 80
+    state["tick"] = 329
+    state["playable_y_min"] = 1
+    state["playable_y_max"] = state["grid_height"] - 2
+    fighter = state["fighters"]["p0"]
+    fighter["y"] = 0
+    hp_before = fighter["hp"]
+
+    state, events = engine.tick(state)
+
+    assert fighter["hp"] < hp_before
+    assert any(e["type"] == "hazard_damage" for e in events)
+
+
+def test_hazard_damage_blocked_by_shield(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["shrinking_arena"] = True
+    state["settings"]["hazard_damage"] = 1
+    state["playable_y_min"] = 2
+    state["playable_y_max"] = state["grid_height"] - 3
+    fighter = state["fighters"]["p0"]
+    fighter["y"] = 0
+    fighter.setdefault("effects", {})["shield_until"] = state["tick"] + 50
+    hp_before = fighter["hp"]
+
+    state, events = engine.tick(state)
+
+    assert fighter["hp"] == hp_before
+    assert not any(e["type"] == "hazard_damage" for e in events)
+
+
+def test_ghost_scrambles_homing_steering(engine: DuelEngine, state: dict) -> None:
+    target = state["fighters"]["p1"]
+    target["y"] = 10
+    target.setdefault("effects", {})["ghost_until"] = state["tick"] + 50
+    bullet = {"x": 20, "y": 8, "vx": 1, "vy": 0, "homing": True, "owner_id": "p0"}
+
+    engine._steer_homing_bullet(state, bullet)
+
+    assert bullet["vy"] != 0
+
+
+def test_ai_difficulty_attached_to_ai_players(engine: DuelEngine) -> None:
+    players = [
+        {"id": "human", "nickname": "Human", "team": None, "role": None, "is_ai": False, "is_connected": True},
+        {"id": "ai", "nickname": "AI", "team": None, "role": None, "is_ai": True, "is_connected": True},
+    ]
+    game_state = engine.create_initial_state(players, {"ai_difficulty": "hard"})
+    ai_player = next(p for p in game_state["players"] if p["id"] == "ai")
+    assert ai_player["ai_difficulty"] == "hard"

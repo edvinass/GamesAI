@@ -216,6 +216,10 @@ export interface DuelGameState {
   grid_height: number
   playable_y_min: number
   playable_y_max: number
+  shrinking_arena?: boolean
+  shrink_start_tick?: number
+  shrink_interval_ticks?: number
+  hazard_damage?: number
   fighter_height: number
   obstacles: DuelObstacle[]
   fighters: Record<string, DuelFighter>

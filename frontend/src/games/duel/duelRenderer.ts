@@ -150,6 +150,11 @@ export class DuelRenderer {
   private stars: Star[] = []
   private starsSeed = 0
 
+  private lastPlayableMin = 0
+  private lastPlayableMax = 999
+  private hazardPulseUntil = 0
+  private arenaBoundsInitialized = false
+
   reset() {
     this.particles = []
     this.muzzleFlashes = []
@@ -161,6 +166,10 @@ export class DuelRenderer {
     this.processedHitsTick = -1
     this.lastActionStamp = ''
     this.stars = []
+    this.lastPlayableMin = 0
+    this.lastPlayableMax = 999
+    this.hazardPulseUntil = 0
+    this.arenaBoundsInitialized = false
   }
 
   clearCombatFx() {
@@ -433,9 +442,28 @@ export class DuelRenderer {
     }
   }
 
-  private updateFighterPoses(state: DuelGameState) {
+  private updateFighterPoses(state: DuelGameState, viewerId: string, now: number) {
+    const elapsed = Math.max(0, now - this.stateSnapshotAt)
+    const progress = Math.min(0.95, elapsed / this.tickMs)
+    const barCount = state.fighter_height ?? 3
+    const minY = state.playable_y_min
+    const maxTop = Math.min(
+      state.grid_height - barCount,
+      state.playable_y_max - barCount + 1,
+    )
+
     for (const [pid, fighter] of Object.entries(state.fighters)) {
-      const targetY = fighter.display_y ?? fighter.y
+      let targetY = fighter.display_y ?? fighter.y
+      if (
+        pid === viewerId &&
+        fighter.alive &&
+        fighter.move_direction !== 'stop' &&
+        state.phase === 'playing'
+      ) {
+        const delta = fighter.move_direction === 'down' ? progress : -progress
+        targetY = Math.max(minY, Math.min(maxTop, fighter.y + delta))
+      }
+
       const existing = this.fighterPoses.get(pid)
       if (!existing) {
         this.fighterPoses.set(pid, { y: targetY, targetY, moveDirection: fighter.move_direction })
@@ -443,9 +471,26 @@ export class DuelRenderer {
       }
       existing.targetY = targetY
       existing.moveDirection = fighter.move_direction
-      existing.y = lerp(existing.y, existing.targetY, 0.34)
+      const lerpFactor = pid === viewerId ? 0.58 : 0.34
+      existing.y = lerp(existing.y, existing.targetY, lerpFactor)
       this.fighterPoses.set(pid, existing)
     }
+  }
+
+  private syncArenaShrink(state: DuelGameState, now: number) {
+    const min = state.playable_y_min
+    const max = state.playable_y_max
+    if (this.arenaBoundsInitialized) {
+      if (min > this.lastPlayableMin || max < this.lastPlayableMax) {
+        this.hazardPulseUntil = now + 900
+        this.shakeUntil = now + 220
+        this.shakeIntensity = 4
+      }
+    } else {
+      this.arenaBoundsInitialized = true
+    }
+    this.lastPlayableMin = min
+    this.lastPlayableMax = max
   }
 
   private updateParticles() {
@@ -529,7 +574,8 @@ export class DuelRenderer {
 
     this.ensureStars(displayW, displayH)
     this.syncStateSnapshot(state, now)
-    this.updateFighterPoses(state)
+    this.syncArenaShrink(state, now)
+    this.updateFighterPoses(state, viewerId, now)
     this.updateParticles()
 
     const shake = this.shakeOffset(now)
@@ -641,9 +687,10 @@ export class DuelRenderer {
 
     if (playableMin > 0) {
       const h = playableMin * cell
+      const hazardBoost = now < this.hazardPulseUntil ? 0.18 : 0
       const grad = ctx.createLinearGradient(offsetX, offsetY, offsetX, offsetY + h)
-      grad.addColorStop(0, 'rgba(239,68,68,0.45)')
-      grad.addColorStop(1, 'rgba(239,68,68,0.12)')
+      grad.addColorStop(0, `rgba(239,68,68,${0.45 + hazardBoost})`)
+      grad.addColorStop(1, `rgba(239,68,68,${0.12 + hazardBoost * 0.5})`)
       ctx.fillStyle = grad
       ctx.fillRect(offsetX, offsetY, boardW, h)
       this.drawHazardStripe(ctx, offsetX, offsetY, boardW, h, now, true)
@@ -651,9 +698,10 @@ export class DuelRenderer {
     if (playableMax < gridH - 1) {
       const top = offsetY + (playableMax + 1) * cell
       const h = (gridH - 1 - playableMax) * cell
+      const hazardBoost = now < this.hazardPulseUntil ? 0.18 : 0
       const grad = ctx.createLinearGradient(offsetX, top, offsetX, top + h)
-      grad.addColorStop(0, 'rgba(239,68,68,0.12)')
-      grad.addColorStop(1, 'rgba(239,68,68,0.45)')
+      grad.addColorStop(0, `rgba(239,68,68,${0.12 + hazardBoost * 0.5})`)
+      grad.addColorStop(1, `rgba(239,68,68,${0.45 + hazardBoost})`)
       ctx.fillStyle = grad
       ctx.fillRect(offsetX, top, boardW, h)
       this.drawHazardStripe(ctx, offsetX, top, boardW, h, now, false)

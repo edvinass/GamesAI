@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.games.base import GamePlugin
-from app.games.duel.ai import choose_ai_actions
+from app.games.duel.ai import choose_ai_actions, get_ai_config, normalize_ai_difficulty
 
 FIGHTER_COLORS = ["#3b82f6", "#ef4444"]
 
@@ -188,8 +188,11 @@ class DuelEngine(GamePlugin):
             "powerup_spawn_jitter_ticks": 20,
             "shrink_start_tick": 240,
             "shrink_interval_ticks": 80,
+            "hazard_damage": 1,
+            "hazard_damage_interval_ticks": 20,
             "charge_max_ticks": 15,
             "effect_duration_ticks": 80,
+            "ai_difficulty": "medium",
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -225,8 +228,18 @@ class DuelEngine(GamePlugin):
         )
         merged["shrink_start_tick"] = max(120, min(600, int(merged.get("shrink_start_tick", 240))))
         merged["shrink_interval_ticks"] = max(40, min(200, int(merged.get("shrink_interval_ticks", 80))))
+        merged["hazard_damage"] = max(0, min(3, int(merged.get("hazard_damage", 1))))
+        merged["hazard_damage_interval_ticks"] = max(
+            8, min(80, int(merged.get("hazard_damage_interval_ticks", 20)))
+        )
         merged["charge_max_ticks"] = max(8, min(30, int(merged.get("charge_max_ticks", 15))))
         merged["effect_duration_ticks"] = max(40, min(200, int(merged.get("effect_duration_ticks", 80))))
+        difficulty = str(merged.get("ai_difficulty", "medium")).lower()
+        if difficulty == "normal":
+            difficulty = "medium"
+        if difficulty not in ("easy", "medium", "hard"):
+            difficulty = "medium"
+        merged["ai_difficulty"] = difficulty
 
         format_preset = MATCH_FORMAT_PRESETS[match_format]
         mutator_preset = MUTATOR_PRESETS[mutator]
@@ -465,8 +478,17 @@ class DuelEngine(GamePlugin):
         playable_y_max = grid_height - 1
 
         fighters: dict[str, dict] = {}
+        normalized_players: list[dict] = []
         for i, player in enumerate(players):
-            fighters[player["id"]] = self._spawn_side(
+            pdata = dict(player)
+            if pdata.get("is_ai"):
+                pdata["ai_difficulty"] = normalize_ai_difficulty(
+                    pdata.get("ai_difficulty")
+                    or (settings.get("ai_difficulties") or {}).get(pdata["id"])
+                    or settings.get("ai_difficulty")
+                )
+            normalized_players.append(pdata)
+            fighters[pdata["id"]] = self._spawn_side(
                 i,
                 grid_width,
                 grid_height,
@@ -487,7 +509,7 @@ class DuelEngine(GamePlugin):
             "countdown_ends_at": countdown_ends_at,
             "tick": 0,
             "round": 1,
-            "round_scores": self._initial_round_scores(players),
+            "round_scores": self._initial_round_scores(normalized_players),
             "round_winner": None,
             "grid_width": grid_width,
             "grid_height": grid_height,
@@ -499,7 +521,7 @@ class DuelEngine(GamePlugin):
             "powerup": None,
             "next_powerup_at_tick": self._schedule_next_powerup_spawn_tick(settings, 0, initial=True),
             "next_bullet_id": 0,
-            "players": players,
+            "players": normalized_players,
             "settings": settings,
             "winner": None,
             "win_reason": None,
@@ -644,8 +666,6 @@ class DuelEngine(GamePlugin):
 
     def _apply_ai_inputs(self, state: dict, events: list[dict] | None = None) -> None:
         ai_events = events if events is not None else []
-        reaction_interval = int(state["settings"].get("ai_reaction_interval_ticks", 2))
-        rethink = reaction_interval <= 1 or state["tick"] % reaction_interval == 0
 
         for player in state["players"]:
             if not player.get("is_ai"):
@@ -654,6 +674,13 @@ class DuelEngine(GamePlugin):
             fighter = state["fighters"].get(pid)
             if not fighter or not fighter.get("alive"):
                 continue
+
+            difficulty = normalize_ai_difficulty(
+                player.get("ai_difficulty") or state["settings"].get("ai_difficulty")
+            )
+            cfg = get_ai_config(difficulty)
+            reaction_interval = int(cfg["reaction_interval"])
+            rethink = reaction_interval <= 1 or state["tick"] % reaction_interval == 0
 
             stored = fighter.get("stored_powerup")
             if fighter.get("activating_powerup") and stored and stored not in INSTANT_POWERUP_TYPES:
@@ -668,7 +695,7 @@ class DuelEngine(GamePlugin):
                 continue
 
             move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant = choose_ai_actions(
-                state, pid, fighter
+                state, pid, fighter, difficulty
             )
             fighter["move_direction"] = move
             if pu_instant:
@@ -1460,19 +1487,73 @@ class DuelEngine(GamePlugin):
             if fighter.get("alive") and fighter.get("activating_powerup"):
                 fighter["powerup_activation_ticks"] = fighter.get("powerup_activation_ticks", 0) + 1
 
+    def _fighter_in_hazard(self, fighter: dict, state: dict) -> bool:
+        if not state["settings"].get("shrinking_arena"):
+            return False
+        min_y = state.get("playable_y_min", 0)
+        max_y = state.get("playable_y_max", state["grid_height"] - 1)
+        height = self._fighter_height(state)
+        top = fighter["y"]
+        bottom = top + height - 1
+        return top < min_y or bottom > max_y
+
+    def _apply_hazard_damage(self, state: dict, events: list[dict]) -> None:
+        settings = state["settings"]
+        if not settings.get("shrinking_arena"):
+            return
+        damage = int(settings.get("hazard_damage", 1))
+        if damage <= 0:
+            return
+
+        for pid, fighter in state["fighters"].items():
+            if not fighter.get("alive") or not self._fighter_in_hazard(fighter, state):
+                continue
+            tick = state["tick"]
+            effects = fighter.get("effects", {})
+            if tick < effects.get("shield_until", 0):
+                continue
+            hp_before = fighter.get("hp", 1)
+            eliminated = self._apply_damage(
+                state,
+                fighter,
+                pid,
+                pid,
+                damage,
+                False,
+                events,
+                hit_y=fighter["y"],
+            )
+            if fighter.get("hp", 0) >= hp_before:
+                continue
+            events.append(
+                {
+                    "type": "hazard_damage",
+                    "player_id": pid,
+                    "damage": damage,
+                    "hp_remaining": fighter.get("hp", 0),
+                }
+            )
+            if eliminated:
+                events.append({"type": "player_eliminated", "player_id": pid, "reason": "hazard"})
+
     def _steer_homing_bullet(self, state: dict, bullet: dict) -> None:
         if not bullet.get("homing"):
             return
         owner = state["fighters"].get(bullet["owner_id"])
         if not owner:
             return
+        tick = state["tick"]
         for pid, fighter in state["fighters"].items():
             if pid == bullet["owner_id"] or not fighter.get("alive"):
                 continue
-            target_row = fighter["y"] + self._fighter_height(state) // 2
-            if bullet["y"] < target_row:
+            center = fighter["y"] + self._fighter_height(state) // 2
+            effects = fighter.get("effects", {})
+            if tick < effects.get("ghost_until", 0):
+                offset = (hash((pid, tick // 3)) % 5) - 2
+                center += offset
+            if bullet["y"] < center:
                 bullet["vy"] = 1
-            elif bullet["y"] > target_row:
+            elif bullet["y"] > center:
                 bullet["vy"] = -1
             else:
                 bullet["vy"] = 0
@@ -1590,6 +1671,7 @@ class DuelEngine(GamePlugin):
         self._increment_charging(state)
         self._increment_powerup_activation(state)
         self._maybe_shrink_arena(state, events)
+        self._apply_hazard_damage(state, events)
         self._maybe_spawn_powerup(state, events)
         self._process_burst_shots(state)
 
@@ -1598,13 +1680,19 @@ class DuelEngine(GamePlugin):
         fighters = state["fighters"]
         fighter_height = self._fighter_height(state)
         obstacles = state.get("obstacles", [])
-        move_interval = int(state["settings"].get("ai_move_interval_ticks", 2))
 
         for pid, fighter in fighters.items():
             if not fighter.get("alive"):
                 continue
             player = self._player_by_id(state, pid)
             is_ai = player.get("is_ai") if player else False
+            if is_ai:
+                difficulty = normalize_ai_difficulty(
+                    (player or {}).get("ai_difficulty") or state["settings"].get("ai_difficulty")
+                )
+                move_interval = int(get_ai_config(difficulty)["move_interval"])
+            else:
+                move_interval = 1
             can_move = (
                 not is_ai
                 or move_interval <= 1
@@ -1701,6 +1789,10 @@ class DuelEngine(GamePlugin):
             "grid_height": state["grid_height"],
             "playable_y_min": state.get("playable_y_min", 0),
             "playable_y_max": state.get("playable_y_max", state["grid_height"] - 1),
+            "shrinking_arena": bool(state["settings"].get("shrinking_arena")),
+            "shrink_start_tick": int(state["settings"].get("shrink_start_tick", 240)),
+            "shrink_interval_ticks": int(state["settings"].get("shrink_interval_ticks", 80)),
+            "hazard_damage": int(state["settings"].get("hazard_damage", 1)),
             "fighter_height": self._fighter_height(state),
             "obstacles": state.get("obstacles", []),
             "fighters": fighters,

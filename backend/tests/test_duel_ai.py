@@ -375,3 +375,27 @@ def test_ai_releases_full_charge_shot() -> None:
             break
 
     assert released_full
+
+
+def test_ai_difficulty_configs_scale() -> None:
+    from app.games.duel.ai import get_ai_config
+
+    easy = get_ai_config("easy")
+    hard = get_ai_config("hard")
+    assert easy["reaction_interval"] > hard["reaction_interval"]
+    assert easy["mistake_rate"] > hard["mistake_rate"]
+
+
+def test_easy_ai_makes_more_mistakes(monkeypatch) -> None:
+    import app.games.duel.ai as duel_ai
+
+    monkeypatch.setattr(duel_ai.random, "random", lambda: 0.0)
+    state = make_state()
+    ai = state["fighters"]["ai"]
+    ai["side"] = "right"
+    ai["x"] = 46
+    ai["y"] = 10
+    state["bullets"] = [{"id": 0, "x": 40, "y": 10, "vx": 1, "owner_id": "human"}]
+
+    move, *_ = choose_ai_actions(state, "ai", ai, "easy")
+    assert move in ("up", "down", "stop")

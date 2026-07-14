@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Room } from '@/types'
 
 defineProps<{
@@ -15,6 +16,8 @@ const soloPractice = defineModel<boolean>('soloPractice', { required: true })
 const tickMs = defineModel<number>('tickMs', { required: true })
 const matchFormat = defineModel<string>('matchFormat', { required: true })
 const mutator = defineModel<string>('mutator', { required: true })
+const aiDifficulty = defineModel<string>('aiDifficulty', { required: true })
+const obstacleCount = defineModel<number>('obstacleCount', { required: true })
 
 const emit = defineEmits<{
   addAi: []
@@ -41,6 +44,18 @@ const mutatorOptions = [
   { label: 'Bounce House', value: 'bounce_house', hint: 'Ricochet + obstacles' },
   { label: 'Fog', value: 'fog', hint: 'Imprecise enemy position' },
 ]
+
+const difficultyOptions = [
+  { label: 'Easy', value: 'easy', hint: 'Slower reactions, more mistakes' },
+  { label: 'Medium', value: 'medium', hint: 'Balanced opponent' },
+  { label: 'Hard', value: 'hard', hint: 'Fast dodges and charge shots' },
+]
+
+const obstacleOptions = [0, 1, 2, 3, 4, 5, 6]
+
+const showObstacleSetting = computed(
+  () => matchFormat.value !== 'quick_duel' && mutator.value !== 'bounce_house',
+)
 </script>
 
 <template>
@@ -74,6 +89,24 @@ const mutatorOptions = [
         <select v-model.number="tickMs" class="setting-select">
           <option v-for="opt in speedOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }} ({{ opt.value }}ms)
+          </option>
+        </select>
+      </div>
+
+      <div v-if="soloPractice || room.players.some((p) => p.is_ai)" class="setting-row">
+        <span class="setting-label">AI difficulty</span>
+        <select v-model="aiDifficulty" class="setting-select">
+          <option v-for="opt in difficultyOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }} — {{ opt.hint }}
+          </option>
+        </select>
+      </div>
+
+      <div v-if="showObstacleSetting" class="setting-row">
+        <span class="setting-label">Cover blocks</span>
+        <select v-model.number="obstacleCount" class="setting-select">
+          <option v-for="count in obstacleOptions" :key="count" :value="count">
+            {{ count === 0 ? 'None' : count }}
           </option>
         </select>
       </div>

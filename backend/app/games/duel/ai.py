@@ -31,6 +31,44 @@ DEFENSIVE_BUFF_TYPES = frozenset({"shield", "ghost", "mirror"})
 
 MOVE_OPTIONS = ("up", "down", "stop")
 
+AI_DIFFICULTIES = ("easy", "medium", "hard")
+
+DIFFICULTY_CONFIG: dict[str, dict[str, float | int]] = {
+    "easy": {
+        "reaction_interval": 3,
+        "move_interval": 3,
+        "mistake_rate": 0.2,
+        "dodge_weight": 0.55,
+        "charge_rate": 0.35,
+    },
+    "medium": {
+        "reaction_interval": 2,
+        "move_interval": 2,
+        "mistake_rate": 0.06,
+        "dodge_weight": 1.0,
+        "charge_rate": 0.65,
+    },
+    "hard": {
+        "reaction_interval": 1,
+        "move_interval": 1,
+        "mistake_rate": 0.0,
+        "dodge_weight": 1.25,
+        "charge_rate": 0.85,
+    },
+}
+
+
+def normalize_ai_difficulty(value: str | None) -> str:
+    aliases = {"normal": "medium"}
+    normalized = aliases.get(str(value or "").lower(), str(value or "").lower())
+    if normalized in DIFFICULTY_CONFIG:
+        return normalized
+    return "medium"
+
+
+def get_ai_config(difficulty: str | None) -> dict[str, float | int]:
+    return DIFFICULTY_CONFIG[normalize_ai_difficulty(difficulty)]
+
 
 def _fighter_height(state: dict) -> int:
     return int(state["settings"].get("fighter_height", 3))
@@ -270,6 +308,7 @@ def _score_move(
     powerup: dict | None,
     speed: int,
     state: dict,
+    dodge_weight: float = 1.0,
 ) -> float:
     y = fighter["y"]
     new_top = _top_after_move(y, direction, min_y, max_y)
@@ -294,7 +333,7 @@ def _score_move(
         bullet_y = bullet["y"]
 
         if bullet_y in new_rows:
-            score -= 2000.0 + max(0, 24 - ticks) * 80.0
+            score -= (2000.0 + max(0, 24 - ticks) * 80.0) * dodge_weight
             immediate_danger = True
             continue
 
@@ -304,12 +343,12 @@ def _score_move(
         new_gap = abs(bullet_y - new_center)
 
         if abs(bullet_y - old_center) <= height + 2 and ticks <= 14:
-            score += (new_gap - old_gap) * 35.0
+            score += (new_gap - old_gap) * 35.0 * dodge_weight
             if ticks <= 8:
                 immediate_danger = True
 
     if incoming and direction == "stop":
-        score -= 120.0
+        score -= 120.0 * dodge_weight
 
     edge_clearance = min(new_top - min_y, max_y - new_top)
     score += edge_clearance * 12.0
@@ -376,7 +415,10 @@ def _choose_move(
     height: int,
     bullets: list[dict],
     enemy: dict[str, Any] | None,
+    cfg: dict[str, float | int] | None = None,
 ) -> str:
+    ai_cfg = cfg or get_ai_config("medium")
+    dodge_weight = float(ai_cfg.get("dodge_weight", 1.0))
     min_y, max_y = _playable_bounds(state, height)
     obstacles = state.get("obstacles", [])
     powerup = state.get("powerup")
@@ -397,6 +439,7 @@ def _choose_move(
             powerup,
             speed,
             state,
+            dodge_weight=dodge_weight,
         )
         scored.append((direction, score))
 
@@ -433,9 +476,14 @@ def _choose_move(
                 best_score = score
                 best_target_dist = target_dist
                 best_direction = direction
-        return best_direction
+        move = best_direction
+    else:
+        move = max(scored, key=lambda item: item[1])[0]
 
-    return max(scored, key=lambda item: item[1])[0]
+    mistake_rate = float(ai_cfg.get("mistake_rate", 0.0))
+    if mistake_rate > 0 and random.random() < mistake_rate:
+        return random.choice(MOVE_OPTIONS)
+    return move
 
 
 def _aim_row_after_move(
@@ -533,7 +581,10 @@ def _should_charge(
     height: int,
     move_direction: str,
     bullets: list[dict],
+    cfg: dict[str, float | int] | None = None,
 ) -> tuple[bool, int]:
+    ai_cfg = cfg or get_ai_config("medium")
+    charge_rate = float(ai_cfg.get("charge_rate", 0.65))
     if not state["settings"].get("charge_shot_enabled"):
         return False, 0
     tick = state["tick"]
@@ -555,11 +606,11 @@ def _should_charge(
     if gap == 0:
         return True, FULL_CHARGE_TICKS
     if gap <= 1:
-        if relaxed_safe and (enemy_low_hp or random.random() < 0.55):
+        if relaxed_safe and (enemy_low_hp or random.random() < charge_rate):
             return True, FULL_CHARGE_TICKS
         return True, MID_CHARGE_TICKS
     if _should_shoot(state, fighter, enemy, height, move_direction) and gap <= 2:
-        if relaxed_safe and random.random() < 0.35:
+        if relaxed_safe and random.random() < charge_rate * 0.55:
             return True, FULL_CHARGE_TICKS
         return True, MID_CHARGE_TICKS
     return False, 0
@@ -694,13 +745,15 @@ def choose_ai_actions(
     state: dict,
     player_id: str,
     fighter: dict[str, Any],
+    difficulty: str | None = None,
 ) -> tuple[str, bool, bool, bool, int, bool, bool, bool]:
     """Returns move, shoot, charge_start, charge_release, charge_ticks, pu_start, pu_release, pu_instant."""
+    cfg = get_ai_config(difficulty)
     height = _fighter_height(state)
     bullets = _incoming_bullets(state, player_id, fighter)
     enemy = _enemy_fighter(state, player_id)
 
-    move = _choose_move(fighter, state, height, bullets, enemy)
+    move = _choose_move(fighter, state, height, bullets, enemy, cfg)
 
     shoot = False
     charge_start = False
@@ -728,7 +781,7 @@ def choose_ai_actions(
                 charge_release = True
                 charge_ticks = release_ticks
         else:
-            want_charge, ticks = _should_charge(state, fighter, enemy, height, move, bullets)
+            want_charge, ticks = _should_charge(state, fighter, enemy, height, move, bullets, cfg)
             if want_charge:
                 charge_start = True
                 charge_ticks = ticks
