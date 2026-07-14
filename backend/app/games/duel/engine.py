@@ -574,8 +574,9 @@ class DuelEngine(GamePlugin):
 
         center_row = self._shoot_row(fighter, fighter_height)
         rows = self._bullet_rows(center_row, width, state["grid_height"])
+        shot_speed = speed * 3 if width >= 3 else speed
         for row in rows:
-            self._spawn_bullet(state, fighter, owner_id, row, damage, bounces, speed)
+            self._spawn_bullet(state, fighter, owner_id, row, damage, bounces, shot_speed)
 
         fighter["cooldown_until_tick"] = tick + self._cooldown_ticks(state, fighter)
         fighter["charge_ticks"] = 0

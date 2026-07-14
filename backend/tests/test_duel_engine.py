@@ -93,6 +93,18 @@ def test_shoot_spawns_bullet(engine: DuelEngine, state: dict) -> None:
     assert state["bullets"][0]["owner_id"] == "p0"
 
 
+def test_full_charge_spawns_three_fast_bullets(engine: DuelEngine, state: dict) -> None:
+    left = state["fighters"]["p0"]
+    left["pending_shoot"] = True
+    left["charge_ticks"] = 12
+    left["cooldown_until_tick"] = 0
+
+    state, _ = engine.tick(state)
+    assert len(state["bullets"]) == 3
+    assert all(bullet["vx"] == 6 for bullet in state["bullets"])
+    assert all(bullet["damage"] == 2 for bullet in state["bullets"])
+
+
 def test_fighter_is_three_bars_tall(engine: DuelEngine) -> None:
     players = make_players(2)
     game_state = engine.create_initial_state(players, {})

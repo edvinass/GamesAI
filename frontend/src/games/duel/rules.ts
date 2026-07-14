@@ -13,7 +13,7 @@ export const duelRules: GameRules = {
   sections: [
     {
       heading: 'Controls',
-      body: 'Use W/S or arrow keys to move up and down. Hold a direction to keep moving. Tap Space for a quick shot in Quick Duel mode. In match modes, hold Space to charge and release to fire — longer charge means more damage or a wide spread.',
+      body: 'Use W/S or arrow keys to move up and down. Hold a direction to keep moving. Tap Space for a quick shot in Quick Duel mode. In match modes, hold Space to charge and release to fire — a full charge fires a fast 3-row spread.',
     },
     {
       heading: 'Health & crits',
