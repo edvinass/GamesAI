@@ -59,6 +59,7 @@ button {
   border: none;
   border-radius: 10px;
   font-weight: 600;
+  color: var(--text);
   transition:
     background 0.2s var(--ease-smooth),
     transform 0.15s var(--ease-smooth),
@@ -110,6 +111,7 @@ input:focus, select:focus {
   border-radius: var(--radius);
   padding: 1.5rem;
   box-shadow: var(--shadow);
+  color: var(--text);
   transition: transform 0.25s var(--ease-smooth), box-shadow 0.25s var(--ease-smooth);
 }
 

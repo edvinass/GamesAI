@@ -47,9 +47,24 @@ const stakePresets = [
 ] as const
 
 const difficultyOptions = [
-  { value: 'easy', label: 'Easy', detail: 'Loose & predictable' },
-  { value: 'medium', label: 'Medium', detail: 'Equity-driven' },
-  { value: 'hard', label: 'Hard', detail: 'EV solver & range play' },
+  {
+    value: 'easy',
+    label: 'Easy',
+    detail: 'Loose & leaky',
+    hint: 'Good for learning. Bots call too much, bluff often, and make frequent mistakes.',
+  },
+  {
+    value: 'medium',
+    label: 'Medium',
+    detail: 'Solid & balanced',
+    hint: 'A fair match. Bots bet good hands, fold weak ones, and use pot odds to decide.',
+  },
+  {
+    value: 'hard',
+    label: 'Hard',
+    detail: 'Tight & adaptive',
+    hint: 'Tough opponent. Bots pick strong lines, size bets well, and adjust to how you play.',
+  },
 ] as const
 
 const maxPlayers = computed(() => Number(props.room.settings?.max_players ?? 6))
@@ -183,7 +198,7 @@ function seatInitial(nickname: string): string {
       <div class="difficulty-section">
         <div class="difficulty-header">
           <h2 class="section-title">AI strength</h2>
-          <span class="difficulty-hint">{{ activeDifficulty.detail }}</span>
+          <span class="difficulty-hint">{{ activeDifficulty.hint }}</span>
         </div>
         <div class="difficulty-row" role="radiogroup" aria-label="AI difficulty">
           <button
@@ -210,8 +225,9 @@ function seatInitial(nickname: string): string {
         <p class="mode-summary-desc">{{ activeMode.description }}</p>
         <p class="mode-summary-stakes">
           {{ startingChips.toLocaleString() }} chips · blinds {{ smallBlind }}/{{ bigBlind }} ·
-          AI {{ activeDifficulty.label }}
+          AI {{ activeDifficulty.label }} ({{ activeDifficulty.detail }})
         </p>
+        <p class="mode-summary-ai-hint">{{ activeDifficulty.hint }}</p>
       </div>
     </section>
 
@@ -318,6 +334,7 @@ function seatInitial(nickname: string): string {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  color: var(--text);
   animation: fadeInUp 0.4s var(--ease-smooth) 0.08s backwards;
 }
 
@@ -404,12 +421,20 @@ function seatInitial(nickname: string): string {
 .mode-summary-label {
   margin: 0;
   font-weight: 600;
+  color: var(--text);
 }
 
 .mode-summary-desc,
 .mode-summary-stakes {
   margin: 0.15rem 0 0;
   font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.mode-summary-ai-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
   color: var(--text-muted);
 }
 
@@ -437,8 +462,11 @@ function seatInitial(nickname: string): string {
 }
 
 .difficulty-hint {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
   color: var(--text-muted);
+  text-align: right;
+  max-width: 22rem;
 }
 
 .difficulty-row {
@@ -456,6 +484,7 @@ function seatInitial(nickname: string): string {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-elevated, rgba(255, 255, 255, 0.03));
+  color: var(--text);
   cursor: pointer;
   text-align: left;
 }
@@ -474,7 +503,8 @@ function seatInitial(nickname: string): string {
 }
 
 .diff-detail {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
   color: var(--text-muted);
 }
 
@@ -552,10 +582,14 @@ function seatInitial(nickname: string): string {
   padding: 0.45rem 0.65rem;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--surface-hover);
   color: var(--text);
   font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
+}
+
+.field input::placeholder {
+  color: var(--text-muted);
 }
 
 .stakes-summary {
@@ -789,6 +823,7 @@ function seatInitial(nickname: string): string {
 
 .nickname {
   font-weight: 600;
+  color: var(--text);
 }
 
 .badge {
@@ -796,13 +831,24 @@ function seatInitial(nickname: string): string {
   padding: 0.12rem 0.4rem;
   border-radius: 999px;
   background: var(--surface-elevated);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
 
+.ai-badge {
+  background: rgba(91, 156, 255, 0.15);
+  color: #8ec5ff;
+}
+
+.host-badge {
+  background: rgba(61, 214, 140, 0.15);
+  color: var(--success);
+}
+
 .you-badge {
   background: rgba(255, 215, 80, 0.15);
-  color: #d4a820;
+  color: #ffd666;
 }
 
 .empty-players,
@@ -865,6 +911,7 @@ function seatInitial(nickname: string): string {
 .validation-message {
   margin: 0;
   font-size: 0.9rem;
+  color: var(--text);
 }
 
 .validation-issues {
@@ -898,8 +945,18 @@ function seatInitial(nickname: string): string {
     align-items: flex-start;
   }
 
-  .remove-btn {
-    align-self: flex-end;
+  .difficulty-row {
+    grid-template-columns: 1fr;
+  }
+
+  .difficulty-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .difficulty-hint {
+    text-align: left;
+    max-width: none;
   }
 }
 </style>
