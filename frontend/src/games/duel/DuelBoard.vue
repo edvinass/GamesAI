@@ -188,9 +188,7 @@ function onKeyDown(e: KeyboardEvent) {
 
   if (e.key === ' ') {
     e.preventDefault()
-    if (storedPowerup.value && powerupsEnabled.value) {
-      if (!activatingPowerup.value) startPowerupActivation()
-    } else if (chargeEnabled.value) {
+    if (chargeEnabled.value) {
       if (!charging.value) startCharge()
     } else {
       quickShoot()
@@ -198,9 +196,13 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
-  if ((e.key === 'f' || e.key === 'F') && storedPowerup.value && chargeEnabled.value) {
+  if (
+    (e.key === 'e' || e.key === 'E') &&
+    storedPowerup.value &&
+    powerupsEnabled.value
+  ) {
     e.preventDefault()
-    if (!charging.value) startCharge()
+    if (!activatingPowerup.value) startPowerupActivation()
   }
 }
 
@@ -227,14 +229,13 @@ function onKeyUp(e: KeyboardEvent) {
 
   if (e.key === ' ') {
     e.preventDefault()
-    if (activatingPowerup.value) releasePowerupActivation()
-    else if (charging.value) releaseCharge()
+    if (charging.value) releaseCharge()
     return
   }
 
-  if ((e.key === 'f' || e.key === 'F') && charging.value) {
+  if ((e.key === 'e' || e.key === 'E') && activatingPowerup.value) {
     e.preventDefault()
-    releaseCharge()
+    releasePowerupActivation()
   }
 }
 
@@ -402,7 +403,7 @@ onUnmounted(() => {
 
       <div class="controls-hint">
         <p v-if="canControl && chargeEnabled && storedPowerup">
-          <strong>Controls:</strong> W/S or ↑/↓ to move · Hold Space until the bar fills to activate · Hold F to charge & fire
+          <strong>Controls:</strong> W/S or ↑/↓ to move · Space to charge & fire · Hold E until the bar fills to activate power-up
         </p>
         <p v-else-if="canControl && chargeEnabled">
           <strong>Controls:</strong> W/S or ↑/↓ to move · Hold Space to charge, release to fire

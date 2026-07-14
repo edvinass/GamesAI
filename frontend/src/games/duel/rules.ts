@@ -13,7 +13,7 @@ export const duelRules: GameRules = {
   sections: [
     {
       heading: 'Controls',
-      body: 'Use W/S or arrow keys to move up and down. Tap Space for a quick shot in Quick Duel mode. In match modes, hold Space to charge and release to fire. When carrying a power-up, hold Space to activate it and use F to charge your weapon.',
+      body: 'Use W/S or arrow keys to move up and down. Tap Space for a quick shot in Quick Duel mode. In match modes, hold Space to charge and release to fire. When carrying a power-up, hold E to activate it — Space still fires your weapon.',
     },
     {
       heading: 'Health & crits',
@@ -44,7 +44,7 @@ export const duelRules: GameRules = {
     'Strafe vertically while charging to bait predictable shots.',
     'Use obstacles to break line-of-sight and force repositioning.',
     'Tag power-ups with a passing shot before they despawn — they blink faster when about to vanish.',
-    'Hold Space to activate a stored power-up; keep shooting with F while you carry one.',
+    'Hold E to activate a stored power-up; keep shooting with Space anytime.',
     'In Fog mode, watch bullet rows — they reveal true aim.',
     'Save shield for an all-in push when the arena shrinks.',
   ],

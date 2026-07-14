@@ -422,8 +422,6 @@ class DuelEngine(GamePlugin):
         if action_type == "charge_start":
             if not state["settings"].get("charge_shot_enabled"):
                 return state, events
-            if fighter.get("stored_powerup"):
-                return state, events
             if state["tick"] < fighter.get("cooldown_until_tick", 0):
                 return state, events
             fighter["charging"] = True
