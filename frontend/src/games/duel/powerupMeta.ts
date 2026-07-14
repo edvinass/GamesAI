@@ -1,5 +1,30 @@
 export const POWERUP_ACTIVATION_TICKS = 8
 
+export const INSTANT_POWERUP_TYPES = new Set([
+  'heal',
+  'laser',
+  'railgun',
+  'bomb',
+  'cluster',
+  'burst',
+  'decoy',
+])
+
+/** Hold duration before channeled power-ups activate — keep in sync with backend POWERUP_CHANNEL_TICKS */
+export const POWERUP_CHANNEL_TICKS: Record<string, number> = {
+  rapid_fire: 6,
+  machine_gun: 6,
+  shield: 8,
+  wide_shot: 6,
+  homing: 7,
+  pierce: 7,
+  ghost: 7,
+  freeze: 8,
+  mirror: 8,
+  overdrive: 7,
+  phase_shift: 7,
+}
+
 export type PowerupTier = 'common' | 'rare' | 'epic'
 
 export const POWERUP_TIERS: Record<string, PowerupTier> = {
@@ -80,6 +105,7 @@ const BUFF_EFFECT_KEYS = [
   ['overdrive_until', 'overdrive_active', 'overdrive', 'Overdrive'],
   ['phase_shift_until', 'phase_shift_active', 'phase_shift', 'Phase Shift'],
   ['freeze_until', 'freeze_active', 'freeze', 'Frozen'],
+  ['freeze_cast_until', 'freeze_cast_active', 'freeze', 'Freeze cast'],
 ] as const
 
 export interface ActivePowerupEffect {
@@ -96,6 +122,15 @@ export function powerupTier(type: string | null | undefined): PowerupTier {
   return POWERUP_TIERS[type] ?? 'common'
 }
 
+export function isInstantPowerup(type: string | null | undefined): boolean {
+  return Boolean(type && INSTANT_POWERUP_TYPES.has(type))
+}
+
+export function powerupChannelTicks(type: string | null | undefined): number {
+  if (!type) return POWERUP_ACTIVATION_TICKS
+  return POWERUP_CHANNEL_TICKS[type] ?? POWERUP_ACTIVATION_TICKS
+}
+
 export function powerupEffectDuration(type: string | null | undefined, fallback = 80): number {
   if (!type) return fallback
   return POWERUP_EFFECT_DURATIONS[type] ?? fallback
@@ -109,13 +144,18 @@ export function formatPowerupSeconds(ticks: number, tickMs: number): string {
 
 export function powerupUseHint(
   type: string | null | undefined,
-  _tickMs = 75,
+  tickMs = 75,
   charges?: number | null,
 ): string {
   if (type === 'bomb' && charges != null && charges > 0) {
-    return `Press E or click Use to fire (${charges} left)`
+    return `Tap or hold to fire (${charges} left)`
   }
-  return 'Press E or click Use to activate'
+  if (isInstantPowerup(type)) {
+    return 'Tap or press to activate instantly'
+  }
+  const ticks = powerupChannelTicks(type)
+  const sec = Math.round((ticks * tickMs) / 100) / 10
+  return `Hold ${sec}s to channel, release to activate`
 }
 
 export function listActivePowerupEffects(

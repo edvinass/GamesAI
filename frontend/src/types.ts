@@ -269,6 +269,7 @@ export interface DuelGameState {
   round_stats?: Record<string, DuelStatBlock>
   match_stats?: Record<string, DuelStatBlock>
   powerup_bans?: Record<string, string>
+  rematch_requests?: string[]
   players: Player[]
   winner: string | null
   win_reason: string | null

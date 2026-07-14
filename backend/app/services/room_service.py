@@ -679,11 +679,16 @@ class RoomService:
         room = await self._load_room(room_id)
         if not room:
             raise ValueError("Room not found")
-        if room.status != RoomStatus.PLAYING or not room.game_state:
+        is_duel_rematch = (
+            room.game_type == "duel"
+            and action.get("type") == "request_rematch"
+            and room.status == RoomStatus.FINISHED
+        )
+        if not is_duel_rematch and (room.status != RoomStatus.PLAYING or not room.game_state):
             raise ValueError("Game not in progress")
 
         game = get_game(room.game_type)
-        if game.tick_interval_ms():
+        if game.tick_interval_ms() and not is_duel_rematch:
             lock = _get_ai_lock(str(room_id))
             async with lock:
                 return await self._apply_game_action_unlocked(
@@ -699,7 +704,14 @@ class RoomService:
         room = await self._load_room(room_id)
         if not room:
             raise ValueError("Room not found")
-        if room.status != RoomStatus.PLAYING or not room.game_state:
+        is_duel_rematch = (
+            room.game_type == "duel"
+            and action.get("type") == "request_rematch"
+            and room.status == RoomStatus.FINISHED
+        )
+        if not is_duel_rematch and (room.status != RoomStatus.PLAYING or not room.game_state):
+            raise ValueError("Game not in progress")
+        if not room.game_state:
             raise ValueError("Game not in progress")
 
         player = next((p for p in room.players if p.id == player_id), None)

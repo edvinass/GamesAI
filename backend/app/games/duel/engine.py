@@ -854,6 +854,19 @@ class DuelEngine(GamePlugin):
         action_type = action.get("type")
         events: list[dict] = []
 
+        if state["phase"] == "finished" and action_type == "request_rematch":
+            player_id = player["id"]
+            requests = state.setdefault("rematch_requests", [])
+            if player_id not in requests:
+                requests.append(player_id)
+            state["last_action"] = {
+                "type": "rematch_requested",
+                "player_id": player_id,
+            }
+            nickname = player.get("nickname", "Player")
+            self._append_event_log(state, f"{nickname} wants a rematch")
+            return state, events
+
         if state["phase"] == "powerup_draft":
             if action_type == "ban_powerup":
                 ptype = action.get("powerup_type")
@@ -1044,7 +1057,12 @@ class DuelEngine(GamePlugin):
             )
             fighter["move_direction"] = move
             if pu_use and fighter.get("stored_powerup"):
-                self._activate_stored_powerup(state, fighter, pid, ai_events)
+                ptype = fighter["stored_powerup"]
+                if ptype in INSTANT_POWERUP_TYPES:
+                    self._activate_stored_powerup(state, fighter, pid, ai_events)
+                elif not fighter.get("activating_powerup"):
+                    fighter["activating_powerup"] = True
+                    fighter["powerup_activation_ticks"] = 0
             elif charge_start:
                 fighter["charging"] = True
                 fighter["charge_ticks"] = 0
@@ -2037,6 +2055,26 @@ class DuelEngine(GamePlugin):
             if fighter.get("alive") and fighter.get("activating_powerup"):
                 fighter["powerup_activation_ticks"] = fighter.get("powerup_activation_ticks", 0) + 1
 
+    def _complete_ai_powerup_channels(self, state: dict, events: list[dict]) -> None:
+        for player in state["players"]:
+            if not player.get("is_ai"):
+                continue
+            pid = player["id"]
+            fighter = state["fighters"].get(pid)
+            if not fighter or not fighter.get("alive") or not fighter.get("activating_powerup"):
+                continue
+            ptype = fighter.get("stored_powerup")
+            if not ptype or ptype in INSTANT_POWERUP_TYPES:
+                fighter["activating_powerup"] = False
+                fighter["powerup_activation_ticks"] = 0
+                continue
+            required = self._powerup_channel_ticks(ptype)
+            server_ticks = int(fighter.get("powerup_activation_ticks", 0))
+            if self._powerup_activation_succeeds(True, server_ticks, None, required):
+                fighter["activating_powerup"] = False
+                fighter["powerup_activation_ticks"] = 0
+                self._activate_stored_powerup(state, fighter, pid, events)
+
     def _fighter_in_hazard(self, fighter: dict, state: dict) -> bool:
         if not state["settings"].get("shrinking_arena"):
             return False
@@ -2394,6 +2432,7 @@ class DuelEngine(GamePlugin):
         self._apply_ai_inputs(state, events)
         self._increment_charging(state)
         self._increment_powerup_activation(state)
+        self._complete_ai_powerup_channels(state, events)
         self._rotate_obstacles(state)
         self._cleanup_decoys(state)
         self._maybe_shrink_arena(state, events)
@@ -2547,6 +2586,7 @@ class DuelEngine(GamePlugin):
             "round_stats": state.get("round_stats", {}),
             "match_stats": state.get("match_stats", {}),
             "powerup_bans": state.get("powerup_bans", {}),
+            "rematch_requests": state.get("rematch_requests", []),
             "players": state["players"],
             "winner": state.get("winner"),
             "win_reason": state.get("win_reason"),

@@ -242,13 +242,35 @@ function confirmDaily() {
               :title="opt.label"
               @click="arenaTheme = opt.id"
             >
-              <span class="swatch-colors" :style="{ background: `linear-gradient(135deg, ${opt.backdrop[0]}, ${opt.backdrop[1]})` }" />
+              <span
+                class="swatch-colors"
+                :style="{
+                  background: `linear-gradient(135deg, ${opt.backdrop[0]}, ${opt.backdrop[1]})`,
+                  '--swatch-grid': opt.grid,
+                  '--swatch-midline': opt.midline,
+                }"
+              />
               <span class="swatch-label">{{ opt.label }}</span>
             </button>
           </div>
         </div>
         <div class="theme-preview card" :style="{ background: selectedTheme.canvasCss }">
-          <span>Preview: {{ selectedTheme.label }}</span>
+          <div
+            class="theme-preview-arena"
+            :style="{
+              background: `linear-gradient(180deg, ${selectedTheme.backdrop[0]}, ${selectedTheme.backdrop[1]})`,
+              '--preview-grid': selectedTheme.grid,
+              '--preview-midline': selectedTheme.midline,
+              '--preview-hazard': selectedTheme.hazard,
+            }"
+          >
+            <span class="preview-ship left" />
+            <span class="preview-midline" />
+            <span class="preview-ship right" />
+            <span class="preview-hazard top" />
+            <span class="preview-hazard bottom" />
+          </div>
+          <span class="theme-preview-label">{{ selectedTheme.label }}</span>
         </div>
         <div class="setting-row">
           <span class="setting-label">Game speed</span>
@@ -506,10 +528,98 @@ function confirmDaily() {
 }
 
 .swatch-colors {
+  position: relative;
   width: 3rem;
   height: 1.75rem;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+.swatch-colors::before,
+.swatch-colors::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.swatch-colors::before {
+  background-image:
+    linear-gradient(var(--swatch-grid, rgba(255, 255, 255, 0.12)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--swatch-grid, rgba(255, 255, 255, 0.12)) 1px, transparent 1px);
+  background-size: 8px 8px;
+}
+
+.swatch-colors::after {
+  background: linear-gradient(90deg, transparent 48%, var(--swatch-midline, rgba(255, 255, 255, 0.3)) 50%, transparent 52%);
+}
+
+.theme-preview {
+  margin-top: 0.5rem;
+  padding: 0.65rem;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.theme-preview-arena {
+  position: relative;
+  height: 4.5rem;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-image:
+    linear-gradient(var(--preview-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--preview-grid) 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+
+.preview-midline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--preview-midline);
+}
+
+.preview-ship {
+  position: absolute;
+  top: 50%;
+  width: 1.1rem;
+  height: 0.55rem;
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+
+.preview-ship.left {
+  left: 18%;
+  background: #5b9cff;
+  box-shadow: 0 0 8px rgba(91, 156, 255, 0.5);
+}
+
+.preview-ship.right {
+  right: 18%;
+  background: #f87171;
+  box-shadow: 0 0 8px rgba(248, 113, 113, 0.5);
+}
+
+.preview-hazard {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0.65rem;
+  background: var(--preview-hazard);
+}
+
+.preview-hazard.top {
+  top: 0;
+}
+
+.preview-hazard.bottom {
+  bottom: 0;
 }
 
 .swatch-label {
@@ -517,11 +627,9 @@ function confirmDaily() {
   color: var(--text-muted);
 }
 
-.theme-preview {
-  margin-top: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-  border-radius: 8px;
+.theme-preview-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
 }
 
 .arrange-hint {

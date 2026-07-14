@@ -64,4 +64,23 @@ export const DUEL_LOBBY_PRESETS: DuelLobbyPreset[] = [
       ai_personality: 'balanced',
     },
   },
+  {
+    id: 'quick_chaos',
+    label: 'Quick chaos',
+    description: 'Quick duel · Chaos mutator · Fast rounds',
+    settings: {
+      solo_practice: false,
+      match_format: 'quick_duel',
+      mutator: 'chaos',
+      mutator_secondary: 'none',
+      training_drill: 'none',
+      tutorial_mode: true,
+      tick_ms: 65,
+      obstacle_count: 2,
+      obstacle_rotation: false,
+      quick_duel_loadout: 'none',
+      powerup_draft_enabled: false,
+      arena_theme: 'neon',
+    },
+  },
 ]

@@ -7,7 +7,9 @@ import {
   POWERUP_TIER_LABELS,
   canUseStoredPowerup,
   formatPowerupSeconds,
+  isInstantPowerup,
   listActivePowerupEffects,
+  powerupChannelTicks,
   powerupTier,
   powerupUseHint,
 } from './powerupMeta'
@@ -191,6 +193,8 @@ const playerRows = computed(() =>
 const heldMove = ref<'up' | 'down' | null>(null)
 const charging = ref(false)
 const chargeTicks = ref(0)
+const powerupHolding = ref(false)
+const powerupActivationTicks = ref(0)
 const shootOnCooldown = computed(() => {
   const tick = props.gameState.tick ?? 0
   const until = myFighter.value?.cooldown_until_tick ?? 0
@@ -239,6 +243,16 @@ const roundRecapRows = computed(() =>
 const chargeTier = computed(() =>
   chargeTierForTicks(chargeTicks.value, props.gameState.mutator === 'sniper'),
 )
+const powerupChannelRequired = computed(() => powerupChannelTicks(storedPowerup.value))
+const powerupChannelReady = computed(
+  () => powerupHolding.value && powerupActivationTicks.value >= powerupChannelRequired.value,
+)
+const powerupUseLabel = computed(() => {
+  if (!storedPowerup.value) return 'Use'
+  if (!canUsePowerup.value && storedPowerup.value === 'heal') return 'Full HP'
+  const key = formatBindingLabel(keybinds.value.powerup)
+  return isInstantPowerup(storedPowerup.value) ? `Use [${key}]` : `Hold [${key}]`
+})
 const draftBanSummary = computed(() => {
   const bans = props.gameState.powerup_bans ?? {}
   return Object.entries(bans).map(([playerId, ptype]) => {
@@ -253,6 +267,15 @@ const bannedPowerupTypes = computed(() => Object.values(props.gameState.powerup_
 const draftTierGroups = computed(() => buildDraftTierGroups(bannedPowerupTypes.value))
 const draftBanCount = computed(() => Object.keys(props.gameState.powerup_bans ?? {}).length)
 const draftPlayerCount = computed(() => props.gameState.players.length)
+const matchBanChips = computed(() => {
+  const bans = props.gameState.powerup_bans ?? {}
+  return Object.values(bans).map((ptype) => ({
+    id: ptype,
+    label: POWERUP_LABELS[ptype] ?? ptype,
+    icon: POWERUP_ICONS[ptype] ?? '★',
+    color: POWERUP_COLORS[ptype] ?? '#a855f7',
+  }))
+})
 const matchMutatorLabel = computed(() =>
   mutatorStackLabel(props.gameState.mutator, props.gameState.mutator_secondary),
 )
@@ -596,6 +619,7 @@ function clearHeldInputs() {
     heldMove.value = null
   }
   if (charging.value) releaseCharge()
+  if (powerupHolding.value) releasePowerupHold()
 }
 
 function onVisibilityChange() {
@@ -619,6 +643,18 @@ function returnToLobby() {
   emit('lobby')
 }
 
+function requestRematch() {
+  emit('action', { type: 'request_rematch' })
+}
+
+const rematchRequests = computed(() => props.gameState.rematch_requests ?? [])
+const hasRequestedRematch = computed(() => rematchRequests.value.includes(props.playerId))
+const rematchRequestNames = computed(() =>
+  rematchRequests.value
+    .filter((id) => id !== props.playerId)
+    .map((id) => props.gameState.players.find((p) => p.id === id)?.nickname ?? 'Player'),
+)
+
 function banPowerup(type: string) {
   emit('action', { type: 'ban_powerup', powerup_type: type })
 }
@@ -636,20 +672,47 @@ function showPowerupNotice(text: string, tone: 'info' | 'success' | 'warn' = 'in
   }, 2800)
 }
 
-function useStoredPowerup() {
+function activateStoredPowerupInstant() {
+  emit('action', { type: 'powerup_activate' })
+}
+
+function startPowerupHold() {
   if (!canControl.value || !powerupsEnabled.value || !storedPowerup.value || !canUsePowerup.value) {
     if (storedPowerup.value === 'heal' && !canUsePowerup.value) {
       showPowerupNotice('Already at full health', 'warn')
     }
     return
   }
-  emit('action', { type: 'powerup_activate' })
+  if (isInstantPowerup(storedPowerup.value)) {
+    activateStoredPowerupInstant()
+    return
+  }
+  if (powerupHolding.value) return
+  powerupHolding.value = true
+  powerupActivationTicks.value = 0
+  emit('action', { type: 'powerup_hold_start' })
+}
+
+function releasePowerupHold() {
+  if (!powerupHolding.value) return
+  powerupHolding.value = false
+  const serverTicks = myFighter.value?.powerup_activation_ticks ?? powerupActivationTicks.value
+  const ticks = Math.min(powerupChannelRequired.value, serverTicks + 1)
+  emit('action', { type: 'powerup_hold_release', powerup_activation_ticks: ticks })
+  powerupActivationTicks.value = 0
 }
 
 function onPowerupButtonClick(e: MouseEvent | TouchEvent) {
   e.preventDefault()
   unlockAudio()
-  useStoredPowerup()
+  startPowerupHold()
+}
+
+function onPowerupButtonRelease(e: MouseEvent | TouchEvent) {
+  e.preventDefault()
+  if (storedPowerup.value && !isInstantPowerup(storedPowerup.value)) {
+    releasePowerupHold()
+  }
 }
 
 watch(
@@ -668,6 +731,24 @@ watch(
   (serverTicks) => {
     if (!charging.value || typeof serverTicks !== 'number') return
     chargeTicks.value = Math.min(chargeMaxTicks.value, serverTicks)
+  },
+)
+
+watch(
+  () => myFighter.value?.powerup_activation_ticks,
+  (serverTicks) => {
+    if (!powerupHolding.value || typeof serverTicks !== 'number') return
+    powerupActivationTicks.value = Math.min(powerupChannelRequired.value, serverTicks)
+  },
+)
+
+watch(
+  () => myFighter.value?.activating_powerup,
+  (activating) => {
+    if (!activating && powerupHolding.value) {
+      powerupHolding.value = false
+      powerupActivationTicks.value = 0
+    }
   },
 )
 
@@ -768,6 +849,8 @@ watch(
       }
     } else if (type === 'powerup_blocked' && action.reason === 'max_hp') {
       showPowerupNotice('Heal saved — you are already at full health', 'warn')
+    } else if (type === 'powerup_hold_release' && action.activated === false) {
+      showPowerupNotice('Hold longer to channel this power-up', 'warn')
     } else if (type === 'action_rejected') {
       const reason = action.reason as string | undefined
       const attempted = action.attempted as string | undefined
@@ -903,7 +986,7 @@ function onKeyDown(e: KeyboardEvent) {
     powerupsEnabled.value
   ) {
     e.preventDefault()
-    useStoredPowerup()
+    startPowerupHold()
     return
   }
 }
@@ -926,6 +1009,15 @@ function onKeyUp(e: KeyboardEvent) {
   if (matchesBinding(e.code, keybinds.value.fire)) {
     e.preventDefault()
     if (charging.value) releaseCharge()
+    return
+  }
+
+  if (
+    matchesBinding(e.code, keybinds.value.powerup) &&
+    powerupHolding.value
+  ) {
+    e.preventDefault()
+    releasePowerupHold()
     return
   }
 }
@@ -1017,37 +1109,43 @@ onUnmounted(() => {
 <template>
   <div class="duel-board">
     <div class="match-bar">
-      <span class="match-format">
-        Round {{ gameState.round }} · Best of {{ gameState.best_of }} · First to {{ roundsToWin }}
-      </span>
-      <span v-if="shrinkSoftWarningActive" class="shrink-soft">Arena shrinking soon</span>
-      <span v-if="shrinkWarningActive" class="shrink-warning">
-        Arena shrinks in {{ formatPowerupSeconds(shrinkTicksUntil ?? 0, tickMs) }}
-      </span>
-      <span class="mutator-tag">{{ matchMutatorLabel }}</span>
-      <span v-if="fogActive" class="match-chip fog" title="Enemy aim rows are imprecise">Fog</span>
-      <span v-if="drillBadge" class="match-chip drill" :title="drillHintText">{{ drillBadge }}</span>
-      <span v-if="quickLoadoutLabel" class="match-chip loadout">Loadout: {{ quickLoadoutLabel }}</span>
-      <span v-if="aiPersonalityLabel" class="match-chip ai">{{ aiPersonalityLabel }}</span>
-      <button type="button" class="match-link" @click="emit('showRules')">Power-ups</button>
-      <button
-        type="button"
-        class="sound-toggle labeled"
-        :aria-label="soundMuted ? 'Unmute sound' : 'Mute sound'"
-        @click="toggleSound"
-      >
-        <span aria-hidden="true">{{ soundMuted ? '🔇' : '🔊' }}</span>
-        <span class="toggle-label">Sound</span>
-      </button>
-      <button
-        type="button"
-        class="sound-toggle labeled"
-        aria-label="Visual and accessibility settings"
-        @click="showVisualPrefs = !showVisualPrefs"
-      >
-        <span aria-hidden="true">⚙</span>
-        <span class="toggle-label">Settings</span>
-      </button>
+      <div class="match-bar-primary">
+        <span class="match-format">
+          Round {{ gameState.round }} · Best of {{ gameState.best_of }} · First to {{ roundsToWin }}
+        </span>
+        <span class="mutator-tag">{{ matchMutatorLabel }}</span>
+      </div>
+      <div class="match-bar-meta">
+        <span v-if="shrinkSoftWarningActive" class="shrink-soft">Arena shrinking soon</span>
+        <span v-if="shrinkWarningActive" class="shrink-warning">
+          Arena shrinks in {{ formatPowerupSeconds(shrinkTicksUntil ?? 0, tickMs) }}
+        </span>
+        <span v-if="fogActive" class="match-chip fog" title="Enemy aim rows are imprecise">Fog</span>
+        <span v-if="drillBadge" class="match-chip drill" :title="drillHintText">{{ drillBadge }}</span>
+        <span v-if="quickLoadoutLabel" class="match-chip loadout">Loadout: {{ quickLoadoutLabel }}</span>
+        <span v-if="aiPersonalityLabel" class="match-chip ai">{{ aiPersonalityLabel }}</span>
+      </div>
+      <div class="match-bar-actions">
+        <button type="button" class="match-link" @click="emit('showRules')">Power-ups</button>
+        <button
+          type="button"
+          class="sound-toggle labeled"
+          :aria-label="soundMuted ? 'Unmute sound' : 'Mute sound'"
+          @click="toggleSound"
+        >
+          <span aria-hidden="true">{{ soundMuted ? '🔇' : '🔊' }}</span>
+          <span class="toggle-label">Sound</span>
+        </button>
+        <button
+          type="button"
+          class="sound-toggle labeled"
+          aria-label="Visual and accessibility settings"
+          @click="showVisualPrefs = !showVisualPrefs"
+        >
+          <span aria-hidden="true">⚙</span>
+          <span class="toggle-label">Settings</span>
+        </button>
+      </div>
     </div>
 
     <div v-if="showVisualPrefs" class="visual-prefs card">
@@ -1122,7 +1220,13 @@ onUnmounted(() => {
       <div
         v-if="canControl && storedPowerup && powerupsEnabled"
         class="powerup-slot"
-        :class="`tier-${storedPowerupTier}`"
+        :class="[
+          `tier-${storedPowerupTier}`,
+          {
+            instant: isInstantPowerup(storedPowerup),
+            activating: powerupHolding,
+          },
+        ]"
         :style="{
           borderColor: POWERUP_COLORS[storedPowerup] ?? '#a855f7',
           boxShadow: `0 8px 28px rgba(0,0,0,0.35), 0 0 24px ${POWERUP_COLORS[storedPowerup] ?? '#a855f7'}33`,
@@ -1150,14 +1254,33 @@ onUnmounted(() => {
           class="powerup-use-btn"
           :class="{ disabled: !canUsePowerup }"
           :disabled="!canUsePowerup"
-          @click="onPowerupButtonClick"
+          @mousedown.prevent="onPowerupButtonClick"
+          @mouseup.prevent="onPowerupButtonRelease"
+          @mouseleave.prevent="onPowerupButtonRelease"
+          @touchstart.prevent="onPowerupButtonClick"
+          @touchend.prevent="onPowerupButtonRelease"
+          @touchcancel.prevent="onPowerupButtonRelease"
         >
-          {{
-            !canUsePowerup && storedPowerup === 'heal'
-              ? 'Full HP'
-              : `Use [${formatBindingLabel(keybinds.powerup)}]`
-          }}
+          {{ powerupUseLabel }}
         </button>
+      </div>
+
+      <div v-if="powerupHolding && canControl" class="powerup-channel-bar">
+        <div
+          class="powerup-channel-fill"
+          :class="{ ready: powerupChannelReady }"
+          :style="{
+            width: `${(powerupActivationTicks / powerupChannelRequired) * 100}%`,
+            background: POWERUP_COLORS[storedPowerup ?? ''] ?? '#a855f7',
+          }"
+        />
+        <span class="powerup-channel-label">
+          {{
+            powerupChannelReady
+              ? 'RELEASE!'
+              : `Channeling ${POWERUP_LABELS[storedPowerup ?? ''] ?? 'power-up'}…`
+          }}
+        </span>
       </div>
 
       <div v-if="canControl && activeBuffs.length" class="active-buffs">
@@ -1212,39 +1335,48 @@ onUnmounted(() => {
       </div>
 
       <div v-if="isDraftPhase && !myBan" class="overlay draft">
-        <span class="overlay-label">Ban a power-up</span>
-        <p class="overlay-hint draft-explainer">
-          Remove one orb type from the pool for the rest of the match. Banned types won't spawn again.
-        </p>
-        <div v-for="group in draftTierGroups" :key="group.tier" class="draft-tier-group">
-          <span class="draft-tier-label">{{ group.label }}</span>
-          <div class="draft-grid">
-            <button
-              v-for="opt in group.options"
-              :key="opt.id"
-              type="button"
-              class="btn-secondary draft-btn"
-              :class="{ banned: opt.banned }"
-              :disabled="opt.banned"
-              :style="{ borderColor: opt.color }"
-              @click="banPowerup(opt.id)"
-            >
-              <span class="draft-icon" :style="{ color: opt.color }">{{ opt.icon }}</span>
-              <span>{{ opt.label }}</span>
-              <span v-if="opt.banned" class="draft-banned-tag">Banned</span>
-            </button>
+        <div class="draft-panel">
+          <span class="overlay-label">Ban a power-up</span>
+          <p class="overlay-hint draft-explainer">
+            Remove one orb type from the pool for the rest of the match. The arena behind you is already set for the next round.
+          </p>
+          <div v-for="group in draftTierGroups" :key="group.tier" class="draft-tier-group">
+            <span class="draft-tier-label">{{ group.label }}</span>
+            <div class="draft-grid">
+              <button
+                v-for="opt in group.options"
+                :key="opt.id"
+                type="button"
+                class="draft-card"
+                :class="[`tier-${opt.tier}`, { banned: opt.banned }]"
+                :disabled="opt.banned"
+                :title="opt.hint"
+                :style="{ '--draft-accent': opt.color }"
+                @click="banPowerup(opt.id)"
+              >
+                <span class="draft-icon" :style="{ color: opt.color }">{{ opt.icon }}</span>
+                <span class="draft-name">{{ opt.label }}</span>
+                <span class="draft-hint">{{ opt.hint }}</span>
+                <span v-if="opt.banned" class="draft-banned-tag">Banned</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       <div v-else-if="isDraftPhase" class="overlay draft">
-        <span class="overlay-hint">Waiting for opponent to ban…</span>
-        <p class="draft-progress">{{ draftBanCount }}/{{ draftPlayerCount }} bans locked in</p>
-        <ul v-if="draftBanSummary.length" class="draft-bans">
-          <li v-for="ban in draftBanSummary" :key="ban.nickname">
-            {{ ban.nickname }} banned {{ ban.label }}
-          </li>
-        </ul>
+        <div class="draft-panel draft-waiting">
+          <span class="overlay-hint">Waiting for opponent to ban…</span>
+          <div class="draft-progress-row">
+            <span class="draft-spinner" aria-hidden="true" />
+            <span class="draft-progress">{{ draftBanCount }}/{{ draftPlayerCount }} bans locked in</span>
+          </div>
+          <ul v-if="draftBanSummary.length" class="draft-bans">
+            <li v-for="ban in draftBanSummary" :key="ban.nickname">
+              {{ ban.nickname }} banned {{ ban.label }}
+            </li>
+          </ul>
+        </div>
       </div>
 
       <div v-if="gameState.phase === 'countdown'" class="overlay countdown">
@@ -1259,6 +1391,19 @@ onUnmounted(() => {
             </template>
           </template>
         </span>
+        <div v-if="matchBanChips.length" class="countdown-bans">
+          <span class="countdown-bans-label">Banned this match</span>
+          <div class="countdown-ban-chips">
+            <span
+              v-for="chip in matchBanChips"
+              :key="chip.id"
+              class="countdown-ban-chip"
+              :style="{ borderColor: chip.color, color: chip.color }"
+            >
+              {{ chip.icon }} {{ chip.label }}
+            </span>
+          </div>
+        </div>
       </div>
 
       <div v-else-if="isRoundOver" class="overlay round-over">
@@ -1353,6 +1498,10 @@ onUnmounted(() => {
           </div>
         </div>
         <div v-if="isHost" class="finished-actions">
+          <p v-if="rematchRequestNames.length" class="rematch-requests">
+            {{ rematchRequestNames.join(', ') }}
+            {{ rematchRequestNames.length === 1 ? 'wants' : 'want' }} a rematch
+          </p>
           <button type="button" class="btn-primary play-again-btn" @click="startNewGame(false)">
             Rematch
           </button>
@@ -1364,8 +1513,17 @@ onUnmounted(() => {
           </button>
         </div>
         <div v-else class="finished-actions guest-finished">
-          <p class="overlay-hint">Waiting for host to start a rematch…</p>
-          <button type="button" class="btn-primary play-again-btn" @click="returnToLobby">
+          <p v-if="hasRequestedRematch" class="overlay-hint">Rematch requested — waiting for host…</p>
+          <p v-else class="overlay-hint">Ask the host for a rematch, or return to the lobby.</p>
+          <button
+            v-if="!hasRequestedRematch"
+            type="button"
+            class="btn-primary play-again-btn"
+            @click="requestRematch"
+          >
+            Request rematch
+          </button>
+          <button type="button" class="btn-secondary play-again-btn" @click="returnToLobby">
             Return to lobby
           </button>
         </div>
@@ -1433,9 +1591,14 @@ onUnmounted(() => {
           v-if="storedPowerup && powerupsEnabled"
           type="button"
           class="touch-btn touch-powerup"
-          :aria-label="'Use power-up'"
+          :aria-label="isInstantPowerup(storedPowerup) ? 'Use power-up' : 'Hold to channel power-up'"
           :disabled="!canUsePowerup"
-          @click.prevent="onPowerupButtonClick"
+          @touchstart.prevent="onPowerupButtonClick"
+          @touchend.prevent="onPowerupButtonRelease"
+          @touchcancel.prevent="onPowerupButtonRelease"
+          @mousedown.prevent="onPowerupButtonClick"
+          @mouseup.prevent="onPowerupButtonRelease"
+          @mouseleave.prevent="onPowerupButtonRelease"
         >
           {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
         </button>
@@ -1504,7 +1667,8 @@ onUnmounted(() => {
       <div class="controls-hint">
         <p v-if="showTouchControls && canControl && storedPowerup && powerupsEnabled">
           <strong>Touch:</strong> Arrows move · ⚡ {{ chargeEnabled ? 'hold to charge' : 'fire' }} ·
-          {{ POWERUP_ICONS[storedPowerup] ?? '★' }} tap power-up
+          {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
+          {{ isInstantPowerup(storedPowerup) ? 'tap power-up' : 'hold power-up' }}
         </p>
         <p v-else-if="showTouchControls && canControl && chargeEnabled">
           <strong>Touch:</strong> Use on-screen arrows to move · Hold ⚡ to charge and release to fire
@@ -1551,14 +1715,50 @@ onUnmounted(() => {
 }
 
 .match-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'primary actions'
+    'meta meta';
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.4rem 0.75rem;
+  gap: 0.35rem 0.75rem;
+  padding: 0.45rem 0.75rem;
   font-size: 0.85rem;
   color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.match-bar-primary {
+  grid-area: primary;
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.match-bar-meta {
+  grid-area: meta;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.match-bar-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.match-format {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .shrink-warning {
@@ -1605,6 +1805,18 @@ onUnmounted(() => {
 .match-chip.fog {
   border-color: rgba(148, 163, 184, 0.35);
   color: #e2e8f0;
+}
+
+.match-chip.ai {
+  border-color: rgba(96, 165, 250, 0.35);
+  color: #bfdbfe;
+}
+
+@media (min-width: 900px) {
+  .match-bar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: 'primary meta actions';
+  }
 }
 
 .match-link {
@@ -1769,8 +1981,49 @@ onUnmounted(() => {
 }
 
 .draft-explainer {
-  max-width: 420px;
+  max-width: 480px;
   margin: 0 0 0.5rem;
+}
+
+.draft-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: min(96%, 640px);
+  max-height: min(88%, 560px);
+  overflow: auto;
+  padding: 1.1rem 1.25rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 12, 20, 0.88);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+.draft-panel.draft-waiting {
+  max-width: 420px;
+}
+
+.draft-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.draft-spinner {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 2px solid rgba(148, 163, 184, 0.35);
+  border-top-color: var(--accent);
+  animation: draftSpin 0.8s linear infinite;
+}
+
+@keyframes draftSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .draft-tier-group {
@@ -1789,18 +2042,62 @@ onUnmounted(() => {
   margin-bottom: 0.35rem;
 }
 
-.draft-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
+.draft-btn,
+.draft-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  text-align: left;
+  min-width: 7.5rem;
+  max-width: 9.5rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--draft-accent, rgba(148, 163, 184, 0.35));
+  background: rgba(15, 23, 42, 0.72);
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 
-.draft-btn.banned {
+.draft-card:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background: rgba(15, 23, 42, 0.92);
+  border-color: var(--draft-accent, rgba(148, 163, 184, 0.55));
+}
+
+.draft-card.tier-rare {
+  border-color: color-mix(in srgb, var(--draft-accent) 55%, transparent);
+}
+
+.draft-card.tier-epic {
+  border-color: color-mix(in srgb, var(--draft-accent) 70%, transparent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--draft-accent) 18%, transparent);
+}
+
+.draft-btn.banned,
+.draft-card.banned {
   opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .draft-icon {
-  font-size: 1rem;
+  font-size: 1.1rem;
+}
+
+.draft-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.draft-hint {
+  font-size: 0.65rem;
+  line-height: 1.35;
+  color: #94a3b8;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .draft-banned-tag {
@@ -1854,6 +2151,12 @@ onUnmounted(() => {
   align-items: center;
 }
 
+.rematch-requests {
+  margin: 0 0 0.5rem;
+  font-size: 0.88rem;
+  color: #86efac;
+}
+
 .feed-line {
   font-size: 0.72rem;
   padding: 0.2rem 0.45rem;
@@ -1866,11 +2169,52 @@ onUnmounted(() => {
 .feed-line.warn { color: #fca5a5; }
 
 .draft-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.45rem;
+  width: 100%;
+  max-width: 560px;
+}
+
+.countdown-bans {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.countdown-bans-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.countdown-ban-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
   justify-content: center;
-  max-width: 520px;
+  gap: 0.35rem;
+}
+
+.countdown-ban-chip {
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid;
+  background: rgba(15, 23, 42, 0.65);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.overlay.draft {
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.overlay.countdown {
+  background: rgba(0, 0, 0, 0.62);
 }
 
 .round-recap {
@@ -2382,6 +2726,53 @@ onUnmounted(() => {
   color: #fbbf24;
   white-space: nowrap;
   text-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+}
+
+.powerup-channel-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 2.15rem;
+  transform: translateX(-50%);
+  width: min(260px, 72%);
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  overflow: hidden;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.25);
+}
+
+.powerup-channel-fill {
+  height: 100%;
+  transition: width 75ms linear;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.45);
+}
+
+.powerup-channel-fill.ready {
+  animation: channelPulse 0.7s ease-in-out infinite;
+}
+
+.powerup-channel-label {
+  position: absolute;
+  top: -1.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #c084fc;
+  white-space: nowrap;
+  text-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+}
+
+@keyframes channelPulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.25);
+  }
 }
 
 .overlay {

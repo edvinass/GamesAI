@@ -1,5 +1,10 @@
 import { POWERUP_COLORS, POWERUP_ICONS, POWERUP_LABELS } from './duelRenderer'
-import { POWERUP_TIER_LABELS, powerupTier, type PowerupTier } from './powerupMeta'
+import {
+  POWERUP_HINTS,
+  POWERUP_TIER_LABELS,
+  powerupTier,
+  type PowerupTier,
+} from './powerupMeta'
 
 export const MUTATOR_LABELS: Record<string, string> = {
   classic: 'Classic',
@@ -36,11 +41,19 @@ export function mutatorStackLabel(primary: string, secondary?: string | null): s
   return `${base} + ${extra}`
 }
 
+export const DRAFT_TIER_ACCENTS: Record<PowerupTier, string> = {
+  common: 'rgba(148, 163, 184, 0.35)',
+  rare: 'rgba(192, 132, 252, 0.45)',
+  epic: 'rgba(252, 211, 77, 0.55)',
+}
+
 export interface DraftPowerupOption {
   id: string
   label: string
   icon: string
   color: string
+  hint: string
+  tier: PowerupTier
   banned: boolean
 }
 
@@ -64,6 +77,8 @@ export function buildDraftTierGroups(bannedTypes: Iterable<string>): DraftTierGr
           label: POWERUP_LABELS[id],
           icon: POWERUP_ICONS[id],
           color: POWERUP_COLORS[id],
+          hint: POWERUP_HINTS[id] ?? '',
+          tier,
           banned: banned.has(id),
         })),
     }))

@@ -1080,3 +1080,147 @@ def test_aim_trainer_blocks_human_movement(engine: DuelEngine, state: dict) -> N
     player = state["players"][0]
     state, _ = engine.apply_action(state, {"type": "set_move", "direction": "up"}, player)
     assert state["fighters"][player["id"]]["move_direction"] != "up"
+
+
+def test_disconnect_forfeit_awards_round(engine: DuelEngine, state: dict) -> None:
+    events: list[dict] = []
+    assert engine.handle_disconnect_forfeit(state, "p0", events) is True
+    assert state["round_scores"]["p1"] == 1
+    assert events
+
+
+def test_sniper_instant_kill(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["instant_kill"] = True
+    right = state["fighters"]["p1"]
+    right["hp"] = 3
+    bullet = {
+        "id": 1,
+        "x": right["x"],
+        "y": right["y"],
+        "vx": 0,
+        "vy": 0,
+        "owner_id": "p0",
+        "damage": 1,
+        "kind": "normal",
+    }
+    events: list[dict] = []
+    damage, crit = engine._hit_damage(
+        state, bullet, right, engine._fighter_height(state)
+    )
+    engine._apply_damage(state, right, "p0", "p1", damage, crit, events, hit_y=right["y"])
+    assert right["alive"] is False
+
+
+def test_bounce_self_damage_on_ricochet(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["bounce_self_damage"] = True
+    state["settings"]["ricochet_bounces"] = 2
+    left = state["fighters"]["p0"]
+    row = left["y"] + 1
+    state["obstacles"] = [{"x": left["x"] + 2, "y": row, "w": 1, "h": 1, "vy": 0}]
+    bullet = {
+        "id": 1,
+        "x": left["x"] + 1,
+        "y": row,
+        "vx": 1,
+        "vy": 0,
+        "owner_id": "p0",
+        "damage": 1,
+        "bounces_remaining": 1,
+        "kind": "normal",
+    }
+    state["bullets"] = [bullet]
+    events: list[dict] = []
+    engine._process_bullet(
+        state,
+        bullet,
+        state["fighters"],
+        engine._fighter_height(state),
+        state["obstacles"],
+        events,
+    )
+    assert bullet.get("can_hit_owner") is True
+    assert bullet["vx"] == -1
+
+
+def test_side_swap_every_two_rounds(engine: DuelEngine) -> None:
+    players = make_players(2)
+    game_state = engine.create_initial_state(
+        players,
+        {"match_format": "best_of_7", "countdown_sec": 0},
+    )
+    game_state["phase"] = "playing"
+    initial_sides = (
+        game_state["fighters"]["p0"]["side"],
+        game_state["fighters"]["p1"]["side"],
+    )
+    game_state["round"] = 2
+    engine._reset_round(game_state)
+    swapped_sides = (
+        game_state["fighters"]["p0"]["side"],
+        game_state["fighters"]["p1"]["side"],
+    )
+    assert initial_sides != swapped_sides
+
+
+def test_phase_shift_passes_through_obstacle(engine: DuelEngine, state: dict) -> None:
+    fighter = state["fighters"]["p0"]
+    obstacle = {"x": 5, "y": fighter["y"], "w": 1, "h": 2, "vy": 0}
+    state["obstacles"] = [obstacle]
+    fighter["effects"]["phase_shift_until"] = state["tick"] + 50
+    fighter["move_direction"] = "down"
+    engine._move_fighter(
+        fighter,
+        state["grid_height"],
+        engine._fighter_height(state),
+        state["obstacles"],
+        state.get("playable_y_min", 0),
+        state.get("playable_y_max", state["grid_height"] - 1),
+        tick=state["tick"],
+    )
+    assert fighter["y"] > 0
+
+
+def test_obstacle_rotation_deterministic_with_layout_seed(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["layout_seed"] = 42
+    state["settings"]["obstacle_rotation"] = True
+    state["tick"] = 120
+    state["obstacles"] = [{"x": 10, "y": 5, "w": 1, "h": 2, "vy": 0}]
+    a = copy.deepcopy(state)
+    b = copy.deepcopy(state)
+    engine._rotate_obstacles(a)
+    engine._rotate_obstacles(b)
+    assert a["obstacles"][0]["vy"] == b["obstacles"][0]["vy"]
+
+
+def test_ai_channels_powerup_before_activation(engine: DuelEngine, state: dict) -> None:
+    ai_player = state["players"][1]
+    ai_player["is_ai"] = True
+    fighter = state["fighters"]["p1"]
+    fighter["stored_powerup"] = "shield"
+    fighter["hp"] = 1
+    state["fighters"]["p0"]["x"] = 2
+    state["fighters"]["p1"]["x"] = 20
+
+    from app.games.duel import ai as duel_ai
+
+    original = duel_ai._should_use_powerup
+    duel_ai._should_use_powerup = lambda *args, **kwargs: True  # type: ignore[assignment]
+    try:
+        engine._apply_ai_inputs(state, [])
+        assert fighter.get("activating_powerup") is True
+        assert fighter.get("stored_powerup") == "shield"
+        for _ in range(10):
+            state, _ = engine.tick(state)
+        assert fighter.get("stored_powerup") is None or fighter.get("effects", {}).get("shield_until", 0) > state["tick"]
+    finally:
+        duel_ai._should_use_powerup = original
+
+
+def test_request_rematch_when_finished(engine: DuelEngine, state: dict) -> None:
+    state["phase"] = "finished"
+    state["winner"] = "p1"
+    player = state["players"][0]
+    state, _ = engine.apply_action(state, {"type": "request_rematch"}, player)
+    assert "p0" in state["rematch_requests"]
+    state, _ = engine.apply_action(state, {"type": "request_rematch"}, player)
+    assert state["rematch_requests"].count("p0") == 1
