@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { Room } from '@/types'
 import PowerupEncyclopedia from './PowerupEncyclopedia.vue'
 import { ARENA_THEMES } from './themes'
 import { getDailyChallenge } from './dailyChallenge'
 import { POWERUP_LABELS } from './duelRenderer'
+import { DUEL_LOBBY_PRESETS } from './lobbyPresets'
+import { formatDuelLobbySummary } from './lobbySummary'
 
-defineProps<{
+const props = defineProps<{
   room: Room
   isHost: boolean
   currentPlayerId: string
@@ -34,9 +36,12 @@ const emit = defineEmits<{
   addAi: []
   remove: [id: string]
   applyDaily: []
+  applyPreset: [settings: Record<string, unknown>]
 }>()
 
 const daily = computed(() => getDailyChallenge())
+const showDailyConfirm = ref(false)
+const guestSummary = computed(() => formatDuelLobbySummary(props.room))
 
 const speedOptions = [
   { label: 'Fast', value: 50 },
@@ -94,127 +99,194 @@ const loadoutOptions = [
 
 const obstacleOptions = [0, 1, 2, 3, 4, 5, 6]
 const themeOptions = Object.values(ARENA_THEMES)
+const selectedTheme = computed(() => ARENA_THEMES[arenaTheme.value as keyof typeof ARENA_THEMES] ?? ARENA_THEMES.classic)
 
 const showObstacleSetting = computed(
   () => matchFormat.value !== 'quick_duel' && mutator.value !== 'bounce_house',
 )
+
+function applyPreset(presetId: string) {
+  const preset = DUEL_LOBBY_PRESETS.find((p) => p.id === presetId)
+  if (!preset) return
+  emit('applyPreset', preset.settings)
+}
+
+function confirmDaily() {
+  showDailyConfirm.value = false
+  emit('applyDaily')
+}
 </script>
 
 <template>
   <div class="duel-lobby">
+    <div v-if="!isHost" class="guest-summary card">
+      <h3>Match setup</h3>
+      <p class="guest-lead">The host chose these settings. You’ll see the same rules in-game.</p>
+      <ul>
+        <li v-for="line in guestSummary" :key="line">{{ line }}</li>
+      </ul>
+    </div>
+
     <div v-if="isHost" class="daily-banner card">
       <div>
         <strong>{{ daily.label }}</strong>
-        <p class="daily-meta">{{ daily.dateKey }} · {{ daily.matchFormat.replace(/_/g, ' ') }} · {{ daily.obstacleCount }} cover</p>
+        <p class="daily-meta">
+          {{ daily.dateKey }} · {{ daily.matchFormat.replace(/_/g, ' ') }} · {{ daily.obstacleCount }} cover
+        </p>
       </div>
-      <button type="button" class="btn-secondary" @click="emit('applyDaily')">Use daily</button>
+      <button type="button" class="btn-secondary" @click="showDailyConfirm = true">Use daily</button>
+    </div>
+
+    <div v-if="isHost && showDailyConfirm" class="daily-confirm card">
+      <h4>Apply daily challenge?</h4>
+      <ul>
+        <li>Format: {{ daily.matchFormat.replace(/_/g, ' ') }}</li>
+        <li>Mutator: {{ daily.mutator.replace(/_/g, ' ') }}</li>
+        <li>Secondary: {{ daily.mutatorSecondary === 'none' ? 'None' : daily.mutatorSecondary }}</li>
+        <li>Cover blocks: {{ daily.obstacleCount }}</li>
+        <li>Layout seed: {{ daily.layoutSeed }}</li>
+      </ul>
+      <div class="daily-confirm-actions">
+        <button type="button" class="btn-primary" @click="confirmDaily">Apply</button>
+        <button type="button" class="btn-secondary" @click="showDailyConfirm = false">Cancel</button>
+      </div>
+    </div>
+
+    <div v-if="isHost" class="presets card">
+      <span class="section-label">Quick presets</span>
+      <div class="preset-row">
+        <button
+          v-for="preset in DUEL_LOBBY_PRESETS"
+          :key="preset.id"
+          type="button"
+          class="btn-secondary preset-btn"
+          @click="applyPreset(preset.id)"
+        >
+          <strong>{{ preset.label }}</strong>
+          <span>{{ preset.description }}</span>
+        </button>
+      </div>
     </div>
 
     <div v-if="isHost" class="settings-block card">
-      <label class="checkbox-label">
-        <input v-model="soloPractice" type="checkbox" />
-        Solo practice (play against AI)
-      </label>
+      <details open class="settings-group">
+        <summary>Match</summary>
+        <label class="checkbox-label">
+          <input v-model="soloPractice" type="checkbox" />
+          Solo practice (play against AI)
+        </label>
+        <label class="checkbox-label">
+          <input v-model="tutorialMode" type="checkbox" />
+          Opening tips (phase coaching)
+        </label>
+        <div class="setting-row">
+          <span class="setting-label">Match format</span>
+          <select v-model="matchFormat" class="setting-select">
+            <option v-for="opt in matchFormatOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Mutator</span>
+          <select v-model="mutator" class="setting-select">
+            <option v-for="opt in mutatorOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }} — {{ opt.hint }}
+            </option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Secondary mutator</span>
+          <select v-model="mutatorSecondary" class="setting-select">
+            <option v-for="opt in secondaryOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+        <div v-if="matchFormat === 'quick_duel'" class="setting-row">
+          <span class="setting-label">Quick duel loadout</span>
+          <select v-model="quickDuelLoadout" class="setting-select">
+            <option v-for="opt in loadoutOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Training drill</span>
+          <select v-model="trainingDrill" class="setting-select">
+            <option v-for="opt in drillOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+      </details>
 
-      <label class="checkbox-label">
-        <input v-model="tutorialMode" type="checkbox" />
-        Tutorial hints (first-round coaching)
-      </label>
+      <details open class="settings-group">
+        <summary>Arena</summary>
+        <div class="setting-row">
+          <span class="setting-label">Arena theme</span>
+          <div class="theme-picker">
+            <button
+              v-for="opt in themeOptions"
+              :key="opt.id"
+              type="button"
+              class="theme-swatch"
+              :class="{ active: arenaTheme === opt.id }"
+              :title="opt.label"
+              @click="arenaTheme = opt.id"
+            >
+              <span class="swatch-colors" :style="{ background: `linear-gradient(135deg, ${opt.backdrop[0]}, ${opt.backdrop[1]})` }" />
+              <span class="swatch-label">{{ opt.label }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="theme-preview card" :style="{ background: selectedTheme.canvasCss }">
+          <span>Preview: {{ selectedTheme.label }}</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Game speed</span>
+          <select v-model.number="tickMs" class="setting-select">
+            <option v-for="opt in speedOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }} ({{ opt.value }}ms)
+            </option>
+          </select>
+        </div>
+        <div v-if="showObstacleSetting" class="setting-row">
+          <span class="setting-label">Cover blocks</span>
+          <select v-model.number="obstacleCount" class="setting-select">
+            <option v-for="count in obstacleOptions" :key="count" :value="count">
+              {{ count === 0 ? 'None' : count }}
+            </option>
+          </select>
+        </div>
+        <label v-if="showObstacleSetting" class="checkbox-label">
+          <input v-model="obstacleRotation" type="checkbox" />
+          Drifting cover (slow obstacle rotation)
+        </label>
+        <p v-if="!showObstacleSetting && mutator === 'bounce_house'" class="setting-hint">
+          Cover: {{ obstacleCount }} blocks (fixed for Bounce House)
+        </p>
+      </details>
 
-      <div class="setting-row">
-        <span class="setting-label">Match format</span>
-        <select v-model="matchFormat" class="setting-select">
-          <option v-for="opt in matchFormatOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-      </div>
-
-      <div class="setting-row">
-        <span class="setting-label">Mutator</span>
-        <select v-model="mutator" class="setting-select">
-          <option v-for="opt in mutatorOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }} — {{ opt.hint }}
-          </option>
-        </select>
-      </div>
-
-      <div class="setting-row">
-        <span class="setting-label">Secondary mutator</span>
-        <select v-model="mutatorSecondary" class="setting-select">
-          <option v-for="opt in secondaryOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-      </div>
-
-      <div v-if="matchFormat === 'quick_duel'" class="setting-row">
-        <span class="setting-label">Quick duel loadout</span>
-        <select v-model="quickDuelLoadout" class="setting-select">
-          <option v-for="opt in loadoutOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-      </div>
-
-      <div class="setting-row">
-        <span class="setting-label">Training drill</span>
-        <select v-model="trainingDrill" class="setting-select">
-          <option v-for="opt in drillOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-      </div>
-
-      <div class="setting-row">
-        <span class="setting-label">Arena theme</span>
-        <select v-model="arenaTheme" class="setting-select">
-          <option v-for="opt in themeOptions" :key="opt.id" :value="opt.id">
-            {{ opt.label }}
-          </option>
-        </select>
-      </div>
-
-      <div class="setting-row">
-        <span class="setting-label">Game speed</span>
-        <select v-model.number="tickMs" class="setting-select">
-          <option v-for="opt in speedOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }} ({{ opt.value }}ms)
-          </option>
-        </select>
-      </div>
-
-      <div v-if="soloPractice || room.players.some((p) => p.is_ai)" class="setting-row">
-        <span class="setting-label">AI difficulty</span>
-        <select v-model="aiDifficulty" class="setting-select">
-          <option v-for="opt in difficultyOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }} — {{ opt.hint }}
-          </option>
-        </select>
-      </div>
-
-      <div v-if="soloPractice || room.players.some((p) => p.is_ai)" class="setting-row">
-        <span class="setting-label">AI personality</span>
-        <select v-model="aiPersonality" class="setting-select">
-          <option v-for="opt in personalityOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-      </div>
-
-      <div v-if="showObstacleSetting" class="setting-row">
-        <span class="setting-label">Cover blocks</span>
-        <select v-model.number="obstacleCount" class="setting-select">
-          <option v-for="count in obstacleOptions" :key="count" :value="count">
-            {{ count === 0 ? 'None' : count }}
-          </option>
-        </select>
-      </div>
-
-      <label v-if="showObstacleSetting" class="checkbox-label">
-        <input v-model="obstacleRotation" type="checkbox" />
-        Drifting cover (slow obstacle rotation)
-      </label>
+      <details v-if="soloPractice || room.players.some((p) => p.is_ai)" class="settings-group">
+        <summary>AI opponent</summary>
+        <div class="setting-row">
+          <span class="setting-label">AI difficulty</span>
+          <select v-model="aiDifficulty" class="setting-select">
+            <option v-for="opt in difficultyOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }} — {{ opt.hint }}
+            </option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">AI personality</span>
+          <select v-model="aiPersonality" class="setting-select">
+            <option v-for="opt in personalityOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+      </details>
     </div>
 
     <PowerupEncyclopedia />
@@ -282,11 +354,48 @@ const showObstacleSetting = computed(
   gap: 1rem;
 }
 
-.daily-banner {
+.guest-summary h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.guest-lead {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.guest-summary ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.daily-banner,
+.daily-confirm {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 1rem;
+}
+
+.daily-confirm {
+  flex-direction: column;
+}
+
+.daily-confirm h4 {
+  margin: 0;
+}
+
+.daily-confirm ul {
+  margin: 0.5rem 0;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.daily-confirm-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .daily-meta {
@@ -295,21 +404,67 @@ const showObstacleSetting = computed(
   color: var(--text-muted);
 }
 
+.presets .section-label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.preset-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  min-width: 9rem;
+}
+
+.preset-btn span {
+  font-size: 0.75rem;
+  opacity: 0.8;
+  font-weight: 400;
+}
+
 .settings-block {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
 }
 
+.settings-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+}
+
+.settings-group summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
 .setting-row {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  margin-top: 0.5rem;
 }
 
 .setting-label {
   font-size: 0.85rem;
   color: var(--text-muted);
+}
+
+.setting-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0.35rem 0 0;
 }
 
 .setting-select {
@@ -319,6 +474,47 @@ const showObstacleSetting = computed(
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
+}
+
+.theme-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.theme-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.theme-swatch.active {
+  border-color: var(--accent);
+}
+
+.swatch-colors {
+  width: 3rem;
+  height: 1.75rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.swatch-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.theme-preview {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  border-radius: 8px;
 }
 
 .arrange-hint {
@@ -413,5 +609,6 @@ const showObstacleSetting = computed(
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
+  margin-top: 0.5rem;
 }
 </style>

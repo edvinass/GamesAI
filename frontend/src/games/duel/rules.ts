@@ -33,11 +33,11 @@ export const duelRules: GameRules = {
     },
     {
       heading: 'Mutators',
-      body: 'Classic is the default. Chaos speeds up bullets and cooldowns. Sniper is one-hit kills with a long reload. Bounce House adds ricochets. Fog obscures the enemy vertical position. Secondary overlays (e.g. Fog on Classic) stack extra rules. Training drills like Aim Trainer lock movement for target practice.',
+      body: 'Classic is the default. Chaos speeds up bullets and cooldowns. Sniper makes every hit lethal with a long reload between shots. Bounce House adds ricochets. Fog obscures the enemy vertical position. Secondary overlays (e.g. Fog on Classic) stack extra rules. Training drills like Aim Trainer lock movement for target practice.',
     },
     {
       heading: 'Winning',
-      body: 'Win a round by reducing your opponent to 0 HP. Win the match by taking the majority of rounds. Draw rounds replay with no score change. Long matches may swap sides every few rounds.',
+      body: 'Win a round by reducing your opponent to 0 HP. Win the match by taking the majority of rounds. Draw rounds replay with no score change (the round counter still advances). Best of 7 swaps sides every two rounds. After round 3+, shrinking arenas accelerate into sudden death.',
     },
   ],
   tips: [

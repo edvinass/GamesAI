@@ -36,8 +36,15 @@ export function saveMilestones(stats: DuelMilestones): void {
 
 export function recordMatchMilestones(
   playerId: string,
-  matchStats: Record<string, { perfect_rounds?: number; crits?: number; powerups_used?: number }> | undefined,
-  lastActions: string[],
+  matchStats: Record<
+    string,
+    {
+      perfect_rounds?: number
+      crits?: number
+      clutch_heals?: number
+      railgun_kills?: number
+    }
+  > | undefined,
 ): DuelMilestones {
   const current = loadMilestones()
   const mine = matchStats?.[playerId]
@@ -45,12 +52,8 @@ export function recordMatchMilestones(
   current.matchesPlayed += 1
   current.perfectRounds += mine.perfect_rounds ?? 0
   current.critsLanded += mine.crits ?? 0
-  if (lastActions.includes('heal') && (mine.powerups_used ?? 0) > 0) {
-    current.clutchHeals += 1
-  }
-  if (lastActions.includes('railgun')) {
-    current.railgunKills += 1
-  }
+  current.clutchHeals += mine.clutch_heals ?? 0
+  current.railgunKills += mine.railgun_kills ?? 0
   saveMilestones(current)
   return current
 }

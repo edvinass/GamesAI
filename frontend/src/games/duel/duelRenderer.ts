@@ -116,8 +116,6 @@ export const POWERUP_LABELS: Record<string, string> = {
   decoy: 'Decoy',
 }
 
-export const POWERUP_ACTIVATION_TICKS = 8
-
 function hexToRgb(hex: string): [number, number, number] {
   const raw = hex.replace('#', '')
   const value = parseInt(raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw, 16)
@@ -617,7 +615,7 @@ export class DuelRenderer {
     this.drawArena(ctx, offsetX, offsetY, boardW, boardH, grid_width, grid_height, cell, playable_y_min, playable_y_max, now)
     this.drawSpawnZones(ctx, offsetX, offsetY, boardW, boardH, cell, now)
     this.drawObstacles(ctx, offsetX, offsetY, cell, obstacles, now)
-    this.drawDecoys(ctx, offsetX, offsetY, cell, grid_width, state.decoys ?? [], now)
+    this.drawDecoys(ctx, offsetX, offsetY, cell, grid_width, state.decoys ?? [], barCount, now)
     this.drawPowerup(
       ctx,
       offsetX,
@@ -670,27 +668,26 @@ export class DuelRenderer {
     now: number,
   ) {
     const bg = ctx.createLinearGradient(offsetX, offsetY, offsetX + boardW, offsetY + boardH)
-    bg.addColorStop(0, '#0c121c')
-    bg.addColorStop(0.5, '#101827')
-    bg.addColorStop(1, '#0c121c')
+    bg.addColorStop(0, this.theme.backdrop[0])
+    bg.addColorStop(0.5, this.theme.backdrop[1])
+    bg.addColorStop(1, this.theme.backdrop[0])
     ctx.fillStyle = bg
     ctx.fillRect(offsetX, offsetY, boardW, boardH)
 
-    ctx.fillStyle = 'rgba(255,255,255,0.015)'
+    ctx.fillStyle = this.theme.grid
     for (let y = 0; y < gridH; y += 2) {
       ctx.fillRect(offsetX, offsetY + y * cell, boardW, cell)
     }
 
     const midX = offsetX + boardW / 2
-    const pulse = 0.35 + Math.sin(now * 0.003) * 0.15
     const midGrad = ctx.createLinearGradient(midX - cell * 2, offsetY, midX + cell * 2, offsetY)
     midGrad.addColorStop(0, 'rgba(91,156,255,0)')
-    midGrad.addColorStop(0.5, `rgba(91,156,255,${0.12 * pulse})`)
+    midGrad.addColorStop(0.5, this.theme.midline)
     midGrad.addColorStop(1, 'rgba(91,156,255,0)')
     ctx.fillStyle = midGrad
     ctx.fillRect(midX - cell * 3, offsetY, cell * 6, boardH)
 
-    ctx.strokeStyle = 'rgba(30, 41, 59, 0.55)'
+    ctx.strokeStyle = this.theme.grid
     ctx.lineWidth = 1
     for (let x = 0; x <= gridW; x++) {
       ctx.beginPath()
@@ -707,10 +704,10 @@ export class DuelRenderer {
 
     if (playableMin > 0) {
       const h = playableMin * cell
-      const hazardBoost = now < this.hazardPulseUntil ? 0.18 : 0
+      const hazardBoost = now < this.hazardPulseUntil ? 0.12 : 0
       const grad = ctx.createLinearGradient(offsetX, offsetY, offsetX, offsetY + h)
-      grad.addColorStop(0, `rgba(239,68,68,${0.45 + hazardBoost})`)
-      grad.addColorStop(1, `rgba(239,68,68,${0.12 + hazardBoost * 0.5})`)
+      grad.addColorStop(0, this.theme.hazard.replace(/0\.\d+\)/, `${0.35 + hazardBoost})`))
+      grad.addColorStop(1, this.theme.hazard.replace(/0\.\d+\)/, '0.12)'))
       ctx.fillStyle = grad
       ctx.fillRect(offsetX, offsetY, boardW, h)
       this.drawHazardStripe(ctx, offsetX, offsetY, boardW, h, now, true)
@@ -718,10 +715,10 @@ export class DuelRenderer {
     if (playableMax < gridH - 1) {
       const top = offsetY + (playableMax + 1) * cell
       const h = (gridH - 1 - playableMax) * cell
-      const hazardBoost = now < this.hazardPulseUntil ? 0.18 : 0
+      const hazardBoost = now < this.hazardPulseUntil ? 0.12 : 0
       const grad = ctx.createLinearGradient(offsetX, top, offsetX, top + h)
-      grad.addColorStop(0, `rgba(239,68,68,${0.12 + hazardBoost * 0.5})`)
-      grad.addColorStop(1, `rgba(239,68,68,${0.45 + hazardBoost})`)
+      grad.addColorStop(0, this.theme.hazard.replace(/0\.\d+\)/, '0.12)'))
+      grad.addColorStop(1, this.theme.hazard.replace(/0\.\d+\)/, `${0.35 + hazardBoost})`))
       ctx.fillStyle = grad
       ctx.fillRect(offsetX, top, boardW, h)
       this.drawHazardStripe(ctx, offsetX, top, boardW, h, now, false)
@@ -1214,8 +1211,22 @@ export class DuelRenderer {
       }
       if (isMe && dangerRows.has(displayY + i)) {
         const pulse = 0.28 + Math.sin(now * 0.025) * 0.12
-        ctx.fillStyle = rgba('#ef4444', pulse)
-        ctx.fillRect(fx - cell * 0.1, rowTop, fw + cell * 0.2, cell)
+        if (isColorblindMode()) {
+          ctx.fillStyle = rgba('#fbbf24', pulse * 1.15)
+          ctx.fillRect(fx - cell * 0.1, rowTop, fw + cell * 0.2, cell)
+          ctx.strokeStyle = rgba('#0f172a', 0.55)
+          ctx.lineWidth = Math.max(1, cell * 0.08)
+          const stripeStep = Math.max(3, cell * 0.35)
+          for (let sx = fx - cell * 0.1; sx < fx + fw + cell * 0.2; sx += stripeStep) {
+            ctx.beginPath()
+            ctx.moveTo(sx, rowTop)
+            ctx.lineTo(sx + stripeStep * 0.55, rowTop + cell)
+            ctx.stroke()
+          }
+        } else {
+          ctx.fillStyle = rgba('#ef4444', pulse)
+          ctx.fillRect(fx - cell * 0.1, rowTop, fw + cell * 0.2, cell)
+        }
       }
     }
 
@@ -1310,6 +1321,7 @@ export class DuelRenderer {
     cell: number,
     gridWidth: number,
     decoys: Array<{ player_id: string; y: number; side?: string }>,
+    barCount: number,
     now: number,
   ) {
     for (const decoy of decoys) {
@@ -1318,7 +1330,7 @@ export class DuelRenderer {
           ? offsetX + (gridWidth - 2) * cell
           : offsetX + cell
       const top = offsetY + decoy.y * cell
-      const height = cell * 3
+      const height = cell * barCount
       const pulse = 0.25 + Math.sin(now * 0.01) * 0.15
       ctx.globalAlpha = pulse
       ctx.strokeStyle = rgba('#cbd5e1', 0.8)

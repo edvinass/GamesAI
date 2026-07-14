@@ -26,20 +26,41 @@ import {
   setSoundMuted,
   unlockAudio,
 } from './sounds'
-import { loadKeybinds, matchesBinding } from './keybinds'
+import { loadKeybinds, matchesBinding, saveKeybinds, DEFAULT_KEYBINDS, formatBindingLabel, KEYBIND_ACTION_LABELS, type DuelKeybindAction } from './keybinds'
 import { chargeTierForTicks } from './chargeTiers'
 import { loadMilestones, recordMatchMilestones } from './stats'
 import { resolveTheme } from './themes'
+import {
+  buildDraftTierGroups,
+  DRILL_HINTS,
+  DRILL_LABELS,
+  mutatorStackLabel,
+  PERSONALITY_LABELS,
+} from './duelHudMeta'
+import {
+  isColorblindMode,
+  isHitStopEnabled,
+  isAutoReleasePowerupEnabled,
+  loadShakeIntensity,
+  saveShakeIntensity,
+  setColorblindMode,
+  setHitStopEnabled,
+  setAutoReleasePowerupEnabled,
+  hasSeenDangerLegend,
+  markDangerLegendSeen,
+} from './visualPrefs'
 
 const props = defineProps<{
   gameState: DuelGameState
   room: Room
   playerId: string
+  inputSuspended?: boolean
 }>()
 
 const emit = defineEmits<{
   action: [data: Record<string, unknown>]
   lobby: []
+  showRules: []
 }>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -52,16 +73,22 @@ const isHost = computed(() => props.room.host_player_id === props.playerId)
 const isFinished = computed(() => props.gameState.phase === 'finished')
 const isRoundOver = computed(() => props.gameState.phase === 'round_over')
 const canControl = computed(
-  () => props.gameState.phase === 'playing' && isAlive.value,
+  () =>
+    !props.inputSuspended &&
+    props.gameState.phase === 'playing' &&
+    isAlive.value,
 )
-const chargeEnabled = computed(() => props.gameState.match_format !== 'quick_duel')
-const powerupsEnabled = computed(() => props.gameState.powerups_enabled ?? props.gameState.match_format !== 'quick_duel')
+const chargeEnabled = computed(
+  () => props.gameState.charge_shot_enabled ?? props.gameState.match_format !== 'quick_duel',
+)
+const powerupsEnabled = computed(() => Boolean(props.gameState.powerups_enabled))
 const chargeMaxTicks = computed(() => props.gameState.charge_max_ticks ?? 15)
 const tickMs = computed(() => props.gameState.tick_ms || 75)
 const storedPowerup = computed(() => myFighter.value?.stored_powerup ?? null)
 
 const roundsToWin = computed(() => Math.ceil(props.gameState.best_of / 2))
 
+const countdownNow = ref(Date.now())
 const countdownRemaining = computed(() => {
   if (
     props.gameState.phase !== 'countdown' &&
@@ -71,14 +98,31 @@ const countdownRemaining = computed(() => {
   }
   if (!props.gameState.countdown_ends_at) return null
   const end = new Date(props.gameState.countdown_ends_at).getTime()
-  return Math.max(0, Math.ceil((end - Date.now()) / 1000))
+  return Math.max(0, Math.ceil((end - countdownNow.value) / 1000))
 })
 
 const winnerName = computed(() => {
   const winnerId = props.gameState.winner
-  if (!winnerId) return 'Draw'
+  if (!winnerId) return null
   const player = props.gameState.players.find((p) => p.id === winnerId)
   return player?.nickname ?? 'Unknown'
+})
+
+const matchResultText = computed(() => {
+  if (!props.gameState.winner) return 'Match drawn!'
+  return `${winnerName.value} wins!`
+})
+
+const phaseAnnouncement = computed(() => {
+  if (props.gameState.phase === 'countdown') {
+    return `Get ready! ${countdownRemaining.value ?? ''}`
+  }
+  if (isRoundOver.value) {
+    if (roundWinnerName.value) return `${roundWinnerName.value} wins the round`
+    return 'Round drawn'
+  }
+  if (isFinished.value) return matchResultText.value
+  return ''
 })
 
 const roundWinnerName = computed(() => {
@@ -134,7 +178,11 @@ const lastPlayableMin = ref(0)
 const lastPlayableMax = ref(999)
 const lastRoundPhase = ref('')
 const keybinds = ref(loadKeybinds())
-const predictedMoveDir = ref<'up' | 'down' | null>(null)
+const showVisualPrefs = ref(false)
+const colorblindMode = ref(isColorblindMode())
+const shakeIntensity = ref(loadShakeIntensity())
+const hitStopEnabled = ref(isHitStopEnabled())
+const canvasDisplaySize = ref({ w: 0, h: 0 })
 const milestones = ref(loadMilestones())
 const matchPowerupActions = ref<string[]>([])
 const lastHazardSoundTick = ref(-1)
@@ -150,7 +198,6 @@ const roundRecapRows = computed(() =>
 const chargeTier = computed(() =>
   chargeTierForTicks(chargeTicks.value, props.gameState.mutator === 'sniper'),
 )
-const draftPowerupOptions = computed(() => Object.keys(POWERUP_LABELS))
 const draftBanSummary = computed(() => {
   const bans = props.gameState.powerup_bans ?? {}
   return Object.entries(bans).map(([playerId, ptype]) => {
@@ -160,6 +207,38 @@ const draftBanSummary = computed(() => {
       label: POWERUP_LABELS[ptype] ?? ptype,
     }
   })
+})
+const bannedPowerupTypes = computed(() => Object.values(props.gameState.powerup_bans ?? {}))
+const draftTierGroups = computed(() => buildDraftTierGroups(bannedPowerupTypes.value))
+const draftBanCount = computed(() => Object.keys(props.gameState.powerup_bans ?? {}).length)
+const draftPlayerCount = computed(() => props.gameState.players.length)
+const matchMutatorLabel = computed(() =>
+  mutatorStackLabel(props.gameState.mutator, props.gameState.mutator_secondary),
+)
+const activeDrill = computed(() => props.gameState.training_drill ?? 'none')
+const drillBadge = computed(() => DRILL_LABELS[activeDrill.value] ?? '')
+const drillHintText = computed(() => DRILL_HINTS[activeDrill.value] ?? '')
+const aiPersonalityLabel = computed(() => {
+  if (!props.gameState.players.some((p) => p.is_ai)) return ''
+  const personality = String(props.room.settings?.ai_personality ?? 'balanced')
+  return PERSONALITY_LABELS[personality] ?? ''
+})
+const quickLoadoutLabel = computed(() => {
+  if (props.gameState.match_format !== 'quick_duel') return null
+  const loadout = String(props.room.settings?.quick_duel_loadout ?? 'none')
+  if (loadout === 'none') return null
+  return POWERUP_LABELS[loadout] ?? loadout.replace(/_/g, ' ')
+})
+const fogActive = computed(
+  () =>
+    props.gameState.mutator === 'fog' ||
+    props.gameState.mutator_secondary === 'fog' ||
+    Boolean(props.gameState.fog),
+)
+const disconnectMessage = computed(() => {
+  if (props.gameState.win_reason !== 'opponent_disconnect' || !isFinished.value) return null
+  if (props.gameState.winner === props.playerId) return 'Opponent disconnected — you win'
+  return 'Opponent disconnected'
 })
 const canvasTheme = computed(() => resolveTheme(props.gameState.arena_theme))
 const incomingBulletCount = computed(() => {
@@ -173,9 +252,6 @@ const incomingBulletCount = computed(() => {
     )
   }).length
 })
-const playableHeight = computed(
-  () => props.gameState.playable_y_max - props.gameState.playable_y_min + 1,
-)
 const shrinkTicksUntil = computed(() => {
   if (!props.gameState.shrinking_arena || props.gameState.phase !== 'playing') return null
   const start = props.gameState.shrink_start_tick ?? 240
@@ -189,9 +265,22 @@ const shrinkWarningActive = computed(() => {
   const until = shrinkTicksUntil.value
   return until !== null && until <= Math.ceil(2400 / tickMs.value)
 })
+const shrinkSoftWarningActive = computed(() => {
+  const until = shrinkTicksUntil.value
+  return (
+    until !== null &&
+    until <= Math.ceil(4800 / tickMs.value) &&
+    until > Math.ceil(2400 / tickMs.value)
+  )
+})
 const showCoachHint = computed(
-  () => coachHint.value && (props.gameState.phase === 'playing' || props.gameState.phase === 'countdown'),
+  () => coachHint.value && props.gameState.phase !== 'finished',
 )
+const autoReleaseEnabled = ref(isAutoReleasePowerupEnabled())
+const autoReleasing = ref(false)
+const showDangerLegend = ref(!hasSeenDangerLegend())
+const bindingCapture = ref<DuelKeybindAction | null>(null)
+const keybindActions = Object.keys(KEYBIND_ACTION_LABELS) as DuelKeybindAction[]
 
 function toggleSound() {
   const next = !soundMuted.value
@@ -205,40 +294,96 @@ function detectTouchControls() {
 }
 
 function updateCoachHint() {
+  if (
+    showDangerLegend.value &&
+    props.gameState.phase === 'playing' &&
+    isAlive.value &&
+    incomingBulletCount.value > 0
+  ) {
+    coachHint.value = 'Flashing rows on your ship = incoming fire'
+    markDangerLegendSeen()
+    showDangerLegend.value = false
+    return
+  }
+
   if (!props.gameState.tutorial_mode) {
     coachHint.value = null
     return
   }
-  if (props.gameState.phase === 'countdown' && props.gameState.round === 1) {
-    if (chargeEnabled.value && powerupsEnabled.value) {
-      coachHint.value = 'Hold Space to charge shots · Hold E to activate power-ups'
-    } else if (chargeEnabled.value) {
-      coachHint.value = 'Hold Space to charge a spread shot, release to fire'
-    } else {
-      coachHint.value = 'W/S or the on-screen arrows move your ship · Space fires'
-    }
+
+  if (props.gameState.phase === 'powerup_draft') {
+    coachHint.value =
+      'Remove one orb type from the pool for the rest of the match — pick what you never want to face'
     return
   }
+
+  if (props.gameState.phase === 'countdown') {
+    if (props.gameState.round === 1 && fogActive.value) {
+      coachHint.value =
+        'Fog jitters enemy aim rows — bullet trails and movement reveal true position'
+      return
+    }
+    if (props.gameState.round === 1) {
+      if (chargeEnabled.value && powerupsEnabled.value) {
+        coachHint.value = 'Hold Space to charge shots · Hold E to activate power-ups'
+      } else if (chargeEnabled.value) {
+        coachHint.value = 'Hold Space to charge a spread shot, release to fire'
+      } else {
+        coachHint.value = 'W/S or the on-screen arrows move your ship · Space fires'
+      }
+      return
+    }
+    if (draftBanSummary.value.length) {
+      coachHint.value = `Banned: ${draftBanSummary.value.map((b) => b.label).join(', ')}`
+      return
+    }
+    coachHint.value = null
+    return
+  }
+
+  if (
+    props.gameState.phase === 'playing' &&
+    shrinkSoftWarningActive.value &&
+    props.gameState.shrinking_arena
+  ) {
+    coachHint.value = 'Arena will shrink soon — red hazard zones deal damage over time'
+    return
+  }
+
   if (props.gameState.phase !== 'playing' || props.gameState.round > 1) {
     coachHint.value = null
     return
   }
+
   if (props.gameState.tick < 120) {
     if (props.gameState.shrinking_arena) {
       coachHint.value = 'Use cover, then watch the red hazard zones — they deal damage'
+    } else if (chargeEnabled.value) {
+      coachHint.value = 'Center-row hits deal bonus damage · higher charge tiers spread wider'
     } else {
       coachHint.value = 'Center-row hits deal bonus damage'
     }
     return
   }
+
   coachHint.value = null
 }
 
 function playGameSounds() {
   if (soundMuted.value) return
 
+  const tickHits = props.gameState.tick_hits ?? []
+  for (const hit of tickHits) {
+    if (!hit?.player_id || hit.damage === undefined) continue
+    const stamp = `${hit.player_id}-${props.gameState.tick}-${hit.damage}-${hit.blocked ? 'b' : 'h'}-multi`
+    if (stamp === lastHitSoundStamp.value) continue
+    lastHitSoundStamp.value = stamp
+    if (hit.blocked) playShieldBlockSound()
+    else playHitSound(Boolean(hit.crit))
+  }
+
   const hit = props.gameState.last_hit
-  if (hit?.player_id && hit.damage !== undefined) {
+  if (hit?.player_id && hit.damage !== undefined && !tickHits.length) {
     const stamp = `${hit.player_id}-${props.gameState.tick}-${hit.damage}-${hit.blocked ? 'b' : 'h'}`
     if (stamp !== lastHitSoundStamp.value) {
       lastHitSoundStamp.value = stamp
@@ -270,6 +415,7 @@ function playGameSounds() {
 
   if (
     myFighter.value?.alive &&
+    !myFighter.value.effects?.shield_active &&
     props.gameState.shrinking_arena &&
     props.gameState.phase === 'playing'
   ) {
@@ -324,28 +470,86 @@ const activeBuffs = computed(() =>
   ),
 )
 
-const MUTATOR_LABELS: Record<string, string> = {
-  classic: 'Classic',
-  chaos: 'Chaos',
-  sniper: 'Sniper',
-  bounce_house: 'Bounce House',
-  fog: 'Fog',
+function fighterEffects(
+  effects: Record<string, unknown> | undefined,
+) {
+  return listActivePowerupEffects(
+    effects,
+    props.gameState.tick,
+    tickMs.value,
+    props.gameState.effect_duration_ticks ?? 80,
+  )
+}
+
+function isInputBinding(code: string): boolean {
+  return (
+    matchesBinding(code, keybinds.value.moveUp) ||
+    matchesBinding(code, keybinds.value.moveDown) ||
+    matchesBinding(code, keybinds.value.fire) ||
+    matchesBinding(code, keybinds.value.powerup)
+  )
+}
+
+function showPhaseBlockedNotice() {
+  if (props.gameState.phase === 'countdown') {
+    showPowerupNotice('Wait for the round to start', 'info')
+  } else if (props.gameState.phase === 'powerup_draft') {
+    showPowerupNotice('Finish the power-up ban first', 'info')
+  } else if (props.gameState.phase === 'round_over' || props.gameState.phase === 'finished') {
+    showPowerupNotice('Round is over', 'info')
+  } else if (!isAlive.value && props.gameState.phase === 'playing') {
+    return
+  } else {
+    showPowerupNotice('Not available right now', 'info')
+  }
+}
+
+function startBindingCapture(action: DuelKeybindAction) {
+  bindingCapture.value = action
+}
+
+function onBindingCaptureKey(e: KeyboardEvent) {
+  if (!bindingCapture.value) return
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.code === 'Escape') {
+    bindingCapture.value = null
+    return
+  }
+  const action = bindingCapture.value
+  keybinds.value = { ...keybinds.value, [action]: [e.code] }
+  saveKeybinds(keybinds.value)
+  bindingCapture.value = null
+}
+
+function toggleAutoRelease() {
+  setAutoReleasePowerupEnabled(autoReleaseEnabled.value)
 }
 
 const dangerRows = computed(() => {
   const rows = new Set<number>()
   if (!myFighter.value?.alive) return rows
   const myX = myFighter.value.x
+  const myTop = myFighter.value.y
+  const myBottom = myTop + props.gameState.fighter_height - 1
   for (const bullet of props.gameState.bullets) {
     if (bullet.owner_id === props.playerId) continue
+    const vx = bullet.vx ?? 0
+    const vy = bullet.vy ?? 0
     const headingToward =
-      (myFighter.value.side === 'left' && bullet.vx < 0 && bullet.x >= myX) ||
-      (myFighter.value.side === 'right' && bullet.vx > 0 && bullet.x <= myX)
-    if (!headingToward) continue
-    const speed = Math.abs(bullet.vx) || 1
-    const approxX = bullet.x + speed * 0.85
-    const ticks = Math.abs(approxX - myX) / speed
-    if (ticks <= 8) rows.add(bullet.y)
+      (myFighter.value.side === 'left' && vx < 0 && bullet.x >= myX) ||
+      (myFighter.value.side === 'right' && vx > 0 && bullet.x <= myX)
+    if (!headingToward && bullet.kind !== 'bomb') continue
+    const approxX = bullet.x + vx * 6
+    const approxY = bullet.y + vy * 6
+    const ticks = Math.abs(approxX - myX) / Math.max(1, Math.abs(vx) || 1)
+    if (ticks > 10 && bullet.kind !== 'bomb') continue
+    for (let row = Math.max(0, approxY - 1); row <= approxY + 1; row++) {
+      if (row >= myTop - 1 && row <= myBottom + 1) rows.add(row)
+    }
+    if (bullet.kind === 'bomb' && Math.abs(bullet.x - myX) <= 2) {
+      for (let row = myTop; row <= myBottom; row++) rows.add(row)
+    }
   }
   return rows
 })
@@ -385,7 +589,6 @@ function banPowerup(type: string) {
 }
 
 function sendMove(direction: 'up' | 'down' | 'stop') {
-  predictedMoveDir.value = direction === 'stop' ? null : direction
   emit('action', { type: 'set_move', direction })
 }
 
@@ -492,13 +695,26 @@ watch(
 )
 
 watch(
-  () => arenaPowerup.value,
-  (orb) => {
-    if (!orb || !powerupsEnabled.value) return
-    const key = `${orb.x}:${orb.y}:${orb.type}:${props.gameState.tick}`
-    if (key === lastSeenPowerupKey.value) return
+  () => myFighter.value?.charge_ticks,
+  (serverTicks) => {
+    if (!charging.value || typeof serverTicks !== 'number') return
+    chargeTicks.value = Math.max(
+      chargeTicks.value,
+      Math.min(chargeMaxTicks.value, serverTicks),
+    )
+  },
+)
+
+watch(
+  () => arenaPowerup.value?.type,
+  (ptype, prev) => {
+    if (!ptype || !powerupsEnabled.value) return
+    const orb = arenaPowerup.value
+    if (!orb) return
+    const key = `${orb.x}:${orb.y}:${ptype}`
+    if (key === lastSeenPowerupKey.value || ptype === prev) return
     lastSeenPowerupKey.value = key
-    const label = POWERUP_LABELS[orb.type] ?? orb.type
+    const label = POWERUP_LABELS[ptype] ?? ptype
     showPowerupNotice(`${label} spawned — shoot or touch to collect`, 'info')
   },
 )
@@ -583,9 +799,18 @@ watch(
       showPowerupNotice('Heal saved — you are already at full health', 'warn')
     } else if (type === 'powerup_hold_release' && action.activated === false) {
       showPowerupNotice(
-        `Hold E a bit longer (${formatPowerupSeconds(channelTicksRequired.value, tickMs.value)})`,
+        `Hold ${formatBindingLabel(keybinds.value.powerup)} a bit longer (${formatPowerupSeconds(channelTicksRequired.value, tickMs.value)})`,
         'warn',
       )
+    } else if (type === 'action_rejected') {
+      const reason = action.reason as string | undefined
+      const messages: Record<string, string> = {
+        wrong_phase: 'Not available right now',
+        not_alive: 'You are eliminated',
+        already_banned: 'You already banned a power-up',
+        invalid_powerup: 'Invalid power-up choice',
+      }
+      showPowerupNotice(messages[reason ?? ''] ?? 'Action rejected', 'warn')
     }
   },
 )
@@ -595,11 +820,14 @@ watch(powerupReady, (ready) => {
     clearTimeout(autoReleaseTimer)
     autoReleaseTimer = null
   }
-  if (ready && activatingPowerup.value) {
+  autoReleasing.value = false
+  if (ready && activatingPowerup.value && autoReleaseEnabled.value) {
+    autoReleasing.value = true
     autoReleaseTimer = setTimeout(() => {
       if (activatingPowerup.value && powerupReady.value) {
         releasePowerupActivation()
       }
+      autoReleasing.value = false
       autoReleaseTimer = null
     }, 180)
   }
@@ -608,12 +836,11 @@ watch(powerupReady, (ready) => {
 watch(
   () => props.gameState.phase,
   (phase, prev) => {
+    if (phase !== 'playing' || !isAlive.value) {
+      clearHeldInputs()
+    }
     if (phase === 'finished' && prev !== 'finished') {
-      milestones.value = recordMatchMilestones(
-        props.playerId,
-        props.gameState.match_stats,
-        matchPowerupActions.value,
-      )
+      milestones.value = recordMatchMilestones(props.playerId, props.gameState.match_stats)
       matchPowerupActions.value = []
     }
     if (phase === 'countdown' && prev === 'finished') {
@@ -623,9 +850,16 @@ watch(
 )
 
 watch(
-  () => myFighter.value?.y,
-  () => {
-    predictedMoveDir.value = null
+  () => isAlive.value,
+  (alive) => {
+    if (!alive) clearHeldInputs()
+  },
+)
+
+watch(
+  () => props.inputSuspended,
+  (suspended) => {
+    if (suspended) clearHeldInputs()
   },
 )
 
@@ -658,7 +892,23 @@ function quickShoot() {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if (!canControl.value) return
+  if (props.inputSuspended) return
+
+  if (bindingCapture.value) {
+    onBindingCaptureKey(e)
+    return
+  }
+
+  if (matchesBinding(e.code, keybinds.value.fire) && charging.value) return
+  if (matchesBinding(e.code, keybinds.value.powerup) && activatingPowerup.value) return
+
+  if (!canControl.value) {
+    if (isInputBinding(e.code)) {
+      e.preventDefault()
+      showPhaseBlockedNotice()
+    }
+    return
+  }
 
   if (matchesBinding(e.code, keybinds.value.moveUp)) {
     e.preventDefault()
@@ -704,17 +954,17 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 function onKeyUp(e: KeyboardEvent) {
-  if (!canControl.value) return
+  if (props.inputSuspended) return
 
   if (matchesBinding(e.code, keybinds.value.moveUp) && heldMove.value === 'up') {
     heldMove.value = null
-    sendMove('stop')
+    if (canControl.value) sendMove('stop')
     return
   }
 
   if (matchesBinding(e.code, keybinds.value.moveDown) && heldMove.value === 'down') {
     heldMove.value = null
-    sendMove('stop')
+    if (canControl.value) sendMove('stop')
     return
   }
 
@@ -747,38 +997,33 @@ function draw(now: number) {
   }
 
   const dpr = window.devicePixelRatio || 1
-  canvas.width = Math.floor(displayW * dpr)
-  canvas.height = Math.floor(displayH * dpr)
-  canvas.style.width = `${displayW}px`
-  canvas.style.height = `${displayH}px`
+  if (canvasDisplaySize.value.w !== displayW || canvasDisplaySize.value.h !== displayH) {
+    canvasDisplaySize.value = { w: displayW, h: displayH }
+    canvas.width = Math.floor(displayW * dpr)
+    canvas.height = Math.floor(displayH * dpr)
+    canvas.style.width = `${displayW}px`
+    canvas.style.height = `${displayH}px`
+  }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  renderer.draw(ctx, renderStateForFrame(), props.playerId, displayW, displayH, now, dangerRows.value)
+  renderer.draw(ctx, props.gameState, props.playerId, displayW, displayH, now, dangerRows.value)
 }
 
-function renderStateForFrame(): DuelGameState {
-  const base = props.gameState
-  const fighter = base.fighters[props.playerId]
-  if (!fighter || !predictedMoveDir.value || !canControl.value) return base
-  const minY = base.playable_y_min
-  const maxY = Math.min(
-    base.grid_height - base.fighter_height,
-    base.playable_y_max - base.fighter_height + 1,
-  )
-  const delta = predictedMoveDir.value === 'up' ? -1 : 1
-  const predictedY = Math.max(minY, Math.min(maxY, fighter.y + delta))
-  if (predictedY === fighter.y) return base
-  return {
-    ...base,
-    fighters: {
-      ...base.fighters,
-      [props.playerId]: { ...fighter, y: predictedY, display_y: predictedY },
-    },
-  }
+function applyVisualPrefs() {
+  setColorblindMode(colorblindMode.value)
+  saveShakeIntensity(shakeIntensity.value)
+  setHitStopEnabled(hitStopEnabled.value)
+  renderer.reset()
+}
+
+function resetKeybinds() {
+  keybinds.value = { ...DEFAULT_KEYBINDS }
+  saveKeybinds(keybinds.value)
 }
 
 let resizeObserver: ResizeObserver | null = null
 let animFrame = 0
+let countdownTimer: ReturnType<typeof setInterval> | null = null
 
 function animationLoop() {
   draw(Date.now())
@@ -800,6 +1045,9 @@ onMounted(() => {
     resizeObserver.observe(canvasWrapRef.value)
   }
   animFrame = requestAnimationFrame(animationLoop)
+  countdownTimer = setInterval(() => {
+    countdownNow.value = Date.now()
+  }, 250)
 })
 
 onUnmounted(() => {
@@ -810,6 +1058,7 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
   resizeObserver?.disconnect()
   cancelAnimationFrame(animFrame)
+  if (countdownTimer) clearInterval(countdownTimer)
   if (localChargeInterval.value) clearInterval(localChargeInterval.value)
   if (localPowerupInterval.value) clearInterval(localPowerupInterval.value)
   if (powerupNoticeTimer) clearTimeout(powerupNoticeTimer)
@@ -821,23 +1070,95 @@ onUnmounted(() => {
 <template>
   <div class="duel-board">
     <div class="match-bar">
-      <span class="match-format">Round {{ gameState.round }} · Best of {{ gameState.best_of }}</span>
+      <span class="match-format">
+        Round {{ gameState.round }} · Best of {{ gameState.best_of }} · First to {{ roundsToWin }}
+      </span>
+      <span v-if="shrinkSoftWarningActive" class="shrink-soft">Arena shrinking soon</span>
       <span v-if="shrinkWarningActive" class="shrink-warning">
         Arena shrinks in {{ formatPowerupSeconds(shrinkTicksUntil ?? 0, tickMs) }}
       </span>
-      <span class="mutator-tag">{{ MUTATOR_LABELS[gameState.mutator] ?? gameState.mutator }}</span>
+      <span class="mutator-tag">{{ matchMutatorLabel }}</span>
+      <span v-if="fogActive" class="match-chip fog" title="Enemy aim rows are imprecise">Fog</span>
+      <span v-if="drillBadge" class="match-chip drill" :title="drillHintText">{{ drillBadge }}</span>
+      <span v-if="quickLoadoutLabel" class="match-chip loadout">Loadout: {{ quickLoadoutLabel }}</span>
+      <span v-if="aiPersonalityLabel" class="match-chip ai">{{ aiPersonalityLabel }}</span>
+      <button type="button" class="match-link" @click="emit('showRules')">Power-ups</button>
       <button
         type="button"
-        class="sound-toggle"
+        class="sound-toggle labeled"
         :aria-label="soundMuted ? 'Unmute sound' : 'Mute sound'"
         @click="toggleSound"
       >
-        {{ soundMuted ? '🔇' : '🔊' }}
+        <span aria-hidden="true">{{ soundMuted ? '🔇' : '🔊' }}</span>
+        <span class="toggle-label">Sound</span>
+      </button>
+      <button
+        type="button"
+        class="sound-toggle labeled"
+        aria-label="Visual and accessibility settings"
+        @click="showVisualPrefs = !showVisualPrefs"
+      >
+        <span aria-hidden="true">⚙</span>
+        <span class="toggle-label">Settings</span>
       </button>
     </div>
 
+    <div v-if="showVisualPrefs" class="visual-prefs card">
+      <label class="checkbox-label">
+        <input v-model="colorblindMode" type="checkbox" @change="applyVisualPrefs" />
+        Colorblind bullet palettes
+      </label>
+      <label>
+        Screen shake
+        <input
+          v-model.number="shakeIntensity"
+          type="range"
+          min="0"
+          max="1"
+          step="0.1"
+          @change="applyVisualPrefs"
+        />
+      </label>
+      <label class="checkbox-label">
+        <input v-model="hitStopEnabled" type="checkbox" @change="applyVisualPrefs" />
+        Hit stop on crits
+      </label>
+      <label class="checkbox-label">
+        <input v-model="autoReleaseEnabled" type="checkbox" @change="toggleAutoRelease" />
+        Auto-release power-up when channel completes
+      </label>
+      <div class="keybind-list">
+        <p class="muted keybind-lead">Click a row, then press a key to rebind. Esc cancels.</p>
+        <div v-for="action in keybindActions" :key="action" class="keybind-row">
+          <span>{{ KEYBIND_ACTION_LABELS[action] }}</span>
+          <button
+            type="button"
+            class="btn-secondary keybind-btn"
+            :class="{ capturing: bindingCapture === action }"
+            @click="startBindingCapture(action)"
+          >
+            {{
+              bindingCapture === action
+                ? 'Press a key…'
+                : formatBindingLabel(keybinds[action])
+            }}
+          </button>
+        </div>
+      </div>
+      <button type="button" class="btn-secondary" @click="resetKeybinds">Reset keybinds</button>
+    </div>
+
     <div ref="canvasWrapRef" class="canvas-wrap" :style="{ background: canvasTheme.canvasCss }">
-      <canvas ref="canvasRef" class="game-canvas" />
+      <canvas
+        ref="canvasRef"
+        class="game-canvas"
+        role="img"
+        aria-label="Side Duel arena"
+      />
+
+      <div class="sr-only" aria-live="assertive" aria-atomic="true">
+        {{ phaseAnnouncement }}
+      </div>
 
       <Transition name="powerup-notice">
         <div v-if="showCoachHint" class="coach-hint">
@@ -847,7 +1168,7 @@ onUnmounted(() => {
 
       <Transition name="powerup-notice">
         <div
-          v-if="powerupNotice && gameState.phase === 'playing'"
+          v-if="powerupNotice"
           class="powerup-notice"
           :class="powerupNotice.tone"
         >
@@ -891,8 +1212,8 @@ onUnmounted(() => {
             !canUsePowerup && storedPowerup === 'heal'
               ? 'Full HP'
               : isInstantStored
-                ? 'Use [E]'
-                : 'Hold [E]'
+                ? `Use [${formatBindingLabel(keybinds.powerup)}]`
+                : `Hold [${formatBindingLabel(keybinds.powerup)}]`
           }}
         </button>
       </div>
@@ -953,17 +1274,19 @@ onUnmounted(() => {
         />
         <span class="charge-label powerup-label">
           {{
-            powerupReady
-              ? 'RELEASE!'
-              : `Activating… ${formatPowerupSeconds(
-                  Math.max(0, channelTicksRequired - powerupActivationTicks),
-                  tickMs,
-                )} left`
+            autoReleasing
+              ? 'Auto-releasing…'
+              : powerupReady
+                ? 'RELEASE!'
+                : `Activating… ${formatPowerupSeconds(
+                    Math.max(0, channelTicksRequired - powerupActivationTicks),
+                    tickMs,
+                  )} left`
           }}
         </span>
       </div>
 
-      <div v-if="eventFeed.length" class="event-feed" aria-live="polite">
+      <div v-if="eventFeed.length" class="event-feed" :class="{ 'feed-touch': showTouchControls }" aria-live="polite">
         <div v-for="(entry, idx) in eventFeed" :key="`${entry.tick}-${idx}`" :class="['feed-line', entry.kind]">
           {{ entry.message }}
         </div>
@@ -971,21 +1294,33 @@ onUnmounted(() => {
 
       <div v-if="isDraftPhase && !myBan" class="overlay draft">
         <span class="overlay-label">Ban a power-up</span>
-        <div class="draft-grid">
-          <button
-            v-for="ptype in draftPowerupOptions"
-            :key="ptype"
-            type="button"
-            class="btn-secondary draft-btn"
-            @click="banPowerup(ptype)"
-          >
-            {{ POWERUP_LABELS[ptype] ?? ptype }}
-          </button>
+        <p class="overlay-hint draft-explainer">
+          Remove one orb type from the pool for the rest of the match. Banned types won't spawn again.
+        </p>
+        <div v-for="group in draftTierGroups" :key="group.tier" class="draft-tier-group">
+          <span class="draft-tier-label">{{ group.label }}</span>
+          <div class="draft-grid">
+            <button
+              v-for="opt in group.options"
+              :key="opt.id"
+              type="button"
+              class="btn-secondary draft-btn"
+              :class="{ banned: opt.banned }"
+              :disabled="opt.banned"
+              :style="{ borderColor: opt.color }"
+              @click="banPowerup(opt.id)"
+            >
+              <span class="draft-icon" :style="{ color: opt.color }">{{ opt.icon }}</span>
+              <span>{{ opt.label }}</span>
+              <span v-if="opt.banned" class="draft-banned-tag">Banned</span>
+            </button>
+          </div>
         </div>
       </div>
 
       <div v-else-if="isDraftPhase" class="overlay draft">
         <span class="overlay-hint">Waiting for opponent to ban…</span>
+        <p class="draft-progress">{{ draftBanCount }}/{{ draftPlayerCount }} bans locked in</p>
         <ul v-if="draftBanSummary.length" class="draft-bans">
           <li v-for="ban in draftBanSummary" :key="ban.nickname">
             {{ ban.nickname }} banned {{ ban.label }}
@@ -996,6 +1331,15 @@ onUnmounted(() => {
       <div v-if="gameState.phase === 'countdown'" class="overlay countdown">
         <span class="overlay-value pulse">{{ countdownRemaining ?? '…' }}</span>
         <span class="overlay-label">Get ready!</span>
+        <span class="overlay-hint">
+          Round {{ gameState.round }} · First to {{ roundsToWin }} wins
+          <template v-if="playerRows.length">
+            ·
+            <template v-for="(row, idx) in playerRows" :key="row.id">
+              {{ row.nickname }} {{ row.roundWins }}/{{ roundsToWin }}<span v-if="idx < playerRows.length - 1"> · </span>
+            </template>
+          </template>
+        </span>
       </div>
 
       <div v-else-if="isRoundOver" class="overlay round-over">
@@ -1003,7 +1347,12 @@ onUnmounted(() => {
         <span v-if="roundWinnerName" class="overlay-value pop-in">{{ roundWinnerName }} wins the round!</span>
         <span v-else class="overlay-value pop-in">Draw — rematch!</span>
         <div v-if="roundRecapRows.length" class="round-recap">
-          <div v-for="row in roundRecapRows" :key="row.nickname" class="recap-row">
+          <div
+            v-for="row in roundRecapRows"
+            :key="row.nickname"
+            class="recap-row"
+            :class="{ winner: row.nickname === roundWinnerName }"
+          >
             <strong>{{ row.nickname }}</strong>
             <span v-if="row.stats">
               {{ row.stats.damage_dealt }} dealt · {{ row.stats.damage_taken }} taken ·
@@ -1016,38 +1365,46 @@ onUnmounted(() => {
 
       <div v-else-if="isFinished" class="overlay finished">
         <span class="overlay-label slide-in">Match over</span>
-        <span class="overlay-value winner-glow">{{ winnerName }} wins!</span>
+        <span class="overlay-value winner-glow">{{ matchResultText }}</span>
+        <p v-if="disconnectMessage" class="disconnect-note">{{ disconnectMessage }}</p>
         <div class="milestones">
-          <p>Career: {{ milestones.matchesPlayed }} matches · {{ milestones.perfectRounds }} perfect rounds · {{ milestones.critsLanded }} crits</p>
+          <span class="milestones-note">Saved on this device only</span>
+          <div class="milestone-chips">
+            <span class="milestone-chip">{{ milestones.matchesPlayed }} matches</span>
+            <span class="milestone-chip">{{ milestones.perfectRounds }} perfect rounds</span>
+            <span class="milestone-chip">{{ milestones.critsLanded }} crits</span>
+            <span class="milestone-chip" title="Kills with railgun power-up">{{ milestones.railgunKills }} railgun kills</span>
+            <span class="milestone-chip" title="Heals used at 1 HP">{{ milestones.clutchHeals }} clutch heals</span>
+          </div>
         </div>
         <div v-if="isHost" class="finished-actions">
           <button type="button" class="btn-primary play-again-btn" @click="startNewGame(false)">
             Rematch
           </button>
           <button type="button" class="btn-secondary play-again-btn" @click="startNewGame(true)">
-            Same seed rematch
+            Rematch (same arena layout)
           </button>
           <button type="button" class="btn-secondary play-again-btn" @click="returnToLobby">
             Back to lobby
           </button>
         </div>
-        <p v-else class="overlay-hint">Waiting for host…</p>
+        <div v-else class="finished-actions guest-finished">
+          <p class="overlay-hint">Waiting for host to start a rematch…</p>
+          <button type="button" class="btn-primary play-again-btn" @click="returnToLobby">
+            Return to lobby
+          </button>
+        </div>
       </div>
 
-      <div v-else-if="!isAlive && gameState.phase === 'playing'" class="overlay eliminated">
-        <span class="overlay-label">You were eliminated!</span>
-        <div class="spectator-stats spectator-dual">
-          <p v-for="row in playerRows" :key="row.id">
-            <strong>{{ row.nickname }}</strong>
-            · {{ row.fighter?.hp ?? 0 }}/{{ row.fighter?.max_hp ?? 3 }} HP
-            · {{ row.roundWins }} round wins
-          </p>
-          <p>
-            Arena {{ playableHeight }} rows · {{ gameState.bullets.length }} bullets
-            <span v-if="incomingBulletCount"> · {{ incomingBulletCount }} incoming</span>
-          </p>
-        </div>
-        <span class="overlay-hint">Watch the round continue…</span>
+      <div v-else-if="!isAlive && gameState.phase === 'playing'" class="spectator-banner">
+        <span class="spectator-title">You were eliminated — spectating</span>
+        <span class="spectator-meta">
+          <template v-for="(row, idx) in playerRows" :key="row.id">
+            {{ row.nickname }} {{ row.fighter?.hp ?? 0 }}/{{ row.fighter?.max_hp ?? 3 }} HP
+            <span v-if="idx < playerRows.length - 1"> · </span>
+          </template>
+          <span v-if="incomingBulletCount"> · {{ incomingBulletCount }} bullets incoming</span>
+        </span>
       </div>
 
       <div
@@ -1083,6 +1440,7 @@ onUnmounted(() => {
             ▼
           </button>
         </div>
+        <div class="touch-actions">
         <button
           type="button"
           class="touch-btn touch-fire"
@@ -1096,6 +1454,22 @@ onUnmounted(() => {
         >
           {{ chargeEnabled ? '⚡' : '●' }}
         </button>
+        <button
+          v-if="storedPowerup && powerupsEnabled"
+          type="button"
+          class="touch-btn touch-powerup"
+          :aria-label="isInstantStored ? 'Use power-up' : 'Hold to activate power-up'"
+          :disabled="!canUsePowerup"
+          @touchstart.prevent="onPowerupButtonDown"
+          @touchend.prevent="onPowerupButtonUp"
+          @touchcancel.prevent="onPowerupButtonUp"
+          @mousedown.prevent="onPowerupButtonDown"
+          @mouseup.prevent="onPowerupButtonUp"
+          @mouseleave.prevent="onPowerupButtonUp"
+        >
+          {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
+        </button>
+        </div>
       </div>
     </div>
 
@@ -1126,45 +1500,71 @@ onUnmounted(() => {
               class="hp-pip"
               :class="{ spent: i > row.fighter.hp, low: row.fighter.hp === 1 && i === 1 }"
             />
+            <span v-if="row.fighter.max_hp === 1" class="hp-text">{{ row.fighter.hp }}/1</span>
           </span>
-          <span v-if="row.fighter?.effects?.rapid_fire_active" class="effect-badge" title="Rapid Fire">⚡</span>
-          <span v-if="row.fighter?.effects?.machine_gun_active" class="effect-badge" title="Machine Gun">🔫</span>
-          <span v-if="row.fighter?.effects?.wide_shot_active" class="effect-badge" title="Wide Shot">▣</span>
-          <span v-if="row.fighter?.effects?.pierce_active" class="effect-badge" title="Pierce">➤</span>
-          <span v-if="row.fighter?.effects?.overdrive_active" class="effect-badge" title="Overdrive">✦</span>
-          <span v-if="row.fighter?.effects?.shield_active" class="effect-badge shield-pulse">🛡</span>
-          <span v-if="row.fighter?.effects?.ghost_active" class="effect-badge" title="Ghost">◎</span>
-          <span v-if="row.fighter?.effects?.mirror_active" class="effect-badge" title="Mirror">⟲</span>
-          <span v-if="row.fighter?.effects?.homing_active" class="effect-badge" title="Homing">↯</span>
-          <span v-if="row.fighter?.effects?.freeze_active" class="effect-badge" title="Frozen">❄</span>
+          <span
+            v-for="buff in fighterEffects(row.fighter?.effects as Record<string, unknown> | undefined)"
+            :key="`${row.id}-${buff.id}`"
+            class="effect-chip"
+            :style="{ borderColor: POWERUP_COLORS[buff.id] ?? '#a855f7' }"
+          >
+            {{ buff.label }}
+            <span class="effect-chip-time">{{ formatPowerupSeconds(buff.remainingTicks, tickMs) }}</span>
+          </span>
+          <span
+            v-if="fogActive && row.id !== playerId"
+            class="effect-chip fog-chip"
+            title="Aim rows are imprecise in fog"
+          >
+            Imprecise aim
+          </span>
           <span
             v-if="row.id === playerId && row.fighter?.stored_powerup"
-            class="effect-badge stored-powerup"
+            class="effect-chip stored"
             :style="{ color: POWERUP_COLORS[row.fighter.stored_powerup] ?? '#fbbf24' }"
             :title="POWERUP_LABELS[row.fighter.stored_powerup]"
           >
             {{ POWERUP_ICONS[row.fighter.stored_powerup] ?? '★' }}
+            {{ POWERUP_LABELS[row.fighter.stored_powerup] }}
           </span>
           <span v-if="!row.fighter?.alive" class="status">out</span>
         </li>
       </ul>
 
       <div class="controls-hint">
-        <p v-if="canControl && chargeEnabled && storedPowerup">
-          <strong>Controls:</strong> W/S move · Space charge & fire ·
-          {{ isInstantStored ? 'E to use power-up' : `Hold E ~${formatPowerupSeconds(channelTicksRequired, tickMs)} to activate` }}
+        <p v-if="showTouchControls && canControl && storedPowerup && powerupsEnabled">
+          <strong>Touch:</strong> Arrows move · ⚡ {{ chargeEnabled ? 'hold to charge' : 'fire' }} ·
+          {{ POWERUP_ICONS[storedPowerup] ?? '★' }}
+          {{ isInstantStored ? 'tap power-up' : 'hold power-up' }}
+        </p>
+        <p v-else-if="showTouchControls && canControl && chargeEnabled">
+          <strong>Touch:</strong> Use on-screen arrows to move · Hold ⚡ to charge and release to fire
+        </p>
+        <p v-else-if="showTouchControls && canControl">
+          <strong>Touch:</strong> Arrows move · ● fires
+        </p>
+        <p v-else-if="canControl && chargeEnabled && storedPowerup">
+          <strong>Controls:</strong> {{ formatBindingLabel(keybinds.moveUp) }}/{{ formatBindingLabel(keybinds.moveDown) }} move · {{ formatBindingLabel(keybinds.fire) }} charge & fire ·
+          {{ isInstantStored ? `${formatBindingLabel(keybinds.powerup)} to use power-up` : `Hold ${formatBindingLabel(keybinds.powerup)} ~${formatPowerupSeconds(channelTicksRequired, tickMs)} to activate` }}
         </p>
         <p v-else-if="canControl && chargeEnabled && powerupsEnabled && arenaPowerup">
-          <strong>Controls:</strong> W/S move · Space charge & fire · Collect the {{ POWERUP_LABELS[arenaPowerup.type] ?? 'power-up' }} (shoot or touch it)
+          <strong>Controls:</strong> {{ formatBindingLabel(keybinds.moveUp) }}/{{ formatBindingLabel(keybinds.moveDown) }} move · {{ formatBindingLabel(keybinds.fire) }} charge & fire · Collect the {{ POWERUP_LABELS[arenaPowerup.type] ?? 'power-up' }} (shoot or touch it)
         </p>
         <p v-else-if="canControl && chargeEnabled">
-          <strong>Controls:</strong> W/S or ↑/↓ to move · Hold Space to charge, release to fire
+          <strong>Controls:</strong> {{ formatBindingLabel(keybinds.moveUp) }}/{{ formatBindingLabel(keybinds.moveDown) }} to move · Hold {{ formatBindingLabel(keybinds.fire) }} to charge, release to fire
         </p>
         <p v-else-if="canControl">
-          <strong>Controls:</strong> W/S or ↑/↓ to move · Space to shoot
+          <strong>Controls:</strong> {{ formatBindingLabel(keybinds.moveUp) }}/{{ formatBindingLabel(keybinds.moveDown) }} to move · {{ formatBindingLabel(keybinds.fire) }} to shoot
         </p>
-        <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">Spectating</p>
+        <p v-else-if="drillHintText && gameState.phase === 'playing'">
+          <strong>Drill:</strong> {{ drillHintText }}
+        </p>
+        <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">Spectating — canvas stays live</p>
         <p v-else class="muted">Waiting…</p>
+        <p v-if="gameState.phase === 'playing' || gameState.phase === 'countdown'" class="muted rules-link">
+          <button type="button" class="inline-link" @click="emit('showRules')">See Rules</button>
+          for the full power-up list
+        </p>
       </div>
     </aside>
   </div>
@@ -1203,6 +1603,90 @@ onUnmounted(() => {
   animation: shrinkPulse 1.2s ease-in-out infinite;
 }
 
+.shrink-soft {
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  color: #fde68a;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.match-chip {
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.match-chip.drill {
+  border-color: rgba(52, 211, 153, 0.35);
+  color: #a7f3d0;
+}
+
+.match-chip.loadout {
+  border-color: rgba(168, 85, 247, 0.35);
+  color: #e9d5ff;
+}
+
+.match-chip.fog {
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #e2e8f0;
+}
+
+.match-link {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sound-toggle.labeled {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.toggle-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.keybind-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.keybind-lead {
+  margin: 0;
+}
+
+.keybind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.keybind-btn {
+  min-width: 7rem;
+  font-size: 0.78rem;
+}
+
+.keybind-btn.capturing {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 @keyframes shrinkPulse {
   0%,
   100% {
@@ -1213,8 +1697,28 @@ onUnmounted(() => {
   }
 }
 
+.visual-prefs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .sound-toggle {
-  margin-left: auto;
+  margin-left: 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(15, 23, 42, 0.65);
   border-radius: 8px;
@@ -1258,6 +1762,127 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.2rem;
   pointer-events: none;
+}
+
+.event-feed.feed-touch {
+  bottom: 9rem;
+  max-width: min(62%, 280px);
+}
+
+.spectator-banner {
+  position: absolute;
+  top: 0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-width: min(92%, 520px);
+  padding: 0.55rem 0.9rem;
+  border-radius: 12px;
+  text-align: center;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.spectator-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fecaca;
+}
+
+.spectator-meta {
+  font-size: 0.72rem;
+  color: #cbd5e1;
+}
+
+.draft-explainer {
+  max-width: 420px;
+  margin: 0 0 0.5rem;
+}
+
+.draft-tier-group {
+  margin-top: 0.65rem;
+  width: 100%;
+  max-width: 560px;
+}
+
+.draft-tier-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 0.35rem;
+}
+
+.draft-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.draft-btn.banned {
+  opacity: 0.45;
+}
+
+.draft-icon {
+  font-size: 1rem;
+}
+
+.draft-banned-tag {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+
+.draft-progress {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.recap-row.winner {
+  border-left: 3px solid #fbbf24;
+  padding-left: 0.5rem;
+  background: rgba(251, 191, 36, 0.08);
+  border-radius: 6px;
+}
+
+.disconnect-note {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #fca5a5;
+}
+
+.milestones-note {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.milestone-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: center;
+}
+
+.milestone-chip {
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.75rem;
+}
+
+.guest-finished {
+  flex-direction: column;
+  align-items: center;
 }
 
 .feed-line {
@@ -1309,6 +1934,14 @@ onUnmounted(() => {
   padding: 0.75rem;
 }
 
+.touch-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.45rem;
+  pointer-events: auto;
+}
+
 .touch-move {
   display: flex;
   flex-direction: column;
@@ -1339,13 +1972,25 @@ onUnmounted(() => {
 
 .touch-fire {
   pointer-events: auto;
-  align-self: flex-end;
   width: 4rem;
   height: 4rem;
   border-radius: 999px;
   font-size: 1.35rem;
   border-color: rgba(251, 191, 36, 0.45);
   color: #fde68a;
+}
+
+.touch-powerup {
+  width: 3.4rem;
+  height: 3.4rem;
+  border-radius: 999px;
+  font-size: 1.2rem;
+  border-color: rgba(168, 85, 247, 0.45);
+  color: #e9d5ff;
+}
+
+.touch-powerup:disabled {
+  opacity: 0.45;
 }
 
 .mutator-tag {
@@ -1943,12 +2588,52 @@ onUnmounted(() => {
   animation: lowHpPulse 0.8s ease-in-out infinite;
 }
 
-.effect-badge {
-  font-size: 0.85rem;
+.hp-text {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fca5a5;
+  margin-left: 0.15rem;
 }
 
-.shield-pulse {
-  animation: shieldPulse 1.2s ease-in-out infinite;
+.effect-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.12rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.55);
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.effect-chip-time {
+  opacity: 0.75;
+  font-weight: 500;
+}
+
+.effect-chip.fog-chip {
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #cbd5e1;
+}
+
+.effect-chip.stored {
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.controls-hint .inline-link {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.rules-link {
+  margin-top: 0.15rem;
 }
 
 .status {
@@ -2008,6 +2693,29 @@ onUnmounted(() => {
 @keyframes shieldPulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.15); }
+}
+
+@media (max-width: 900px) {
+  .duel-board {
+    padding: 0 0.35rem 0.35rem;
+  }
+
+  .match-bar {
+    gap: 0.4rem;
+  }
+
+  .toggle-label {
+    display: none;
+  }
+
+  .powerup-slot {
+    max-width: min(94%, 280px);
+    font-size: 0.85rem;
+  }
+
+  .active-buffs {
+    max-width: min(58%, 200px);
+  }
 }
 
 @media (max-width: 640px) {

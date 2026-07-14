@@ -1,6 +1,8 @@
 const SHAKE_KEY = 'duel-shake-intensity'
 const COLORBLIND_KEY = 'duel-colorblind'
 const HITSTOP_KEY = 'duel-hit-stop'
+const AUTO_RELEASE_KEY = 'duel-auto-release-powerup'
+const DANGER_LEGEND_KEY = 'duel-danger-legend-seen'
 
 export function loadShakeIntensity(): number {
   try {
@@ -48,6 +50,38 @@ export function isHitStopEnabled(): boolean {
 export function setHitStopEnabled(value: boolean): void {
   try {
     localStorage.setItem(HITSTOP_KEY, value ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isAutoReleasePowerupEnabled(): boolean {
+  try {
+    return localStorage.getItem(AUTO_RELEASE_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function setAutoReleasePowerupEnabled(value: boolean): void {
+  try {
+    localStorage.setItem(AUTO_RELEASE_KEY, value ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+}
+
+export function hasSeenDangerLegend(): boolean {
+  try {
+    return localStorage.getItem(DANGER_LEGEND_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function markDangerLegendSeen(): void {
+  try {
+    localStorage.setItem(DANGER_LEGEND_KEY, '1')
   } catch {
     /* ignore */
   }

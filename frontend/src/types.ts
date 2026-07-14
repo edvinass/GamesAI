@@ -124,6 +124,8 @@ export interface DuelFighterEffects {
   wide_shot_active?: boolean
   pierce_active?: boolean
   overdrive_active?: boolean
+  phase_shift_active?: boolean
+  freeze_cast_active?: boolean
 }
 
 export interface DuelFighter {
@@ -212,6 +214,8 @@ export interface DuelStatBlock {
   powerups_used: number
   hazard_ticks: number
   perfect_rounds?: number
+  clutch_heals?: number
+  railgun_kills?: number
 }
 
 export interface DuelLastHit {
@@ -237,6 +241,7 @@ export interface DuelGameState {
   training_drill?: string
   tutorial_mode?: boolean
   powerups_enabled: boolean
+  charge_shot_enabled?: boolean
   effect_duration_ticks?: number
   powerup_lifetime_ticks?: number
   bullet_speed: number
@@ -544,7 +549,7 @@ export function isSnakeState(state: GameState): state is SnakeGameState {
 }
 
 export function isDuelState(state: GameState): state is DuelGameState {
-  return 'fighters' in state
+  return 'fighters' in state && 'bullets' in state && 'grid_width' in state
 }
 
 export function isTetrisState(state: GameState): state is TetrisGameState {

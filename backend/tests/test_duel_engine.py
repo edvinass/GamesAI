@@ -597,6 +597,8 @@ def test_initial_powerup_spawn_is_sooner_than_interval(engine: DuelEngine) -> No
 
 
 def test_bomb_detonates_on_fighter(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["powerup_draft_enabled"] = False
+    state["settings"]["best_of"] = 1
     state["obstacles"] = []
     state["fighters"]["p1"]["y"] = 5
     state["fighters"]["p1"]["x"] = 20
@@ -796,11 +798,99 @@ def test_round_end_enters_powerup_draft(engine: DuelEngine, state: dict) -> None
     state["settings"]["powerup_draft_enabled"] = True
     state["settings"]["best_of"] = 5
     state["settings"]["match_format"] = "best_of_5"
+    state["fighters"]["p0"]["alive"] = False
     events: list[dict] = []
-    engine._end_round(state, "p0", events)
+    engine._end_round(state, "p1", events)
     assert state["phase"] == "powerup_draft"
-    assert state.get("pending_round_reset") is True
+    assert state["fighters"]["p0"]["alive"] is True
+    assert state["fighters"]["p1"]["alive"] is True
     assert state["round"] == 2
+
+
+def test_powerup_draft_tick_completion_resets_fighters(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["powerup_draft_enabled"] = True
+    state["settings"]["best_of"] = 5
+    state["settings"]["match_format"] = "best_of_5"
+    state["fighters"]["p0"]["alive"] = False
+    events: list[dict] = []
+    engine._end_round(state, "p1", events)
+    assert state["phase"] == "powerup_draft"
+
+    human = state["players"][0]
+    ai = state["players"][1]
+    ai["is_ai"] = True
+    state, _ = engine.apply_action(
+        state, {"type": "ban_powerup", "powerup_type": "shield"}, human
+    )
+    assert state["phase"] == "powerup_draft"
+
+    state, _ = engine.tick(state)
+    assert state["phase"] == "countdown"
+    assert state["fighters"]["p0"]["alive"] is True
+    assert state["fighters"]["p1"]["alive"] is True
+    assert state["round_scores"]["p1"] == 1
+
+
+def test_draw_round_increments_without_score_change(engine: DuelEngine, state: dict) -> None:
+    state["fighters"]["p0"]["alive"] = False
+    state["fighters"]["p1"]["alive"] = False
+    events: list[dict] = []
+    engine._end_round(state, None, events)
+    assert state["round_scores"]["p0"] == 0
+    assert state["round_scores"]["p1"] == 0
+    assert state["round"] == 2
+
+
+def test_burst_shots_respect_bullet_cap(engine: DuelEngine, state: dict) -> None:
+    state["settings"]["max_bullets_per_player"] = 2
+    fighter = state["fighters"]["p0"]
+    fighter["burst_shots_remaining"] = 6
+    fighter["burst_next_at_tick"] = state["tick"]
+    state["bullets"] = [
+        {"id": 1, "x": 5, "y": 3, "vx": 1, "owner_id": "p0"},
+        {"id": 2, "x": 6, "y": 3, "vx": 1, "owner_id": "p0"},
+    ]
+    engine._process_burst_shots(state)
+    assert len([b for b in state["bullets"] if b["owner_id"] == "p0"]) == 2
+
+
+def test_mirror_reflects_bomb(engine: DuelEngine, state: dict) -> None:
+    state["fighters"]["p1"]["x"] = 20
+    state["fighters"]["p1"]["y"] = 5
+    state["fighters"]["p1"]["effects"]["mirror_until"] = state["tick"] + 50
+    bomb = {
+        "id": 9,
+        "x": 19,
+        "y": 6,
+        "vx": 1,
+        "vy": 0,
+        "owner_id": "p0",
+        "kind": "bomb",
+    }
+    state["bullets"] = [bomb]
+    events: list[dict] = []
+    kept = engine._process_bullet(
+        state,
+        bomb,
+        state["fighters"],
+        engine._fighter_height(state),
+        state.get("obstacles", []),
+        events,
+    )
+    assert kept is True
+    assert bomb["owner_id"] == "p1"
+    assert bomb["vx"] == -1
+
+
+def test_duplicate_ban_returns_rejection(engine: DuelEngine, state: dict) -> None:
+    state["phase"] = "powerup_draft"
+    state["powerup_bans"] = {"p0": "shield"}
+    player = state["players"][0]
+    state, _ = engine.apply_action(
+        state, {"type": "ban_powerup", "powerup_type": "ghost"}, player
+    )
+    assert state["last_action"]["type"] == "action_rejected"
+    assert state["last_action"]["reason"] == "already_banned"
 
 
 def test_decoy_spawn_uses_seeded_y(engine: DuelEngine, state: dict) -> None:

@@ -67,6 +67,8 @@ const duelState = computed(() =>
   gameState.value && isDuelState(gameState.value) ? gameState.value as DuelGameState : null,
 )
 
+const duelInputSuspended = computed(() => showRules.value || showPokerHands.value)
+
 const tetrisState = computed(() =>
   gameState.value && isTetrisState(gameState.value) ? gameState.value as TetrisGameState : null,
 )
@@ -187,7 +189,7 @@ function backToLobby() {
             <span class="connection-dot" />
             {{ connected ? 'Live' : 'Reconnecting' }}
           </span>
-          <span class="av-hint">💬 Voice chat optional — text Q&amp;A built in</span>
+          <span v-if="room?.game_type !== 'duel'" class="av-hint">💬 Voice chat optional — text Q&amp;A built in</span>
         </div>
       </div>
       <div class="header-actions">
@@ -230,8 +232,10 @@ function backToLobby() {
       :game-state="duelState"
       :room="room"
       :player-id="playerStore.playerId"
+      :input-suspended="duelInputSuspended"
       @action="sendAction"
       @lobby="backToLobby"
+      @show-rules="showRules = true"
     />
 
     <TetrisBoard

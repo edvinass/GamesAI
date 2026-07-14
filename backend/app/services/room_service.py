@@ -258,7 +258,7 @@ class RoomService:
             raise ValueError("Host cannot remove themselves")
 
         await self.db.delete(target)
-        if room.game_type in ("tetris", "poker"):
+        if room.game_type in ("tetris", "poker", "duel"):
             settings = dict(room.settings or {})
             difficulties = dict(settings.get("ai_difficulties") or {})
             difficulties.pop(str(target_id), None)
@@ -496,18 +496,47 @@ class RoomService:
         await self.db.flush()
 
         token = generate_session_token()
-        self.db.add(
-            RoomPlayer(
-                room_id=room.id,
-                nickname="🤖 AI Player 1",
-                session_token_hash=hash_session_token(token),
-                team=None,
-                role=None,
-                is_ai=True,
-                is_connected=True,
-            )
+        ai_player = RoomPlayer(
+            room_id=room.id,
+            nickname="🤖 AI Player 1",
+            session_token_hash=hash_session_token(token),
+            team=None,
+            role=None,
+            is_ai=True,
+            is_connected=True,
         )
+        self.db.add(ai_player)
         await self.db.flush()
+        settings = dict(room.settings or {})
+        difficulties = dict(settings.get("ai_difficulties") or {})
+        difficulties[str(ai_player.id)] = str(settings.get("ai_difficulty") or "medium")
+        settings["ai_difficulties"] = difficulties
+        room.settings = get_game(room.game_type).validate_settings(settings)
+
+    async def handle_duel_disconnect_forfeit(
+        self, room_id: uuid.UUID, player_id: uuid.UUID
+    ) -> Room | None:
+        room = await self._load_room(room_id)
+        if not room or room.game_type != "duel":
+            return room
+        if room.status != RoomStatus.PLAYING or not room.game_state:
+            return room
+
+        player = next((p for p in room.players if p.id == player_id), None)
+        if not player or player.is_ai:
+            return room
+
+        game = get_game("duel")
+        state = copy.deepcopy(room.game_state.state)
+        events: list[dict] = []
+        if game.handle_disconnect_forfeit(state, str(player_id), events):
+            room.game_state.state = state
+            room.game_state.version += 1
+            if state.get("winner"):
+                room.status = RoomStatus.FINISHED
+            await self.db.commit()
+            await self.db.refresh(room, ["players", "game_state"])
+        return room
 
     async def _setup_tetris_single_player(self, room: Room) -> None:
         for p in list(room.players):

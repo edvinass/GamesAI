@@ -5,6 +5,15 @@ export interface DuelKeybinds {
   powerup: string[]
 }
 
+export type DuelKeybindAction = keyof DuelKeybinds
+
+export const KEYBIND_ACTION_LABELS: Record<DuelKeybindAction, string> = {
+  moveUp: 'Move up',
+  moveDown: 'Move down',
+  fire: 'Fire / charge',
+  powerup: 'Power-up',
+}
+
 const STORAGE_KEY = 'duel-keybinds'
 
 export const DEFAULT_KEYBINDS: DuelKeybinds = {

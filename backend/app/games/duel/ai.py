@@ -707,7 +707,7 @@ def _should_activate_powerup(
         return False, False
 
     if fighter.get("activating_powerup"):
-        ticks = fighter.get("powerup_activation_ticks", 0) + 1
+        ticks = fighter.get("powerup_activation_ticks", 0)
         required = POWERUP_CHANNEL_TICKS.get(stored, POWERUP_ACTIVATION_TICKS)
         if ticks >= required:
             return False, True

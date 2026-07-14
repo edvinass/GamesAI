@@ -181,6 +181,10 @@ function applyDailyChallenge() {
   })
 }
 
+function applyDuelPreset(settings: Record<string, unknown>) {
+  updateSettings(settings)
+}
+
 const baseDropTicks = computed({
   get: () => Number(room.value?.settings?.base_drop_ticks ?? 20),
   set: (val: number) => updateSettings({ base_drop_ticks: val }),
@@ -403,6 +407,7 @@ async function copyUrl() {
         @add-ai="addAi()"
         @remove="removePlayer"
         @apply-daily="applyDailyChallenge"
+        @apply-preset="applyDuelPreset"
       />
 
       <TetrisLobby
