@@ -507,15 +507,17 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 }
 
 .card-btn.key.red {
-  background: color-mix(in srgb, var(--red-team) 35%, #c4a35a);
+  background: color-mix(in srgb, var(--red-team) 62%, #c4a35a);
   color: #1a1a1a;
   border-color: var(--red-team);
+  border-width: 3px;
 }
 
 .card-btn.key.blue {
-  background: color-mix(in srgb, var(--blue-team) 35%, #c4a35a);
+  background: color-mix(in srgb, var(--blue-team) 62%, #c4a35a);
   color: #1a1a1a;
   border-color: var(--blue-team);
+  border-width: 3px;
 }
 
 .card-btn.key.neutral {
