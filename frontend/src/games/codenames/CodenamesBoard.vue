@@ -521,15 +521,16 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 }
 
 .card-btn.key.neutral {
-  background: #b8956a;
+  background: #f2efe8;
   color: #1a1a1a;
-  border-color: #8a7040;
+  border-color: #c8c2b6;
 }
 
 .card-btn.key.assassin {
-  background: color-mix(in srgb, var(--assassin) 40%, #c4a35a);
-  color: #1a1a1a;
-  border-color: #555;
+  background: #3a3a3a;
+  color: #fff;
+  border-color: #222;
+  border-width: 3px;
 }
 
 .card-btn.revealed {
@@ -564,16 +565,16 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 }
 
 .card-btn.revealed.red {
-  background: var(--red-team);
+  background: #b83345;
   color: white;
-  border-color: var(--red-team);
+  border-color: #9a2737;
   border-style: solid;
 }
 
 .card-btn.revealed.blue {
-  background: var(--blue-team);
+  background: #2f6dcc;
   color: white;
-  border-color: var(--blue-team);
+  border-color: #2458a8;
   border-style: solid;
 }
 
