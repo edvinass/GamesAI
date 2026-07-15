@@ -43,6 +43,8 @@ const registerFilled = computed(() =>
 
 const board = computed(() => props.gameState.board)
 
+const boardAspect = computed(() => `${board.value.width} / ${board.value.height}`)
+
 const wallSet = computed(() => {
   const set = new Set<string>()
   for (const [x, y] of board.value.walls) {
@@ -60,7 +62,7 @@ const checkpointMap = computed(() => {
 })
 
 const robotAt = computed(() => {
-  const map = new Map<string, { playerId: string; facing: string; color: string }>()
+  const map = new Map<string, { playerId: string; facing: string; color: string; nickname: string }>()
   for (const player of props.gameState.players) {
     const robot = props.gameState.robots[player.id]
     if (robot) {
@@ -68,6 +70,7 @@ const robotAt = computed(() => {
         playerId: player.id,
         facing: robot.facing,
         color: player.color,
+        nickname: player.nickname,
       })
     }
   }
@@ -77,25 +80,41 @@ const robotAt = computed(() => {
 const cols = computed(() => Array.from({ length: board.value.width }, (_, i) => i))
 const rows = computed(() => Array.from({ length: board.value.height }, (_, i) => i))
 
+const phaseLabel = computed(() => {
+  const gs = props.gameState
+  if (gs.winner) return 'Finished'
+  if (gs.phase === 'executing') return 'Executing'
+  if (isLocked.value) return 'Waiting'
+  return 'Programming'
+})
+
+const phaseClass = computed(() => {
+  const gs = props.gameState
+  if (gs.winner) return 'phase--finished'
+  if (gs.phase === 'executing') return 'phase--executing'
+  if (isLocked.value) return 'phase--waiting'
+  return 'phase--programming'
+})
+
 const statusText = computed(() => {
   const gs = props.gameState
   if (gs.winner) {
     const winner = gs.players.find((p) => p.id === gs.winner)
     if (gs.win_reason === 'checkpoints') {
-      return `🏁 ${winner?.nickname ?? 'Winner'} reached all checkpoints!`
+      return `${winner?.nickname ?? 'Winner'} reached all checkpoints`
     }
-    return `${winner?.nickname ?? 'Winner'} wins (${gs.win_reason})`
+    return `${winner?.nickname ?? 'Winner'} wins`
   }
   if (gs.phase === 'executing') {
-    return `Round ${gs.round} — robots executing…`
+    return 'Robots are running this round\'s program…'
   }
   if (isLocked.value) {
-    return `Round ${gs.round} — program locked, waiting for others…`
+    return 'Your program is locked — waiting for other racers'
   }
   if (canProgram.value) {
-    return `Round ${gs.round} — fill your register and lock in`
+    return 'Pick cards from your hand and fill every register slot'
   }
-  return `Round ${gs.round} — ${gs.phase}`
+  return 'Watch the race unfold'
 })
 
 const priorityList = computed(() =>
@@ -103,6 +122,8 @@ const priorityList = computed(() =>
     rank: i + 1,
     player: props.gameState.players.find((p) => p.id === pid),
     robot: props.gameState.robots[pid],
+    locked: props.gameState.lock_status[pid] ?? false,
+    isMe: pid === props.playerId,
   })),
 )
 
@@ -121,6 +142,14 @@ function checkpointNum(x: number, y: number): number | null {
 
 function robotOn(x: number, y: number) {
   return robotAt.value.get(`${x},${y}`)
+}
+
+function isFloor(x: number, y: number): boolean {
+  return !isWall(x, y)
+}
+
+function floorShade(x: number, y: number): string {
+  return (x + y) % 2 === 0 ? 'floor-a' : 'floor-b'
 }
 
 function selectCard(cardId: string) {
@@ -166,137 +195,202 @@ function cardTitle(card: { type?: string; hidden?: boolean }) {
   if (card.hidden || !card.type) return 'Hidden card'
   return CARD_LABELS[card.type] ?? card.type
 }
+
+function cardTypeClass(type?: string): string {
+  if (!type) return 'card--unknown'
+  if (type.startsWith('move_')) return 'card--move'
+  if (type.startsWith('turn_')) return 'card--turn'
+  if (type === 'backup') return 'card--backup'
+  return 'card--unknown'
+}
 </script>
 
 <template>
   <div class="roborally-board">
-    <header class="game-status card">
-      <div class="status-main">
-        <h2>{{ board.name }}</h2>
-        <p>{{ statusText }}</p>
+    <header class="status-bar">
+      <div class="status-left">
+        <span class="phase-badge" :class="phaseClass">{{ phaseLabel }}</span>
+        <div class="status-copy">
+          <h2 class="map-name">{{ board.name }}</h2>
+          <p class="status-line">{{ statusText }}</p>
+        </div>
       </div>
-      <div v-if="myRobot && !isSpectator" class="my-progress">
-        Checkpoints: {{ myRobot.checkpoints_reached }} / {{ gameState.total_checkpoints }}
+
+      <div class="status-stats">
+        <div class="stat-pill">
+          <span class="stat-label">Round</span>
+          <span class="stat-value">{{ gameState.round }}</span>
+        </div>
+        <div v-if="myRobot && !isSpectator" class="stat-pill stat-pill--accent">
+          <span class="stat-label">Checkpoints</span>
+          <span class="stat-value">{{ myRobot.checkpoints_reached }} / {{ gameState.total_checkpoints }}</span>
+        </div>
       </div>
+
       <button
         v-if="!isSpectator && !gameState.winner"
         type="button"
-        class="btn-secondary resign-btn"
+        class="btn-secondary forfeit-btn"
         @click="resign"
       >
         Forfeit
       </button>
     </header>
 
-    <div class="layout">
-      <aside class="sidebar card">
-        <h3>Priority</h3>
-        <ol class="priority-list">
-          <li v-for="entry in priorityList" :key="entry.player?.id">
-            <span class="rank">{{ entry.rank }}</span>
-            <span
-              class="dot"
-              :style="{ background: entry.player?.color }"
-            />
-            <span class="name">{{ entry.player?.nickname }}</span>
-            <span v-if="gameState.lock_status[entry.player?.id ?? '']" class="locked">🔒</span>
-            <span class="cp">CP {{ entry.robot?.checkpoints_reached ?? 0 }}</span>
-          </li>
-        </ol>
-      </aside>
-
-      <div class="grid-wrap card">
-        <div
-          class="grid"
-          :style="{
-            gridTemplateColumns: `repeat(${board.width}, 1fr)`,
-            gridTemplateRows: `repeat(${board.height}, 1fr)`,
-          }"
-        >
+    <div class="main-stage">
+      <div class="arena">
+        <div class="grid-frame">
           <div
-            v-for="y in rows"
-            :key="'row-' + y"
-            class="grid-row"
-            :style="{ display: 'contents' }"
+            class="grid"
+            :style="{
+              aspectRatio: boardAspect,
+              gridTemplateColumns: `repeat(${board.width}, 1fr)`,
+              gridTemplateRows: `repeat(${board.height}, 1fr)`,
+            }"
           >
-            <div
-              v-for="x in cols"
-              :key="`${x}-${y}`"
-              class="cell"
-              :class="{
-                wall: isWall(x, y),
-                antenna: isAntenna(x, y),
-                checkpoint: checkpointNum(x, y) != null,
-              }"
-            >
-              <span v-if="checkpointNum(x, y)" class="cp-label">{{ checkpointNum(x, y) }}</span>
-              <span v-if="isAntenna(x, y)" class="antenna-icon">📡</span>
+            <template v-for="y in rows" :key="'row-' + y">
               <div
-                v-if="robotOn(x, y)"
-                class="robot"
-                :style="{ '--robot-color': robotOn(x, y)?.color }"
-                :title="gameState.players.find(p => p.id === robotOn(x, y)?.playerId)?.nickname"
+                v-for="x in cols"
+                :key="`${x}-${y}`"
+                class="cell"
+                :class="[
+                  floorShade(x, y),
+                  {
+                    wall: isWall(x, y),
+                    floor: isFloor(x, y),
+                    antenna: isAntenna(x, y),
+                    checkpoint: checkpointNum(x, y) != null,
+                  },
+                ]"
               >
-                <span class="robot-body" />
-                <span class="robot-arrow">{{ FACING_ARROW[robotOn(x, y)!.facing] }}</span>
+                <span v-if="checkpointNum(x, y)" class="cp-ring">
+                  <span class="cp-num">{{ checkpointNum(x, y) }}</span>
+                </span>
+                <span v-if="isAntenna(x, y)" class="antenna-glow">
+                  <span class="antenna-icon">📡</span>
+                </span>
+                <div
+                  v-if="robotOn(x, y)"
+                  class="robot"
+                  :class="{ 'robot--me': robotOn(x, y)?.playerId === playerId }"
+                  :style="{ '--robot-color': robotOn(x, y)?.color }"
+                  :title="robotOn(x, y)?.nickname"
+                >
+                  <span class="robot-shell" />
+                  <span class="robot-arrow">{{ FACING_ARROW[robotOn(x, y)!.facing] }}</span>
+                </div>
               </div>
-            </div>
+            </template>
           </div>
         </div>
       </div>
+
+      <aside class="racers-panel">
+        <div class="panel-head">
+          <h3>Register order</h3>
+          <span class="panel-sub">Closest to antenna first</span>
+        </div>
+        <ol class="racer-list">
+          <li
+            v-for="entry in priorityList"
+            :key="entry.player?.id"
+            class="racer-card"
+            :class="{ 'racer-card--me': entry.isMe, 'racer-card--locked': entry.locked }"
+          >
+            <span class="racer-rank">{{ entry.rank }}</span>
+            <span class="racer-dot" :style="{ background: entry.player?.color }" />
+            <div class="racer-info">
+              <span class="racer-name">
+                {{ entry.player?.nickname }}
+                <span v-if="entry.isMe" class="you-tag">You</span>
+              </span>
+              <div class="cp-track">
+                <div
+                  class="cp-fill"
+                  :style="{ width: `${((entry.robot?.checkpoints_reached ?? 0) / gameState.total_checkpoints) * 100}%`, background: entry.player?.color }"
+                />
+              </div>
+            </div>
+            <span class="racer-meta">
+              <span class="racer-cp">{{ entry.robot?.checkpoints_reached ?? 0 }}/{{ gameState.total_checkpoints }}</span>
+              <span v-if="entry.locked" class="lock-icon" title="Program locked">🔒</span>
+            </span>
+          </li>
+        </ol>
+      </aside>
     </div>
 
-    <section v-if="!isSpectator" class="programming card">
-      <div class="register-row">
-        <span class="section-label">Register</span>
+    <section v-if="!isSpectator" class="programming-dock">
+      <div class="dock-section dock-register">
+        <div class="dock-head">
+          <span class="dock-label">Register</span>
+          <span class="dock-count">{{ myProgram.filter(Boolean).length }} / {{ gameState.register_size }}</span>
+        </div>
         <div class="register-slots">
           <button
             v-for="(slot, i) in myProgram"
             :key="'slot-' + i"
             type="button"
             class="slot"
-            :class="{ filled: slot && !slot.hidden, active: canProgram }"
+            :class="[
+              cardTypeClass(slot?.type),
+              {
+                filled: slot && !slot.hidden,
+                active: canProgram,
+                pulsing: canProgram && !slot,
+              },
+            ]"
             :disabled="!canProgram"
+            :title="slot && !slot.hidden ? cardTitle(slot) : `Register slot ${i + 1}`"
             @click="onSlotClick(i)"
           >
             <span class="slot-num">{{ i + 1 }}</span>
-            <span v-if="slot" class="slot-card">{{ cardLabel(slot) }}</span>
+            <span v-if="slot && !slot.hidden" class="slot-card">{{ cardLabel(slot) }}</span>
             <span v-else class="slot-empty">+</span>
           </button>
         </div>
-        <button
-          type="button"
-          class="btn-primary lock-btn"
-          :disabled="!canProgram || !registerFilled"
-          @click="lockProgram"
-        >
-          {{ isLocked ? 'Locked' : 'Lock program' }}
-        </button>
       </div>
 
-      <div class="hand-row">
-        <span class="section-label">Hand</span>
+      <div class="dock-section dock-hand">
+        <div class="dock-head">
+          <span class="dock-label">Hand</span>
+          <span v-if="canProgram" class="dock-hint">Select a card, then a slot</span>
+        </div>
         <div class="hand-cards">
           <button
             v-for="card in myHand"
             :key="card.id"
             type="button"
             class="hand-card"
-            :class="{ selected: selectedCardId === card.id, hidden: card.hidden }"
+            :class="[
+              cardTypeClass(card.type),
+              { selected: selectedCardId === card.id, hidden: card.hidden },
+            ]"
             :disabled="!canProgram || card.hidden"
             :title="cardTitle(card)"
             @click="selectCard(card.id)"
           >
-            {{ card.hidden ? '?' : cardLabel(card) }}
+            <span class="hand-card-glyph">{{ card.hidden ? '?' : cardLabel(card) }}</span>
+            <span v-if="!card.hidden && card.type" class="hand-card-name">{{ CARD_LABELS[card.type] }}</span>
           </button>
         </div>
-        <p v-if="canProgram" class="hint">
-          Click a card, then a register slot. Click a filled slot to return the card to your hand.
-        </p>
+      </div>
+
+      <div class="dock-actions">
+        <button
+          type="button"
+          class="lock-btn"
+          :class="{ ready: registerFilled && canProgram, locked: isLocked }"
+          :disabled="!canProgram || !registerFilled"
+          @click="lockProgram"
+        >
+          <span class="lock-btn-icon">{{ isLocked ? '✓' : '🔒' }}</span>
+          <span>{{ isLocked ? 'Locked in' : 'Lock program' }}</span>
+        </button>
       </div>
     </section>
 
-    <section v-else class="spectator-note card">
+    <section v-else class="spectator-dock">
       <p>Spectating — you are not racing in this game.</p>
     </section>
   </div>
@@ -304,297 +398,697 @@ function cardTitle(card: { type?: string; hidden?: boolean }) {
 
 <style scoped>
 .roborally-board {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 0 1rem 1.5rem;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem 1rem;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.12), transparent),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.4) 0%, transparent 30%);
 }
 
-.game-status {
+/* ── Status bar ── */
+.status-bar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
+  padding: 0.85rem 1.15rem;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  backdrop-filter: blur(8px);
 }
 
-.status-main h2 {
-  margin: 0;
-  font-size: 1.1rem;
-}
-
-.status-main p {
-  margin: 0.25rem 0 0;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-.my-progress {
-  margin-left: auto;
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.resign-btn {
-  margin-left: auto;
-}
-
-.layout {
-  display: grid;
-  grid-template-columns: 180px 1fr;
-  gap: 1rem;
-}
-
-@media (max-width: 720px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-.sidebar h3 {
-  margin: 0 0 0.75rem;
-  font-size: 0.95rem;
-}
-
-.priority-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.priority-list li {
+.status-left {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.85rem;
+  gap: 0.85rem;
+  flex: 1;
+  min-width: 200px;
 }
 
-.rank {
-  width: 1.2rem;
+.phase-badge {
+  flex-shrink: 0;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.phase--programming {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.phase--waiting {
+  background: rgba(234, 179, 8, 0.18);
+  color: #fde047;
+  border: 1px solid rgba(234, 179, 8, 0.35);
+}
+
+.phase--executing {
+  background: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  animation: pulse-phase 1.5s ease-in-out infinite;
+}
+
+.phase--finished {
+  background: rgba(168, 85, 247, 0.18);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+@keyframes pulse-phase {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+.status-copy {
+  min-width: 0;
+}
+
+.map-name {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.status-line {
+  margin: 0.15rem 0 0;
+  font-size: 0.88rem;
   color: var(--text-muted);
 }
 
-.dot {
-  width: 0.65rem;
-  height: 0.65rem;
-  border-radius: 50%;
+.status-stats {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.stat-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.4rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  min-width: 4.5rem;
+}
+
+.stat-pill--accent {
+  border-color: rgba(250, 204, 21, 0.25);
+  background: rgba(250, 204, 21, 0.06);
+}
+
+.stat-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.stat-value {
+  font-size: 1rem;
+  font-weight: 800;
+  margin-top: 0.1rem;
+}
+
+.forfeit-btn {
   flex-shrink: 0;
 }
 
-.name {
+/* ── Main stage ── */
+.main-stage {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr min(240px, 24vw);
+  gap: 0.75rem;
 }
 
-.locked {
-  font-size: 0.75rem;
+@media (max-width: 860px) {
+  .main-stage {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+  }
+
+  .racers-panel {
+    max-height: 140px;
+  }
+
+  .racer-list {
+    flex-direction: row !important;
+    overflow-x: auto;
+  }
+
+  .racer-card {
+    min-width: 180px;
+  }
 }
 
-.cp {
-  color: var(--text-muted);
-  font-size: 0.75rem;
+.arena {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.6));
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 8px 32px rgba(0, 0, 0, 0.25);
 }
 
-.grid-wrap {
-  overflow: auto;
+.grid-frame {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.75rem;
 }
 
 .grid {
   display: grid;
-  gap: 2px;
-  min-width: min(100%, 520px);
-  aspect-ratio: 13 / 11;
-  max-height: 60vh;
+  gap: 3px;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
 .cell {
   position: relative;
-  background: #1e293b;
-  border-radius: 3px;
+  min-width: 0;
   min-height: 0;
+  border-radius: 5px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+.cell.floor-a {
+  background: linear-gradient(145deg, #1a2744, #152038);
+}
+
+.cell.floor-b {
+  background: linear-gradient(145deg, #162035, #121a2e);
+}
+
+.cell.floor::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  pointer-events: none;
+}
+
 .cell.wall {
-  background: #475569;
+  background: linear-gradient(160deg, #64748b, #334155);
+  box-shadow:
+    inset 0 2px 4px rgba(255, 255, 255, 0.12),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.35);
 }
 
 .cell.checkpoint {
-  background: #334155;
-  box-shadow: inset 0 0 0 2px rgba(250, 204, 21, 0.5);
+  box-shadow: inset 0 0 0 2px rgba(250, 204, 21, 0.45);
 }
 
 .cell.antenna {
-  background: #312e81;
+  background: radial-gradient(circle at center, #4338ca, #312e81);
 }
 
-.cp-label {
+.cp-ring {
   position: absolute;
-  top: 2px;
-  left: 3px;
-  font-size: 0.55rem;
-  font-weight: 700;
-  color: #facc15;
+  inset: 12%;
+  border-radius: 50%;
+  border: 2px solid rgba(250, 204, 21, 0.55);
+  background: rgba(250, 204, 21, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   z-index: 1;
 }
 
+.cp-num {
+  font-size: clamp(0.7rem, 1.4vmin, 1.15rem);
+  font-weight: 900;
+  color: #fde047;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.antenna-glow {
+  position: relative;
+  z-index: 1;
+  animation: antenna-pulse 2s ease-in-out infinite;
+}
+
 .antenna-icon {
-  font-size: 0.7rem;
-  opacity: 0.85;
+  font-size: clamp(0.9rem, 2vmin, 1.4rem);
+  filter: drop-shadow(0 0 6px rgba(129, 140, 248, 0.8));
+}
+
+@keyframes antenna-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.08); opacity: 1; }
 }
 
 .robot {
   position: relative;
-  width: 70%;
-  height: 70%;
+  width: 78%;
+  height: 78%;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2;
+  z-index: 3;
 }
 
-.robot-body {
+.robot--me .robot-shell {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.85),
+    0 0 14px var(--robot-color),
+    0 4px 10px rgba(0, 0, 0, 0.45);
+}
+
+.robot-shell {
   width: 100%;
   height: 100%;
-  border-radius: 4px;
-  background: var(--robot-color);
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+  background: linear-gradient(145deg, var(--robot-color), color-mix(in srgb, var(--robot-color) 70%, black));
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
 }
 
 .robot-arrow {
   position: absolute;
-  font-size: 0.75rem;
-  font-weight: 800;
+  font-size: clamp(0.9rem, 2.2vmin, 1.5rem);
+  font-weight: 900;
   color: white;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 
-.programming {
+/* ── Racers panel ── */
+.racers-panel {
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  overflow: hidden;
 }
 
-.section-label {
-  font-size: 0.8rem;
-  font-weight: 600;
+.panel-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.panel-sub {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
-.register-row,
-.hand-row {
+.racer-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  overflow-y: auto;
+  flex: 1;
 }
 
-.register-slots {
+.racer-card {
   display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid transparent;
+}
+
+.racer-card--me {
+  border-color: rgba(99, 102, 241, 0.45);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.racer-card--locked {
+  opacity: 0.85;
+}
+
+.racer-rank {
+  width: 1.25rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.racer-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.racer-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.racer-name {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.you-tag {
+  margin-left: 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #a5b4fc;
+}
+
+.cp-track {
+  margin-top: 0.3rem;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+  overflow: hidden;
+}
+
+.cp-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+
+.racer-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+
+.racer-cp {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.lock-icon {
+  font-size: 0.75rem;
+}
+
+/* ── Programming dock ── */
+.programming-dock {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr auto;
+  gap: 1rem;
+  align-items: end;
+  padding: 1rem 1.15rem;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.85));
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 960px) {
+  .programming-dock {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .dock-actions {
+    justify-content: stretch;
+  }
+
+  .lock-btn {
+    width: 100%;
+  }
+}
+
+.dock-section {
+  min-width: 0;
+}
+
+.dock-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.dock-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
+.dock-count,
+.dock-hint {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.register-slots,
+.hand-cards {
+  display: flex;
+  gap: 0.55rem;
   flex-wrap: wrap;
 }
 
+.slot,
+.hand-card {
+  border: none;
+  cursor: pointer;
+  color: white;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
 .slot {
-  width: 3.5rem;
-  height: 4rem;
-  border: 2px dashed var(--border);
-  border-radius: 8px;
-  background: var(--surface);
+  width: clamp(3.75rem, 6vw, 5rem);
+  height: clamp(4.75rem, 8vw, 6.25rem);
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.15rem;
-  cursor: pointer;
-  color: var(--text);
+  gap: 0.2rem;
+  background: rgba(30, 41, 59, 0.8);
+  border: 2px dashed rgba(148, 163, 184, 0.35);
+}
+
+.slot.pulsing.active:not(:disabled) {
+  animation: slot-pulse 2s ease-in-out infinite;
+}
+
+@keyframes slot-pulse {
+  0%, 100% { border-color: rgba(148, 163, 184, 0.35); }
+  50% { border-color: rgba(99, 102, 241, 0.55); }
 }
 
 .slot.active:not(:disabled):hover {
-  border-color: var(--accent);
+  transform: translateY(-2px);
+  border-color: rgba(99, 102, 241, 0.65);
 }
 
 .slot.filled {
   border-style: solid;
-  background: var(--surface-elevated);
+}
+
+.slot.card--move.filled {
+  background: linear-gradient(160deg, #059669, #047857);
+  border-color: rgba(110, 231, 183, 0.5);
+}
+
+.slot.card--turn.filled {
+  background: linear-gradient(160deg, #0284c7, #0369a1);
+  border-color: rgba(125, 211, 252, 0.5);
+}
+
+.slot.card--backup.filled {
+  background: linear-gradient(160deg, #d97706, #b45309);
+  border-color: rgba(253, 186, 116, 0.5);
 }
 
 .slot:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: default;
 }
 
 .slot-num {
-  font-size: 0.65rem;
-  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  opacity: 0.75;
 }
 
 .slot-card {
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: clamp(1.35rem, 2.5vw, 1.85rem);
+  font-weight: 900;
+  line-height: 1;
 }
 
 .slot-empty {
-  font-size: 1.25rem;
-  color: var(--text-muted);
-}
-
-.lock-btn {
-  align-self: flex-start;
-  margin-top: 0.25rem;
-}
-
-.hand-cards {
-  display: flex;
-  gap: 0.45rem;
-  flex-wrap: wrap;
+  font-size: 1.75rem;
+  font-weight: 300;
+  opacity: 0.45;
 }
 
 .hand-card {
-  min-width: 2.75rem;
-  height: 3.25rem;
-  padding: 0 0.5rem;
-  border-radius: 8px;
-  border: 2px solid var(--border);
-  background: linear-gradient(145deg, #334155, #1e293b);
-  color: white;
-  font-size: 1.1rem;
-  font-weight: 700;
-  cursor: pointer;
+  width: clamp(4rem, 6.5vw, 5.25rem);
+  height: clamp(5rem, 9vw, 6.75rem);
+  padding: 0.45rem 0.35rem;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+}
+
+.hand-card.card--move {
+  background: linear-gradient(165deg, #10b981, #065f46);
+}
+
+.hand-card.card--turn {
+  background: linear-gradient(165deg, #0ea5e9, #075985);
+}
+
+.hand-card.card--backup {
+  background: linear-gradient(165deg, #f59e0b, #92400e);
+}
+
+.hand-card.card--unknown,
+.hand-card.hidden {
+  background: linear-gradient(165deg, #64748b, #334155);
 }
 
 .hand-card.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.35);
+  transform: translateY(-4px) scale(1.04);
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.55),
+    0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
-.hand-card.hidden {
-  background: #64748b;
+.hand-card:not(:disabled):hover {
+  transform: translateY(-2px);
 }
 
 .hand-card:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.hand-card-glyph {
+  font-size: clamp(1.4rem, 2.8vw, 2rem);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.hand-card-name {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.15;
+  opacity: 0.9;
+}
+
+.dock-actions {
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 0.15rem;
+}
+
+.lock-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.85rem 1.35rem;
+  border-radius: 12px;
+  border: 2px solid rgba(148, 163, 184, 0.25);
+  background: rgba(30, 41, 59, 0.9);
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.lock-btn.ready:not(:disabled) {
+  background: linear-gradient(145deg, #6366f1, #4f46e5);
+  border-color: rgba(165, 180, 252, 0.5);
+  color: white;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+}
+
+.lock-btn.ready:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45);
+}
+
+.lock-btn.locked {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #86efac;
+}
+
+.lock-btn:disabled:not(.locked) {
   opacity: 0.5;
   cursor: default;
 }
 
-.hint {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--text-muted);
+.lock-btn-icon {
+  font-size: 1.1rem;
 }
 
-.spectator-note p {
+.spectator-dock {
+  flex-shrink: 0;
+  padding: 1rem 1.15rem;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  text-align: center;
+}
+
+.spectator-dock p {
   margin: 0;
   color: var(--text-muted);
 }

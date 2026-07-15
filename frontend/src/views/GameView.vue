@@ -99,6 +99,8 @@ const playerId = computed(() => playerStore.playerId)
 
 const isPoker = computed(() => room.value?.game_type === 'poker')
 
+const isRoboRally = computed(() => room.value?.game_type === 'roborally')
+
 const isFullscreenGame = computed(() =>
   Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value || roborallyState.value),
 )
@@ -178,6 +180,7 @@ function backToLobby() {
     :class="{
       'game-page--snake': isFullscreenGame,
       'game-page--poker': isPoker,
+      'game-page--roborally': isRoboRally,
     }"
   >
     <header
@@ -185,6 +188,7 @@ function backToLobby() {
       :class="{
         'game-header--snake': isFullscreenGame,
         'game-header--poker': isPoker,
+        'game-header--roborally': isRoboRally,
       }"
     >
       <div class="header-left">
@@ -195,7 +199,7 @@ function backToLobby() {
             <span class="connection-dot" />
             {{ connected ? 'Live' : 'Reconnecting' }}
           </span>
-          <span v-if="room?.game_type !== 'duel'" class="av-hint">💬 Voice chat optional — text Q&amp;A built in</span>
+          <span v-if="room?.game_type !== 'duel' && room?.game_type !== 'roborally'" class="av-hint">💬 Voice chat optional — text Q&amp;A built in</span>
         </div>
       </div>
       <div class="header-actions">
@@ -333,6 +337,22 @@ function backToLobby() {
   margin-bottom: 0;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border);
+}
+
+.game-page--roborally .game-header {
+  padding: 0.55rem 1rem;
+}
+
+.game-page--roborally .game-header h1 {
+  font-size: 1.15rem;
+}
+
+.game-header--roborally .header-meta {
+  margin-top: 0;
+}
+
+.game-page--roborally .av-hint {
+  display: none;
 }
 
 .game-header--snake {
