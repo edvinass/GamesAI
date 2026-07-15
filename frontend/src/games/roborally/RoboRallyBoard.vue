@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { RoboRallyGameState, Room } from '@/types'
+import { computed, ref, watch, onUnmounted } from 'vue'
+import type { RoboRallyGameState, RoboRallyRobot, Room } from '@/types'
 import { CARD_LABELS, CARD_SHORT, FACING_ARROW } from './rules'
 
 const props = defineProps<{
@@ -14,6 +14,153 @@ const emit = defineEmits<{
 }>()
 
 const selectedCardId = ref<string | null>(null)
+const displayRobots = ref<Record<string, RoboRallyRobot>>({})
+const isAnimating = ref(false)
+const animStepLabel = ref('')
+let animationToken = 0
+let animationTimer: ReturnType<typeof setTimeout> | null = null
+let lastReplayedLogKey = ''
+
+const EXEC_STEP_MS = 240
+
+interface ExecFrame {
+  player_id: string
+  before: { x: number; y: number; facing: RoboRallyRobot['facing'] }
+  after: { x: number; y: number; facing: RoboRallyRobot['facing'] }
+  card_type?: string
+  moved?: boolean
+}
+
+function cloneRobots(robots: Record<string, RoboRallyRobot>) {
+  return Object.fromEntries(
+    Object.entries(robots).map(([id, robot]) => [id, { ...robot }]),
+  )
+}
+
+function flattenExecutionLog(log: Array<Record<string, unknown>>): ExecFrame[] {
+  const frames: ExecFrame[] = []
+  for (const entry of log) {
+    if (entry.type !== 'register_step' || !Array.isArray(entry.robots)) continue
+    for (const raw of entry.robots as ExecFrame[]) {
+      if (raw.before && raw.after && raw.player_id) frames.push(raw)
+    }
+  }
+  return frames
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    animationTimer = setTimeout(resolve, ms)
+  })
+}
+
+async function replayExecution(log: Array<Record<string, unknown>>) {
+  const token = ++animationToken
+  const frames = flattenExecutionLog(log)
+  if (!frames.length) {
+    displayRobots.value = cloneRobots(props.gameState.robots)
+    isAnimating.value = false
+    animStepLabel.value = ''
+    return
+  }
+
+  isAnimating.value = true
+  const positions: Record<string, RoboRallyRobot> = {}
+
+  for (const frame of frames) {
+    if (positions[frame.player_id]) continue
+    const serverRobot = props.gameState.robots[frame.player_id]
+    positions[frame.player_id] = {
+      x: frame.before.x,
+      y: frame.before.y,
+      facing: frame.before.facing,
+      checkpoints_reached: serverRobot?.checkpoints_reached ?? 0,
+    }
+  }
+
+  for (const player of props.gameState.players) {
+    if (!positions[player.id] && props.gameState.robots[player.id]) {
+      positions[player.id] = { ...props.gameState.robots[player.id] }
+    }
+  }
+
+  displayRobots.value = cloneRobots(positions)
+
+  for (const frame of frames) {
+    if (token !== animationToken) return
+
+    const cardName = frame.card_type ? (CARD_LABELS[frame.card_type] ?? frame.card_type) : 'Card'
+    animStepLabel.value = `${cardName}${frame.moved === false ? ' (blocked)' : ''}`
+
+    await sleep(EXEC_STEP_MS)
+    if (token !== animationToken) return
+
+    const current = displayRobots.value[frame.player_id]
+    if (!current) continue
+
+    displayRobots.value = {
+      ...displayRobots.value,
+      [frame.player_id]: {
+        ...current,
+        x: frame.after.x,
+        y: frame.after.y,
+        facing: frame.after.facing,
+      },
+    }
+  }
+
+  if (token !== animationToken) return
+  displayRobots.value = cloneRobots(props.gameState.robots)
+  isAnimating.value = false
+  animStepLabel.value = ''
+}
+
+watch(
+  () => props.gameState.execution_log,
+  (log) => {
+    if (animationTimer) {
+      clearTimeout(animationTimer)
+      animationTimer = null
+    }
+    if (log?.length) {
+      const logKey = JSON.stringify(log)
+      if (logKey === lastReplayedLogKey) {
+        displayRobots.value = cloneRobots(props.gameState.robots)
+        return
+      }
+      lastReplayedLogKey = logKey
+      void replayExecution(log)
+    } else {
+      lastReplayedLogKey = ''
+      animationToken += 1
+      displayRobots.value = cloneRobots(props.gameState.robots)
+      isAnimating.value = false
+      animStepLabel.value = ''
+    }
+  },
+  { deep: true, immediate: true },
+)
+
+watch(
+  () => props.gameState.robots,
+  (robots) => {
+    if (!isAnimating.value) {
+      displayRobots.value = cloneRobots(robots)
+    }
+  },
+  { deep: true },
+)
+
+onUnmounted(() => {
+  animationToken += 1
+  if (animationTimer) clearTimeout(animationTimer)
+})
+
+const robotsForDisplay = computed(() =>
+  isAnimating.value || Object.keys(displayRobots.value).length
+    ? displayRobots.value
+    : props.gameState.robots,
+)
 
 const myPlayer = computed(() =>
   props.gameState.players.find((p) => p.id === props.playerId),
@@ -34,7 +181,8 @@ const canProgram = computed(
     props.gameState.phase === 'programming' &&
     !isLocked.value &&
     !props.gameState.winner &&
-    !isSpectator.value,
+    !isSpectator.value &&
+    !isAnimating.value,
 )
 
 const registerFilled = computed(() =>
@@ -64,7 +212,7 @@ const checkpointMap = computed(() => {
 const robotAt = computed(() => {
   const map = new Map<string, { playerId: string; facing: string; color: string; nickname: string }>()
   for (const player of props.gameState.players) {
-    const robot = props.gameState.robots[player.id]
+    const robot = robotsForDisplay.value[player.id]
     if (robot) {
       map.set(`${robot.x},${robot.y}`, {
         playerId: player.id,
@@ -82,6 +230,7 @@ const rows = computed(() => Array.from({ length: board.value.height }, (_, i) =>
 
 const phaseLabel = computed(() => {
   const gs = props.gameState
+  if (isAnimating.value) return 'Executing'
   if (gs.winner) return 'Finished'
   if (gs.phase === 'executing') return 'Executing'
   if (isLocked.value) return 'Waiting'
@@ -90,6 +239,7 @@ const phaseLabel = computed(() => {
 
 const phaseClass = computed(() => {
   const gs = props.gameState
+  if (isAnimating.value) return 'phase--executing'
   if (gs.winner) return 'phase--finished'
   if (gs.phase === 'executing') return 'phase--executing'
   if (isLocked.value) return 'phase--waiting'
@@ -98,6 +248,9 @@ const phaseClass = computed(() => {
 
 const statusText = computed(() => {
   const gs = props.gameState
+  if (isAnimating.value && animStepLabel.value) {
+    return animStepLabel.value
+  }
   if (gs.winner) {
     const winner = gs.players.find((p) => p.id === gs.winner)
     if (gs.win_reason === 'checkpoints') {
@@ -121,7 +274,7 @@ const priorityList = computed(() =>
   props.gameState.register_order.map((pid, i) => ({
     rank: i + 1,
     player: props.gameState.players.find((p) => p.id === pid),
-    robot: props.gameState.robots[pid],
+    robot: robotsForDisplay.value[pid] ?? props.gameState.robots[pid],
     locked: props.gameState.lock_status[pid] ?? false,
     isMe: pid === props.playerId,
   })),
@@ -272,7 +425,10 @@ function cardTypeClass(type?: string): string {
                 <div
                   v-if="robotOn(x, y)"
                   class="robot"
-                  :class="{ 'robot--me': robotOn(x, y)?.playerId === playerId }"
+                  :class="{
+                    'robot--me': robotOn(x, y)?.playerId === playerId,
+                    'robot--animating': isAnimating,
+                  }"
                   :style="{ '--robot-color': robotOn(x, y)?.color }"
                   :title="robotOn(x, y)?.nickname"
                 >
@@ -686,6 +842,10 @@ function cardTypeClass(type?: string): string {
     0 0 0 2px rgba(255, 255, 255, 0.85),
     0 0 14px var(--robot-color),
     0 4px 10px rgba(0, 0, 0, 0.45);
+}
+
+.robot--animating .robot-shell {
+  transition: transform 0.2s ease;
 }
 
 .robot-shell {

@@ -87,3 +87,119 @@ def test_resign_two_player():
     state, events = engine.apply_action(state, {"type": "resign"}, {"id": "p1"})
     assert state["winner"] == "p2"
     assert state["win_reason"] == "resign"
+
+
+def test_move_cards_interleave_by_priority():
+    """Move 2/3 must advance one square at a time in priority order, not per-robot."""
+    from app.games.roborally.simulation import execute_register
+
+    board = {
+        "width": 11,
+        "height": 9,
+        "walls": (
+            [[x, 0] for x in range(11)]
+            + [[x, 8] for x in range(11)]
+            + [[0, y] for y in range(1, 8)]
+            + [[10, y] for y in range(1, 8)]
+        ),
+        "checkpoints": [],
+        "antenna": [5, 4],
+    }
+    robots = {
+        "p1": {"x": 2, "y": 7, "facing": "N", "checkpoints_reached": 0},
+        "p2": {"x": 2, "y": 6, "facing": "N", "checkpoints_reached": 0},
+    }
+    programs = {
+        "p1": [{"id": "1", "type": "move_1"}],
+        "p2": [{"id": "2", "type": "move_1"}],
+    }
+
+    # Lower priority p1 goes first: blocked by p2, only p2 moves.
+    state_blocked = {
+        "settings": {"register_size": 1},
+        "board": board,
+        "robots": {k: dict(v) for k, v in robots.items()},
+        "register_order": ["p1", "p2"],
+        "programs": programs,
+    }
+    execute_register(state_blocked)
+    assert state_blocked["robots"]["p1"]["y"] == 7
+    assert state_blocked["robots"]["p2"]["y"] == 5
+
+    # Higher priority p2 goes first: p2 vacates, then p1 can enter former p2 square.
+    state_chain = {
+        "settings": {"register_size": 1},
+        "board": board,
+        "robots": {k: dict(v) for k, v in robots.items()},
+        "register_order": ["p2", "p1"],
+        "programs": programs,
+    }
+    execute_register(state_chain)
+    assert state_chain["robots"]["p2"]["y"] == 5
+    assert state_chain["robots"]["p1"]["y"] == 6
+
+
+def test_move_three_uses_three_substeps():
+    from app.games.roborally.simulation import execute_register
+
+    board = {
+        "width": 11,
+        "height": 9,
+        "walls": (
+            [[x, 0] for x in range(11)]
+            + [[x, 8] for x in range(11)]
+            + [[0, y] for y in range(1, 8)]
+            + [[10, y] for y in range(1, 8)]
+        ),
+        "checkpoints": [],
+        "antenna": [5, 4],
+    }
+    robots = {"p1": {"x": 5, "y": 7, "facing": "N", "checkpoints_reached": 0}}
+    programs = {"p1": [{"id": "1", "type": "move_3"}]}
+    state = {
+        "settings": {"register_size": 1},
+        "board": board,
+        "robots": robots,
+        "register_order": ["p1"],
+        "programs": programs,
+    }
+    _, log = execute_register(state)
+    assert state["robots"]["p1"]["y"] == 4
+    step_events = log[0]["robots"]
+    assert len(step_events) == 3
+    assert all(e["moved"] for e in step_events)
+
+
+def test_turn_executes_in_priority_order():
+    from app.games.roborally.simulation import execute_register
+
+    board = {
+        "width": 11,
+        "height": 9,
+        "walls": (
+            [[x, 0] for x in range(11)]
+            + [[x, 8] for x in range(11)]
+            + [[0, y] for y in range(1, 8)]
+            + [[10, y] for y in range(1, 8)]
+        ),
+        "checkpoints": [],
+        "antenna": [5, 4],
+    }
+    robots = {
+        "p1": {"x": 2, "y": 7, "facing": "N", "checkpoints_reached": 0},
+        "p2": {"x": 4, "y": 7, "facing": "N", "checkpoints_reached": 0},
+    }
+    programs = {
+        "p1": [{"id": "1", "type": "turn_right"}],
+        "p2": [{"id": "2", "type": "turn_left"}],
+    }
+    state = {
+        "settings": {"register_size": 1},
+        "board": board,
+        "robots": robots,
+        "register_order": ["p1", "p2"],
+        "programs": programs,
+    }
+    execute_register(state)
+    assert state["robots"]["p1"]["facing"] == "E"
+    assert state["robots"]["p2"]["facing"] == "W"

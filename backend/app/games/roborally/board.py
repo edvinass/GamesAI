@@ -37,7 +37,7 @@ def in_bounds(x: int, y: int, width: int, height: int) -> bool:
 def is_wall(board: dict[str, Any], x: int, y: int) -> bool:
     if not in_bounds(x, y, board["width"], board["height"]):
         return True
-    return [x, y] in board["walls"]
+    return (x, y) in {tuple(w) for w in board.get("walls", [])}
 
 
 def checkpoint_at(board: dict[str, Any], x: int, y: int) -> int | None:
