@@ -34,6 +34,7 @@ interface ExecFrame {
   moved?: boolean
   step?: number
   phase?: 'card' | 'board'
+  checkpoints_reached?: number
 }
 
 function cloneRobots(robots: Record<string, RoboRallyRobot>) {
@@ -175,8 +176,8 @@ async function replayExecution(log: Array<Record<string, unknown>>) {
           y: frame.after.y,
           facing: frame.after.facing,
           checkpoints_reached:
-            typeof (frame as { checkpoints_reached?: number }).checkpoints_reached === 'number'
-              ? (frame as { checkpoints_reached: number }).checkpoints_reached
+            typeof frame.checkpoints_reached === 'number'
+              ? frame.checkpoints_reached
               : current.checkpoints_reached,
         },
       }
@@ -382,14 +383,6 @@ const crusherMap = computed(() => {
   return map
 })
 
-const laserMap = computed(() => {
-  const map = new Map<string, { dir: string; strength: number }>()
-  for (const laser of board.value.lasers ?? []) {
-    map.set(`${laser.x},${laser.y}`, { dir: laser.dir, strength: laser.strength ?? 1 })
-  }
-  return map
-})
-
 const DELTA: Record<string, [number, number]> = {
   N: [0, -1],
   E: [1, 0],
@@ -559,10 +552,6 @@ function pusherAt(x: number, y: number) {
 
 function crusherAt(x: number, y: number) {
   return crusherMap.value.get(`${x},${y}`)
-}
-
-function laserAt(x: number, y: number) {
-  return laserMap.value.get(`${x},${y}`)
 }
 
 function laserBeamsAt(x: number, y: number) {
@@ -830,7 +819,10 @@ function cardTypeClass(type?: string): string {
                   <span class="crusher-regs">{{ crusherAt(x, y)!.join('') }}</span>
                 </div>
 
-                <template v-for="(beam, bi) in laserBeamsAt(x, y)" :key="`laser-${x}-${y}-${bi}`">
+                <template
+                  v-for="beam in laserBeamsAt(x, y)"
+                  :key="`laser-${x}-${y}-${beam.dir}-${beam.role}-${beam.strength}`"
+                >
                   <div
                     class="laser-fx"
                     :class="[
