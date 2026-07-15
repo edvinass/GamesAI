@@ -390,6 +390,13 @@ const laserMap = computed(() => {
   return map
 })
 
+const DELTA: Record<string, [number, number]> = {
+  N: [0, -1],
+  E: [1, 0],
+  S: [0, 1],
+  W: [-1, 0],
+}
+
 const robotAt = computed(() => {
   const map = new Map<string, { playerId: string; facing: string; color: string; nickname: string }>()
   for (const player of props.gameState.players) {
@@ -403,6 +410,58 @@ const robotAt = computed(() => {
       })
     }
   }
+  return map
+})
+
+/** Full board-laser paths for rendering (emitters + beam cells until wall/robot). */
+const laserBeamCells = computed(() => {
+  const map = new Map<
+    string,
+    Array<{ dir: string; strength: number; role: 'emitter' | 'beam' | 'impact' }>
+  >()
+
+  const push = (
+    x: number,
+    y: number,
+    entry: { dir: string; strength: number; role: 'emitter' | 'beam' | 'impact' },
+  ) => {
+    const key = `${x},${y}`
+    const list = map.get(key) ?? []
+    list.push(entry)
+    map.set(key, list)
+  }
+
+  const width = board.value.width
+  const height = board.value.height
+  const walls = edgeWallSet.value
+  const robots = robotAt.value
+
+  for (const laser of board.value.lasers ?? []) {
+    const lx = laser.x
+    const ly = laser.y
+    const dir = String(laser.dir)
+    const strength = laser.strength ?? 1
+    const delta = DELTA[dir]
+    if (!delta) continue
+
+    push(lx, ly, { dir, strength, role: 'emitter' })
+
+    if (walls.has(`${lx},${ly},${dir}`)) continue
+
+    let x = lx + delta[0]
+    let y = ly + delta[1]
+
+    while (x >= 0 && x < width && y >= 0 && y < height) {
+      const key = `${x},${y}`
+      const hitRobot = robots.has(key)
+      push(x, y, { dir, strength, role: hitRobot ? 'impact' : 'beam' })
+      if (hitRobot) break
+      if (walls.has(`${x},${y},${dir}`)) break
+      x += delta[0]
+      y += delta[1]
+    }
+  }
+
   return map
 })
 
@@ -504,6 +563,10 @@ function crusherAt(x: number, y: number) {
 
 function laserAt(x: number, y: number) {
   return laserMap.value.get(`${x},${y}`)
+}
+
+function laserBeamsAt(x: number, y: number) {
+  return laserBeamCells.value.get(`${x},${y}`) ?? []
 }
 
 function isRegisterLocked(i: number): boolean {
@@ -767,15 +830,27 @@ function cardTypeClass(type?: string): string {
                   <span class="crusher-regs">{{ crusherAt(x, y)!.join('') }}</span>
                 </div>
 
-                <div
-                  v-if="laserAt(x, y)"
-                  class="laser-emitter"
-                  :class="`laser--${laserAt(x, y)!.dir}`"
-                  :title="`Laser ×${laserAt(x, y)!.strength}`"
-                >
-                  <span class="laser-gun" />
-                  <span class="laser-beam" />
-                </div>
+                <template v-for="(beam, bi) in laserBeamsAt(x, y)" :key="`laser-${x}-${y}-${bi}`">
+                  <div
+                    class="laser-fx"
+                    :class="[
+                      `laser--${beam.dir}`,
+                      `laser-role--${beam.role}`,
+                      { 'laser--strong': beam.strength >= 2 },
+                    ]"
+                    :title="beam.role === 'emitter' ? `Board laser ×${beam.strength}` : 'Laser beam'"
+                  >
+                    <span v-if="beam.role === 'emitter'" class="laser-housing">
+                      <span class="laser-lens" />
+                      <span class="laser-vents" />
+                    </span>
+                    <span class="laser-core" />
+                    <span class="laser-glow" />
+                    <span class="laser-spark" />
+                    <span v-if="beam.role === 'impact'" class="laser-impact" />
+                    <span v-if="beam.role === 'emitter'" class="laser-strength">{{ beam.strength }}</span>
+                  </div>
+                </template>
 
                 <div v-if="isPit(x, y)" class="pit-hole" title="Pit">
                   <span class="pit-hatch" />
@@ -1487,56 +1562,303 @@ function cardTypeClass(type?: string): string {
   50% { transform: scaleY(0.72); }
 }
 
-/* ── Lasers ── */
-.laser-emitter {
+/* ── Lasers (full beam path) ── */
+.laser-fx {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 2;
+  pointer-events: none;
+  --laser: #ff3b5c;
+  --laser-soft: rgba(255, 59, 92, 0.55);
+  --laser-core: #ffe4ea;
+}
+
+.laser--strong {
+  --laser: #ff1f4b;
+  --laser-soft: rgba(255, 31, 75, 0.75);
+  --laser-core: #fff5f7;
+}
+
+.laser-housing {
+  position: absolute;
+  width: 34%;
+  height: 42%;
+  background:
+    linear-gradient(160deg, #94a3b8 0%, #475569 40%, #1e293b 100%);
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.8),
+    0 0 10px var(--laser-soft);
+  z-index: 3;
+  overflow: hidden;
+}
+
+.laser--E .laser-housing { left: 2%; top: 29%; }
+.laser--W .laser-housing { right: 2%; top: 29%; }
+.laser--N .laser-housing {
+  left: 29%;
+  bottom: 2%;
+  width: 42%;
+  height: 34%;
+}
+.laser--S .laser-housing {
+  left: 29%;
+  top: 2%;
+  width: 42%;
+  height: 34%;
+}
+
+.laser-lens {
+  position: absolute;
+  background: radial-gradient(circle at 40% 40%, #fff, var(--laser) 45%, #7f1d1d 80%);
+  box-shadow: 0 0 8px var(--laser);
+  border-radius: 50%;
+  animation: laser-lens-pulse 1.1s ease-in-out infinite;
+}
+
+.laser--E .laser-lens { right: 4%; top: 28%; width: 36%; height: 44%; }
+.laser--W .laser-lens { left: 4%; top: 28%; width: 36%; height: 44%; }
+.laser--N .laser-lens { top: 4%; left: 28%; width: 44%; height: 36%; }
+.laser--S .laser-lens { bottom: 4%; left: 28%; width: 44%; height: 36%; }
+
+.laser-vents {
+  position: absolute;
+  inset: 18% 12%;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 2px,
+      rgba(15, 23, 42, 0.55) 2px 3px
+    );
+  opacity: 0.7;
   pointer-events: none;
 }
 
-.laser-gun {
+.laser--N .laser-vents,
+.laser--S .laser-vents {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 2px,
+      rgba(15, 23, 42, 0.55) 2px 3px
+    );
+}
+
+.laser-core,
+.laser-glow,
+.laser-spark {
   position: absolute;
+  border-radius: 999px;
+}
+
+/* Continuous beam across cells */
+.laser--E .laser-core,
+.laser--W .laser-core {
+  top: 44%;
+  height: 12%;
+  width: 100%;
+  left: 0;
+}
+.laser--N .laser-core,
+.laser--S .laser-core {
+  left: 44%;
+  width: 12%;
+  height: 100%;
+  top: 0;
+}
+
+.laser-core {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--laser-core) 20%,
+    #fff 50%,
+    var(--laser-core) 80%,
+    transparent 100%
+  );
+  box-shadow:
+    0 0 4px #fff,
+    0 0 10px var(--laser),
+    0 0 18px var(--laser-soft);
+  opacity: 0.95;
+  z-index: 1;
+  animation: laser-core-pulse 0.7s ease-in-out infinite;
+}
+
+.laser--N .laser-core,
+.laser--S .laser-core {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--laser-core) 20%,
+    #fff 50%,
+    var(--laser-core) 80%,
+    transparent 100%
+  );
+}
+
+.laser--strong .laser-core {
+  height: 18%;
+}
+.laser--strong.laser--N .laser-core,
+.laser--strong.laser--S .laser-core {
+  width: 18%;
+  height: 100%;
+}
+
+.laser--E .laser-glow,
+.laser--W .laser-glow {
+  top: 30%;
+  height: 40%;
+  width: 100%;
+  left: 0;
+}
+.laser--N .laser-glow,
+.laser--S .laser-glow {
+  left: 30%;
+  width: 40%;
+  height: 100%;
+  top: 0;
+}
+
+.laser-glow {
+  background: var(--laser-soft);
+  filter: blur(3px);
+  opacity: 0.55;
+  z-index: 0;
+  animation: laser-glow-breathe 1.2s ease-in-out infinite;
+}
+
+.laser--E .laser-spark,
+.laser--W .laser-spark {
+  top: 42%;
+  height: 16%;
   width: 28%;
+}
+.laser--N .laser-spark,
+.laser--S .laser-spark {
+  left: 42%;
+  width: 16%;
   height: 28%;
-  background: linear-gradient(145deg, #fb7185, #be123c);
-  border-radius: 2px;
-  box-shadow: 0 0 6px rgba(244, 63, 94, 0.7);
 }
 
-.laser--E .laser-gun { left: 6%; top: 36%; }
-.laser--W .laser-gun { right: 6%; top: 36%; }
-.laser--N .laser-gun { bottom: 6%; left: 36%; }
-.laser--S .laser-gun { top: 6%; left: 36%; }
+.laser-spark {
+  background: linear-gradient(90deg, transparent, #fff, transparent);
+  opacity: 0.85;
+  z-index: 2;
+  animation: laser-spark-x 0.55s linear infinite;
+}
 
-.laser-beam {
+.laser--W .laser-spark {
+  animation-name: laser-spark-x-rev;
+}
+.laser--N .laser-spark,
+.laser--S .laser-spark {
+  background: linear-gradient(180deg, transparent, #fff, transparent);
+  animation-name: laser-spark-y;
+}
+.laser--N .laser-spark {
+  animation-name: laser-spark-y-rev;
+}
+
+.laser--E.laser-role--emitter .laser-core,
+.laser--E.laser-role--emitter .laser-glow,
+.laser--E.laser-role--emitter .laser-spark {
+  left: 32%;
+  width: 68%;
+}
+.laser--W.laser-role--emitter .laser-core,
+.laser--W.laser-role--emitter .laser-glow,
+.laser--W.laser-role--emitter .laser-spark {
+  right: 32%;
+  left: auto;
+  width: 68%;
+}
+.laser--S.laser-role--emitter .laser-core,
+.laser--S.laser-role--emitter .laser-glow,
+.laser--S.laser-role--emitter .laser-spark {
+  top: 32%;
+  height: 68%;
+}
+.laser--N.laser-role--emitter .laser-core,
+.laser--N.laser-role--emitter .laser-glow,
+.laser--N.laser-role--emitter .laser-spark {
+  bottom: 32%;
+  top: auto;
+  height: 68%;
+}
+
+.laser-strength {
   position: absolute;
-  background: linear-gradient(90deg, rgba(251, 113, 133, 0.15), rgba(251, 113, 133, 0.85), rgba(251, 113, 133, 0.15));
-  box-shadow: 0 0 6px rgba(251, 113, 133, 0.8);
-  animation: laser-flicker 0.9s ease-in-out infinite;
+  font-size: clamp(0.45rem, 1vmin, 0.7rem);
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 4px var(--laser);
+  z-index: 4;
+}
+.laser--E .laser-strength { left: 6%; top: 6%; }
+.laser--W .laser-strength { right: 6%; top: 6%; }
+.laser--N .laser-strength { left: 6%; bottom: 6%; }
+.laser--S .laser-strength { left: 6%; top: 6%; }
+
+.laser-impact {
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 18%, var(--laser) 40%, transparent 70%);
+  box-shadow: 0 0 14px var(--laser);
+  animation: laser-impact-flash 0.45s ease-in-out infinite;
+  z-index: 3;
 }
 
-.laser--E .laser-beam,
-.laser--W .laser-beam {
-  top: 46%;
-  height: 8%;
-  width: 70%;
+@keyframes laser-lens-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.35); }
 }
-.laser--E .laser-beam { left: 28%; }
-.laser--W .laser-beam { right: 28%; }
-.laser--N .laser-beam,
-.laser--S .laser-beam {
-  left: 46%;
-  width: 8%;
-  height: 70%;
-  background: linear-gradient(180deg, rgba(251, 113, 133, 0.15), rgba(251, 113, 133, 0.85), rgba(251, 113, 133, 0.15));
-}
-.laser--N .laser-beam { bottom: 28%; }
-.laser--S .laser-beam { top: 28%; }
 
-@keyframes laser-flicker {
-  0%, 100% { opacity: 0.55; }
+@keyframes laser-core-pulse {
+  0%, 100% { opacity: 0.75; }
   50% { opacity: 1; }
+}
+
+@keyframes laser-glow-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.65; }
+}
+
+@keyframes laser-spark-x {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(420%); }
+}
+
+@keyframes laser-spark-x-rev {
+  from { transform: translateX(420%); }
+  to { transform: translateX(-120%); }
+}
+
+@keyframes laser-spark-y {
+  from { transform: translateY(-120%); }
+  to { transform: translateY(420%); }
+}
+
+@keyframes laser-spark-y-rev {
+  from { transform: translateY(420%); }
+  to { transform: translateY(-120%); }
+}
+
+@keyframes laser-impact-flash {
+  0%, 100% { transform: scale(0.85); opacity: 0.7; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .laser-lens,
+  .laser-core,
+  .laser-glow,
+  .laser-spark,
+  .laser-impact {
+    animation: none !important;
+  }
 }
 
 /* ── Pits ── */
@@ -1613,8 +1935,7 @@ function cardTypeClass(type?: string): string {
   .belt-track,
   .gear-disc,
   .pusher-arm,
-  .crusher-plate,
-  .laser-beam {
+  .crusher-plate {
     animation: none !important;
   }
 }
