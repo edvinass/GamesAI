@@ -214,6 +214,7 @@ export interface DuelStatBlock {
 
 export interface DuelLastHit {
   player_id: string
+  shooter_id?: string
   damage: number
   crit: boolean
   blocked?: boolean

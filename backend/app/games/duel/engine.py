@@ -330,7 +330,7 @@ class DuelEngine(GamePlugin):
             1, min(4, int(merged.get("ai_reaction_interval_ticks", 2)))
         )
 
-        merged["powerup_draft_enabled"] = bool(merged.get("powerup_draft_enabled", False))
+        merged["powerup_draft_enabled"] = False
         merged["sudden_death_after_round"] = max(
             2, min(6, int(merged.get("sudden_death_after_round", 3)))
         )
@@ -550,6 +550,7 @@ class DuelEngine(GamePlugin):
         obstacles: list[dict],
         playable_y_min: int,
         playable_y_max: int,
+        color_index: int | None = None,
     ) -> dict[str, Any]:
         side = "left" if index == 0 else "right"
         x = 1 if side == "left" else grid_width - 2
@@ -568,7 +569,7 @@ class DuelEngine(GamePlugin):
                 "charging": False,
                 "charge_ticks": 0,
                 "cooldown_until_tick": 0,
-                "color": FIGHTER_COLORS[index % len(FIGHTER_COLORS)],
+                "color": FIGHTER_COLORS[(color_index if color_index is not None else index) % len(FIGHTER_COLORS)],
                 "stored_powerup": None,
                 "activating_powerup": False,
                 "powerup_activation_ticks": 0,
@@ -603,7 +604,7 @@ class DuelEngine(GamePlugin):
                 "charging": False,
                 "charge_ticks": 0,
                 "cooldown_until_tick": 0,
-                "color": FIGHTER_COLORS[index % len(FIGHTER_COLORS)],
+                "color": FIGHTER_COLORS[(color_index if color_index is not None else index) % len(FIGHTER_COLORS)],
                 "stored_powerup": None,
                 "activating_powerup": False,
                 "powerup_activation_ticks": 0,
@@ -636,7 +637,7 @@ class DuelEngine(GamePlugin):
             "charging": False,
             "charge_ticks": 0,
             "cooldown_until_tick": 0,
-            "color": FIGHTER_COLORS[index % len(FIGHTER_COLORS)],
+            "color": FIGHTER_COLORS[(color_index if color_index is not None else index) % len(FIGHTER_COLORS)],
             "stored_powerup": None,
             "activating_powerup": False,
             "powerup_activation_ticks": 0,
@@ -1291,6 +1292,7 @@ class DuelEngine(GamePlugin):
         crit: bool,
         blocked: bool,
         hit_y: int | None = None,
+        shooter_id: str | None = None,
     ) -> None:
         hit: dict[str, Any] = {
             "player_id": player_id,
@@ -1300,6 +1302,8 @@ class DuelEngine(GamePlugin):
         }
         if hit_y is not None:
             hit["y"] = hit_y
+        if shooter_id is not None:
+            hit["shooter_id"] = shooter_id
         state["last_hit"] = hit
         state.setdefault("tick_hits", []).append(hit)
 
@@ -1318,11 +1322,11 @@ class DuelEngine(GamePlugin):
         effects = fighter.get("effects", {})
         if tick < effects.get("shield_until", 0):
             events.append({"type": "shield_blocked", "player_id": target_id, "shooter_id": owner_id})
-            self._record_hit(state, target_id, 0, False, True, hit_y)
+            self._record_hit(state, target_id, 0, False, True, hit_y, shooter_id=owner_id)
             return False
 
         fighter["hp"] = max(0, fighter.get("hp", 1) - damage)
-        self._record_hit(state, target_id, damage, crit, False, hit_y)
+        self._record_hit(state, target_id, damage, crit, False, hit_y, shooter_id=owner_id)
         self._update_match_stats(
             state, owner_id, target_id, damage=damage, crit=crit, kind="hit"
         )
@@ -2297,6 +2301,7 @@ class DuelEngine(GamePlugin):
         state["round_stats"] = self._empty_round_stats(state.get("players", []))
 
         players = list(state["players"])
+        color_index_by_id = {player["id"]: i for i, player in enumerate(state["players"])}
         swap_every = int(settings.get("side_swap_every_n_rounds", 0))
         if swap_every > 0 and round_num > 1 and round_num % swap_every == 0:
             players.reverse()
@@ -2312,6 +2317,7 @@ class DuelEngine(GamePlugin):
                 state["obstacles"],
                 state["playable_y_min"],
                 state["playable_y_max"],
+                color_index=color_index_by_id[pid],
             )
 
         loadout = settings.get("quick_duel_loadout", "none")
@@ -2435,7 +2441,6 @@ class DuelEngine(GamePlugin):
         self._maybe_shrink_arena(state, events)
         self._apply_hazard_damage(state, events)
         self._maybe_spawn_powerup(state, events)
-        self._process_burst_shots(state)
 
         grid_width = state["grid_width"]
         grid_height = state["grid_height"]
@@ -2474,6 +2479,7 @@ class DuelEngine(GamePlugin):
                 )
             self._try_shoot(state, fighter, pid)
 
+        self._process_burst_shots(state)
         self._clamp_fighters_to_playable(state)
         self._try_fighter_pickup_powerups(state, events)
 

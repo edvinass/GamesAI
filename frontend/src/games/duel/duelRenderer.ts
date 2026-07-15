@@ -124,10 +124,6 @@ function rgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t
-}
-
 function lighten(hex: string, amount: number): string {
   const [r, g, b] = hexToRgb(hex)
   return `rgb(${Math.min(255, r + 255 * amount)}, ${Math.min(255, g + 255 * amount)}, ${Math.min(255, b + 255 * amount)})`
@@ -258,12 +254,6 @@ export class DuelRenderer {
       this.hitFlashUntil = Date.now() + (hit.blocked ? 120 : 220)
       if (hit.crit && isHitStopEnabled()) {
         /* brief hit-stop handled via shake timing */
-      }
-    } else if (hit.damage > 0) {
-      const shakeScale = loadShakeIntensity()
-      if (shakeScale > 0) {
-        this.shakeUntil = Date.now() + 140
-        this.shakeIntensity = 5 * shakeScale
       }
     }
   }
@@ -496,38 +486,21 @@ export class DuelRenderer {
     }
   }
 
-  private updateFighterPoses(state: DuelGameState, viewerId: string, now: number) {
-    const elapsed = Math.max(0, now - this.stateSnapshotAt)
-    const progress = Math.min(0.95, elapsed / this.tickMs)
-    const barCount = state.fighter_height ?? 3
-    const minY = state.playable_y_min
-    const maxTop = Math.min(
-      state.grid_height - barCount,
-      state.playable_y_max - barCount + 1,
-    )
-
+  private updateFighterPoses(state: DuelGameState, _viewerId: string, _now: number) {
     for (const [pid, fighter] of Object.entries(state.fighters)) {
-      let targetY = fighter.display_y ?? fighter.y
-      if (
-        pid === viewerId &&
-        fighter.alive &&
-        fighter.move_direction !== 'stop' &&
-        state.phase === 'playing'
-      ) {
-        const delta = fighter.move_direction === 'down' ? progress : -progress
-        targetY = Math.max(minY, Math.min(maxTop, fighter.y + delta))
-      }
-
+      const targetY = fighter.display_y ?? fighter.y
       const existing = this.fighterPoses.get(pid)
       if (!existing) {
-        this.fighterPoses.set(pid, { y: targetY, targetY, moveDirection: fighter.move_direction })
+        this.fighterPoses.set(pid, {
+          y: targetY,
+          targetY,
+          moveDirection: fighter.move_direction,
+        })
         continue
       }
       existing.targetY = targetY
       existing.moveDirection = fighter.move_direction
-      const lerpFactor = pid === viewerId ? 0.58 : 0.34
-      existing.y = lerp(existing.y, existing.targetY, lerpFactor)
-      this.fighterPoses.set(pid, existing)
+      existing.y = targetY
     }
   }
 
@@ -580,6 +553,23 @@ export class DuelRenderer {
     if (state.tick !== this.stateSnapshotTick) {
       this.stateSnapshotTick = state.tick
       this.stateSnapshotAt = now
+      // Snap fighter poses to authoritative rows each tick so shots and muzzle FX
+      // stay aligned with server bullet spawn positions (no mid-tick Y prediction).
+      for (const [pid, fighter] of Object.entries(state.fighters)) {
+        const y = fighter.display_y ?? fighter.y
+        const existing = this.fighterPoses.get(pid)
+        if (existing) {
+          existing.y = y
+          existing.targetY = y
+          existing.moveDirection = fighter.move_direction
+        } else {
+          this.fighterPoses.set(pid, {
+            y,
+            targetY: y,
+            moveDirection: fighter.move_direction,
+          })
+        }
+      }
     }
     this.tickMs = state.tick_ms || 75
   }
@@ -587,8 +577,9 @@ export class DuelRenderer {
   private bulletDisplayPos(bullet: DuelBullet, now: number): { x: number; y: number } {
     const elapsed = Math.max(0, now - this.stateSnapshotAt)
     const progress = Math.min(0.95, elapsed / this.tickMs)
+    // World grid coords — boardX() applies the view flip once (same as fighters).
     return {
-      x: this.viewGridX(bullet.x + bullet.vx * progress),
+      x: bullet.x + bullet.vx * progress,
       y: bullet.y + (bullet.vy ?? 0) * progress,
     }
   }
@@ -652,7 +643,7 @@ export class DuelRenderer {
     ctx.clearRect(0, 0, displayW, displayH)
     this.drawBackdrop(ctx, displayW, displayH, now)
     this.drawArena(ctx, offsetX, offsetY, boardW, boardH, grid_width, grid_height, cell, playable_y_min, playable_y_max, now)
-    this.drawSpawnZones(ctx, offsetX, offsetY, boardW, boardH, cell, now)
+    this.drawSpawnZones(ctx, offsetX, offsetY, boardW, boardH, cell, now, viewerId, fighters)
     this.drawObstacles(ctx, offsetX, offsetY, cell, obstacles, now)
     this.drawPowerup(
       ctx,
@@ -806,33 +797,26 @@ export class DuelRenderer {
     boardH: number,
     cell: number,
     now: number,
+    viewerId: string,
+    fighters: Record<string, DuelFighter>,
   ) {
     const pulse = 0.5 + Math.sin(now * 0.004) * 0.2
-    const blueGrad = (fromX: number, toX: number) => {
+    const viewer = fighters[viewerId]
+    const opponent = Object.entries(fighters).find(([pid]) => pid !== viewerId)?.[1]
+    const myColor = viewer?.color ?? '#3b82f6'
+    const theirColor = opponent?.color ?? '#ef4444'
+    const zoneGrad = (color: string, fromX: number, toX: number) => {
       const grad = ctx.createLinearGradient(fromX, offsetY, toX, offsetY)
-      grad.addColorStop(0, `rgba(59,130,246,${0.22 * pulse})`)
-      grad.addColorStop(1, 'rgba(59,130,246,0)')
-      return grad
-    }
-    const redGrad = (fromX: number, toX: number) => {
-      const grad = ctx.createLinearGradient(fromX, offsetY, toX, offsetY)
-      grad.addColorStop(0, `rgba(239,68,68,${0.22 * pulse})`)
-      grad.addColorStop(1, 'rgba(239,68,68,0)')
+      grad.addColorStop(0, rgba(color, 0.22 * pulse))
+      grad.addColorStop(1, rgba(color, 0))
       return grad
     }
 
-    const blueOnLeft = !this.flipView
-    if (blueOnLeft) {
-      ctx.fillStyle = blueGrad(offsetX, offsetX + cell * 2.5)
-      ctx.fillRect(offsetX, offsetY, cell * 2.5, boardH)
-      ctx.fillStyle = redGrad(offsetX + boardW, offsetX + boardW - cell * 2.5)
-      ctx.fillRect(offsetX + boardW - cell * 2.5, offsetY, cell * 2.5, boardH)
-    } else {
-      ctx.fillStyle = redGrad(offsetX, offsetX + cell * 2.5)
-      ctx.fillRect(offsetX, offsetY, cell * 2.5, boardH)
-      ctx.fillStyle = blueGrad(offsetX + boardW, offsetX + boardW - cell * 2.5)
-      ctx.fillRect(offsetX + boardW - cell * 2.5, offsetY, cell * 2.5, boardH)
-    }
+    // View flip always places the local player on the left side of the canvas.
+    ctx.fillStyle = zoneGrad(myColor, offsetX, offsetX + cell * 2.5)
+    ctx.fillRect(offsetX, offsetY, cell * 2.5, boardH)
+    ctx.fillStyle = zoneGrad(theirColor, offsetX + boardW, offsetX + boardW - cell * 2.5)
+    ctx.fillRect(offsetX + boardW - cell * 2.5, offsetY, cell * 2.5, boardH)
   }
 
   private drawObstacles(
@@ -1540,6 +1524,13 @@ export class DuelRenderer {
         ctx.beginPath()
         this.traceFighterHullPath(ctx, fx, shipTop, fw, shipHeight, cell, facingRight)
         ctx.stroke()
+
+        const youLabel = Math.max(9, cell * 0.28)
+        ctx.font = `bold ${youLabel}px system-ui`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'bottom'
+        ctx.fillStyle = 'rgba(255,255,255,0.92)'
+        ctx.fillText('YOU', fx + fw / 2, shipTop - cell * 0.12)
 
         const aimRow = displayY + Math.floor(barCount / 2)
         const ay = offsetY + aimRow * cell + cell / 2

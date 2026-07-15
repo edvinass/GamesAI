@@ -16,6 +16,7 @@ import {
   playArenaShrinkSound,
   playHazardTickSound,
   playHitSound,
+  playEnemyHitSound,
   playPowerupActivateSound,
   playPowerupCollectSound,
   playRoundWinSound,
@@ -181,12 +182,47 @@ const roundWinnerName = computed(() => {
 })
 
 const playerRows = computed(() =>
-  props.gameState.players.map((p) => ({
-    ...p,
-    fighter: props.gameState.fighters[p.id],
-    roundWins: props.gameState.round_scores[p.id] ?? 0,
-  })),
+  props.gameState.players
+    .map((p) => ({
+      ...p,
+      fighter: props.gameState.fighters[p.id],
+      roundWins: props.gameState.round_scores[p.id] ?? 0,
+    }))
+    .sort((a, b) => {
+      if (a.id === props.playerId) return -1
+      if (b.id === props.playerId) return 1
+      return 0
+    }),
 )
+
+function describeHitTaken(hit: { damage: number; crit: boolean; blocked?: boolean }) {
+  if (hit.blocked) return 'Shield blocked!'
+  if (hit.damage <= 0) return ''
+  return hit.crit ? `Critical hit! -${hit.damage} HP` : `Hit! -${hit.damage} HP`
+}
+
+function playHitFeedback(hit: {
+  player_id: string
+  shooter_id?: string
+  damage: number
+  crit: boolean
+  blocked?: boolean
+}) {
+  if (hit.player_id === props.playerId) {
+    if (hit.blocked) {
+      playShieldBlockSound()
+      showPowerupNotice('Shield blocked!', 'info')
+    } else if (hit.damage > 0) {
+      playHitSound(Boolean(hit.crit))
+      const text = describeHitTaken(hit)
+      if (text) showPowerupNotice(text, 'warn')
+    }
+    return
+  }
+  if (hit.shooter_id === props.playerId && hit.damage > 0 && !hit.blocked) {
+    playEnemyHitSound(Boolean(hit.crit))
+  }
+}
 
 const heldMove = ref<'up' | 'down' | null>(null)
 const charging = ref(false)
@@ -432,8 +468,7 @@ function playGameSounds() {
     const stamp = `${hit.player_id}-${props.gameState.tick}-${hit.damage}-${hit.blocked ? 'b' : 'h'}-multi`
     if (stamp === lastHitSoundStamp.value) continue
     lastHitSoundStamp.value = stamp
-    if (hit.blocked) playShieldBlockSound()
-    else playHitSound(Boolean(hit.crit))
+    playHitFeedback(hit)
   }
 
   const hit = props.gameState.last_hit
@@ -441,8 +476,7 @@ function playGameSounds() {
     const stamp = `${hit.player_id}-${props.gameState.tick}-${hit.damage}-${hit.blocked ? 'b' : 'h'}`
     if (stamp !== lastHitSoundStamp.value) {
       lastHitSoundStamp.value = stamp
-      if (hit.blocked) playShieldBlockSound()
-      else playHitSound(Boolean(hit.crit))
+      playHitFeedback(hit)
     }
   }
 
@@ -1526,6 +1560,7 @@ onUnmounted(() => {
             dead: !row.fighter?.alive,
             'hp-hit': hpPulseId === `${row.id}-${gameState.tick}`,
           }"
+          :style="row.fighter ? { '--ship-color': row.fighter.color } : undefined"
         >
           <span
             class="ship-avatar"
@@ -1533,7 +1568,10 @@ onUnmounted(() => {
             :style="{ '--ship-color': row.fighter?.color ?? '#666' }"
             aria-hidden="true"
           />
-          <span class="name">{{ row.nickname }}</span>
+          <span class="name">
+            {{ row.nickname }}
+            <span v-if="row.id === playerId" class="you-badge">YOU</span>
+          </span>
           <span class="round-wins">{{ row.roundWins }}/{{ roundsToWin }}</span>
           <span v-if="row.fighter" class="hp-bar">
             <span
@@ -2993,9 +3031,28 @@ onUnmounted(() => {
 
 .player-score-row.me {
   font-weight: 700;
-  border-color: rgba(91, 156, 255, 0.35);
-  background: linear-gradient(135deg, rgba(91, 156, 255, 0.12), rgba(124, 108, 240, 0.08));
-  box-shadow: 0 0 0 1px rgba(91, 156, 255, 0.08), 0 4px 14px rgba(91, 156, 255, 0.12);
+  border-color: color-mix(in srgb, var(--ship-color, #5b9cff) 45%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ship-color, #5b9cff) 14%, transparent),
+    rgba(124, 108, 240, 0.08)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ship-color, #5b9cff) 10%, transparent),
+    0 4px 14px color-mix(in srgb, var(--ship-color, #5b9cff) 14%, transparent);
+}
+
+.you-badge {
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #e2e8f0;
+  background: color-mix(in srgb, var(--ship-color, #5b9cff) 28%, rgba(15, 23, 42, 0.9));
+  border: 1px solid color-mix(in srgb, var(--ship-color, #5b9cff) 45%, transparent);
 }
 
 .player-score-row.dead {

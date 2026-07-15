@@ -124,6 +124,11 @@ export function playShootSound(charged = false): void {
   tone(charged ? 440 : 520, 0.06, { type: 'triangle', volume: 0.1, detune: charged ? 80 : 0 })
 }
 
+export function playEnemyHitSound(crit = false): void {
+  tone(crit ? 720 : 640, 0.05, { type: 'triangle', volume: 0.1 })
+  tone(crit ? 960 : 820, 0.07, { type: 'sine', volume: 0.08 })
+}
+
 export function playHitSound(crit = false): void {
   tone(crit ? 180 : 140, 0.12, { type: 'sawtooth', volume: crit ? 0.2 : 0.16 })
   noiseBurst(crit ? 0.08 : 0.05, crit ? 0.1 : 0.07)

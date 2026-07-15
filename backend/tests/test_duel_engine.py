@@ -779,6 +779,36 @@ def test_burst_fires_multiple_shots(engine: DuelEngine, state: dict) -> None:
     assert state["fighters"]["p0"]["burst_shots_remaining"] == 1
 
 
+def test_burst_shots_spawn_after_move(engine: DuelEngine, state: dict) -> None:
+    left = state["fighters"]["p0"]
+    fighter_height = state["settings"]["fighter_height"]
+    left["move_direction"] = "down"
+    left["burst_shots_remaining"] = 1
+    left["burst_next_at_tick"] = state["tick"]
+    y_before = left["y"]
+
+    state, _ = engine.tick(state)
+
+    assert left["y"] == y_before + 1
+    assert len(state["bullets"]) == 1
+    assert state["bullets"][0]["y"] == left["y"] + fighter_height // 2
+
+
+def test_shoot_spawns_from_post_move_row(engine: DuelEngine, state: dict) -> None:
+    left = state["fighters"]["p0"]
+    fighter_height = state["settings"]["fighter_height"]
+    left["move_direction"] = "up"
+    left["pending_shoot"] = True
+    left["cooldown_until_tick"] = 0
+    y_before = left["y"]
+
+    state, _ = engine.tick(state)
+
+    assert left["y"] == y_before - 1
+    assert len(state["bullets"]) == 1
+    assert state["bullets"][0]["y"] == left["y"] + fighter_height // 2
+
+
 def test_railgun_pierces_obstacle(engine: DuelEngine, state: dict) -> None:
     state["obstacles"] = [{"x": 10, "y": 4, "w": 1, "h": 2}]
     state["fighters"]["p0"]["y"] = 5
@@ -1171,6 +1201,10 @@ def test_side_swap_every_two_rounds(engine: DuelEngine) -> None:
         game_state["fighters"]["p0"]["side"],
         game_state["fighters"]["p1"]["side"],
     )
+    initial_colors = (
+        game_state["fighters"]["p0"]["color"],
+        game_state["fighters"]["p1"]["color"],
+    )
     game_state["round"] = 2
     engine._reset_round(game_state)
     swapped_sides = (
@@ -1178,6 +1212,10 @@ def test_side_swap_every_two_rounds(engine: DuelEngine) -> None:
         game_state["fighters"]["p1"]["side"],
     )
     assert initial_sides != swapped_sides
+    assert (
+        game_state["fighters"]["p0"]["color"],
+        game_state["fighters"]["p1"]["color"],
+    ) == initial_colors
 
 
 def test_jam_rejects_shoot_action(engine: DuelEngine, state: dict) -> None:
