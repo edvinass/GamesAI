@@ -22,7 +22,9 @@ let animationToken = 0
 let animationTimer: ReturnType<typeof setTimeout> | null = null
 let lastReplayedLogKey = ''
 
-const EXEC_STEP_MS = 240
+/** Hold each sub-step so the race is readable one action at a time. */
+const EXEC_STEP_MS = 550
+const EXEC_REGISTER_PAUSE_MS = 350
 
 interface ExecFrame {
   player_id: string
@@ -30,6 +32,8 @@ interface ExecFrame {
   after: { x: number; y: number; facing: RoboRallyRobot['facing'] }
   card_type?: string
   moved?: boolean
+  step?: number
+  phase?: 'card' | 'board'
 }
 
 function cloneRobots(robots: Record<string, RoboRallyRobot>) {
@@ -38,12 +42,20 @@ function cloneRobots(robots: Record<string, RoboRallyRobot>) {
   )
 }
 
+function executionLogKey(log: Array<Record<string, unknown>> | undefined | null): string {
+  if (!log?.length) return ''
+  return JSON.stringify(log)
+}
+
 function flattenExecutionLog(log: Array<Record<string, unknown>>): ExecFrame[] {
   const frames: ExecFrame[] = []
   for (const entry of log) {
+    const step = typeof entry.step === 'number' ? entry.step : undefined
     if (entry.type === 'register_step' && Array.isArray(entry.robots)) {
       for (const raw of entry.robots as ExecFrame[]) {
-        if (raw.before && raw.after && raw.player_id) frames.push(raw)
+        if (raw.before && raw.after && raw.player_id) {
+          frames.push({ ...raw, step: raw.step ?? step, phase: 'card' })
+        }
       }
     }
     if (entry.type === 'board_step' && Array.isArray(entry.events)) {
@@ -51,12 +63,15 @@ function flattenExecutionLog(log: Array<Record<string, unknown>>): ExecFrame[] {
         const before = raw.before as ExecFrame['before'] | undefined
         const after = raw.after as ExecFrame['after'] | undefined
         if (before && after && typeof raw.player_id === 'string') {
+          const eventType = String(raw.type ?? raw.card_type ?? 'board')
           frames.push({
             player_id: raw.player_id,
             before,
             after,
-            card_type: String(raw.type ?? 'board'),
+            card_type: eventType,
             moved: before.x !== after.x || before.y !== after.y || before.facing !== after.facing,
+            step: typeof raw.step === 'number' ? raw.step : step,
+            phase: 'board',
           })
         }
       }
@@ -65,10 +80,39 @@ function flattenExecutionLog(log: Array<Record<string, unknown>>): ExecFrame[] {
   return frames
 }
 
-function sleep(ms: number) {
+function frameLabel(frame: ExecFrame): string {
+  const register =
+    typeof frame.step === 'number' ? `Register ${frame.step + 1}` : 'Register'
+  const action = frame.card_type
+    ? (CARD_LABELS[frame.card_type] ?? frame.card_type.replace(/_/g, ' '))
+    : frame.phase === 'board'
+      ? 'Board'
+      : 'Card'
+  const nick =
+    props.gameState.players.find((p) => p.id === frame.player_id)?.nickname ?? 'Robot'
+  const blocked = frame.moved === false && frame.phase === 'card' ? ' (blocked)' : ''
+  return `${register} · ${nick}: ${action}${blocked}`
+}
+
+function sleep(ms: number, token: number) {
   return new Promise<void>((resolve) => {
-    animationTimer = setTimeout(resolve, ms)
+    animationTimer = setTimeout(() => {
+      animationTimer = null
+      resolve()
+    }, ms)
+  }).then(() => {
+    if (token !== animationToken) {
+      throw new Error('animation-cancelled')
+    }
   })
+}
+
+function cancelAnimation() {
+  animationToken += 1
+  if (animationTimer) {
+    clearTimeout(animationTimer)
+    animationTimer = null
+  }
 }
 
 async function replayExecution(log: Array<Record<string, unknown>>) {
@@ -84,15 +128,16 @@ async function replayExecution(log: Array<Record<string, unknown>>) {
   isAnimating.value = true
   const positions: Record<string, RoboRallyRobot> = {}
 
+  // Rewind every robot to its first logged position for this execution.
   for (const frame of frames) {
     if (positions[frame.player_id]) continue
     const serverRobot = props.gameState.robots[frame.player_id]
+    if (!serverRobot) continue
     positions[frame.player_id] = {
       ...serverRobot,
       x: frame.before.x,
       y: frame.before.y,
       facing: frame.before.facing,
-      checkpoints_reached: serverRobot?.checkpoints_reached ?? 0,
     }
   }
 
@@ -104,59 +149,74 @@ async function replayExecution(log: Array<Record<string, unknown>>) {
 
   displayRobots.value = cloneRobots(positions)
 
-  for (const frame of frames) {
-    if (token !== animationToken) return
+  try {
+    let previousStep: number | undefined
+    for (const frame of frames) {
+      if (token !== animationToken) return
 
-    const cardName = frame.card_type ? (CARD_LABELS[frame.card_type] ?? frame.card_type) : 'Card'
-    animStepLabel.value = `${cardName}${frame.moved === false ? ' (blocked)' : ''}`
+      if (previousStep !== undefined && frame.step !== undefined && frame.step !== previousStep) {
+        animStepLabel.value = `Register ${frame.step + 1}`
+        await sleep(EXEC_REGISTER_PAUSE_MS, token)
+      }
+      previousStep = frame.step
 
-    await sleep(EXEC_STEP_MS)
-    if (token !== animationToken) return
+      animStepLabel.value = frameLabel(frame)
+      // Show the "before" pose briefly, then apply the move.
+      await sleep(EXEC_STEP_MS, token)
 
-    const current = displayRobots.value[frame.player_id]
-    if (!current) continue
+      const current = displayRobots.value[frame.player_id]
+      if (!current) continue
 
-    displayRobots.value = {
-      ...displayRobots.value,
-      [frame.player_id]: {
-        ...current,
-        x: frame.after.x,
-        y: frame.after.y,
-        facing: frame.after.facing,
-      },
+      displayRobots.value = {
+        ...displayRobots.value,
+        [frame.player_id]: {
+          ...current,
+          x: frame.after.x,
+          y: frame.after.y,
+          facing: frame.after.facing,
+          checkpoints_reached:
+            typeof (frame as { checkpoints_reached?: number }).checkpoints_reached === 'number'
+              ? (frame as { checkpoints_reached: number }).checkpoints_reached
+              : current.checkpoints_reached,
+        },
+      }
     }
-  }
 
-  if (token !== animationToken) return
-  displayRobots.value = cloneRobots(props.gameState.robots)
-  isAnimating.value = false
-  animStepLabel.value = ''
+    if (token !== animationToken) return
+    // Brief hold on the final pose before handing control back.
+    await sleep(EXEC_REGISTER_PAUSE_MS, token)
+    displayRobots.value = cloneRobots(props.gameState.robots)
+    isAnimating.value = false
+    animStepLabel.value = ''
+  } catch (err) {
+    if (err instanceof Error && err.message === 'animation-cancelled') return
+    throw err
+  }
 }
 
+// Watch a stable key so later WS updates (AI programming, card places) with the
+// same execution_log do not cancel the step-by-step replay.
 watch(
-  () => props.gameState.execution_log,
-  (log) => {
-    if (animationTimer) {
-      clearTimeout(animationTimer)
-      animationTimer = null
+  () => executionLogKey(props.gameState.execution_log),
+  (logKey) => {
+    if (logKey && logKey === lastReplayedLogKey) {
+      return
     }
-    if (log?.length) {
-      const logKey = JSON.stringify(log)
-      if (logKey === lastReplayedLogKey) {
-        displayRobots.value = cloneRobots(props.gameState.robots)
-        return
-      }
-      lastReplayedLogKey = logKey
-      void replayExecution(log)
-    } else {
+
+    cancelAnimation()
+
+    if (!logKey) {
       lastReplayedLogKey = ''
-      animationToken += 1
       displayRobots.value = cloneRobots(props.gameState.robots)
       isAnimating.value = false
       animStepLabel.value = ''
+      return
     }
+
+    lastReplayedLogKey = logKey
+    void replayExecution(props.gameState.execution_log)
   },
-  { deep: true, immediate: true },
+  { immediate: true },
 )
 
 watch(
@@ -183,8 +243,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  animationToken += 1
-  if (animationTimer) clearTimeout(animationTimer)
+  cancelAnimation()
   window.removeEventListener('keydown', onKeydown)
 })
 
@@ -353,8 +412,8 @@ const rows = computed(() => Array.from({ length: board.value.height }, (_, i) =>
 const phaseLabel = computed(() => {
   const gs = props.gameState
   if (gs.winner) return 'Finished'
-  if (canProgram.value) return 'Programming'
   if (isAnimating.value || gs.phase === 'executing') return 'Executing'
+  if (canProgram.value) return 'Programming'
   if (isLocked.value) return 'Waiting'
   return 'Programming'
 })
@@ -362,8 +421,8 @@ const phaseLabel = computed(() => {
 const phaseClass = computed(() => {
   const gs = props.gameState
   if (gs.winner) return 'phase--finished'
-  if (canProgram.value) return 'phase--programming'
   if (isAnimating.value || gs.phase === 'executing') return 'phase--executing'
+  if (canProgram.value) return 'phase--programming'
   if (isLocked.value) return 'phase--waiting'
   return 'phase--programming'
 })
@@ -377,12 +436,6 @@ const statusText = computed(() => {
     }
     return `${winner?.nickname ?? 'Winner'} wins`
   }
-  if (canProgram.value) {
-    if (isAnimating.value && animStepLabel.value) {
-      return `${programmingHint.value} · Last round: ${animStepLabel.value}`
-    }
-    return programmingHint.value || 'Pick cards from your hand and fill every register slot'
-  }
   if (isAnimating.value && animStepLabel.value) {
     return animStepLabel.value
   }
@@ -391,6 +444,9 @@ const statusText = computed(() => {
   }
   if (isLocked.value) {
     return 'Your program is locked — waiting for other racers'
+  }
+  if (canProgram.value) {
+    return programmingHint.value || 'Pick cards from your hand and fill every register slot'
   }
   return 'Watch the race unfold'
 })
