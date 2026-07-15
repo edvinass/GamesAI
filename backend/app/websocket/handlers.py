@@ -140,17 +140,20 @@ async def handle_websocket(websocket: WebSocket, room_id: uuid.UUID, token: str)
             async with async_session() as db:
                 service = RoomService(db)
                 await service.set_connected(uuid.UUID(player_id), False)
-                room = await service.handle_duel_disconnect_forfeit(room_id, uuid.UUID(player_id))
-                if room:
+                room, forfeited = await service.handle_duel_disconnect_forfeit(
+                    room_id, uuid.UUID(player_id)
+                )
+                if not room:
+                    return
+                # Never broadcast a shared anonymous game_state: games like Codenames
+                # redact card colors when viewer is None, which would wipe spymaster key cards.
+                if forfeited and room.game_state:
+                    await broadcast_room_state(room)
+                else:
                     await manager.broadcast(room_id_str, {
                         "type": "room_updated",
                         "room": room_to_dict(room),
                     })
-                    if room.game_state:
-                        await manager.broadcast(room_id_str, {
-                            "type": "game_state",
-                            "game_state": service.get_viewer_state(room, None),
-                        })
 
 
 async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> None:

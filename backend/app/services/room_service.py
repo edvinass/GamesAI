@@ -519,16 +519,21 @@ class RoomService:
 
     async def handle_duel_disconnect_forfeit(
         self, room_id: uuid.UUID, player_id: uuid.UUID
-    ) -> Room | None:
+    ) -> tuple[Room | None, bool]:
+        """Apply duel disconnect forfeit if needed.
+
+        Returns (room, forfeited). Room is always reloaded when found so callers can
+        broadcast connection status. forfeited is True only when game state changed.
+        """
         room = await self._load_room(room_id)
         if not room or room.game_type != "duel":
-            return room
+            return room, False
         if room.status != RoomStatus.PLAYING or not room.game_state:
-            return room
+            return room, False
 
         player = next((p for p in room.players if p.id == player_id), None)
         if not player or player.is_ai:
-            return room
+            return room, False
 
         game = get_game("duel")
         state = copy.deepcopy(room.game_state.state)
@@ -540,7 +545,8 @@ class RoomService:
                 room.status = RoomStatus.FINISHED
             await self.db.commit()
             await self.db.refresh(room, ["players", "game_state"])
-        return room
+            return room, True
+        return room, False
 
     async def _setup_tetris_single_player(self, room: Room) -> None:
         for p in list(room.players):
