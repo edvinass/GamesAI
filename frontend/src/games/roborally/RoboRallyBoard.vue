@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import type { RoboRallyGameState, RoboRallyRobot, Room } from '@/types'
 import { CARD_LABELS, CARD_SHORT, FACING_ARROW } from './rules'
 
@@ -14,6 +14,7 @@ const emit = defineEmits<{
 }>()
 
 const selectedCardId = ref<string | null>(null)
+const selectedSlotIndex = ref<number | null>(null)
 const displayRobots = ref<Record<string, RoboRallyRobot>>({})
 const isAnimating = ref(false)
 const animStepLabel = ref('')
@@ -40,9 +41,25 @@ function cloneRobots(robots: Record<string, RoboRallyRobot>) {
 function flattenExecutionLog(log: Array<Record<string, unknown>>): ExecFrame[] {
   const frames: ExecFrame[] = []
   for (const entry of log) {
-    if (entry.type !== 'register_step' || !Array.isArray(entry.robots)) continue
-    for (const raw of entry.robots as ExecFrame[]) {
-      if (raw.before && raw.after && raw.player_id) frames.push(raw)
+    if (entry.type === 'register_step' && Array.isArray(entry.robots)) {
+      for (const raw of entry.robots as ExecFrame[]) {
+        if (raw.before && raw.after && raw.player_id) frames.push(raw)
+      }
+    }
+    if (entry.type === 'board_step' && Array.isArray(entry.events)) {
+      for (const raw of entry.events as Array<Record<string, unknown>>) {
+        const before = raw.before as ExecFrame['before'] | undefined
+        const after = raw.after as ExecFrame['after'] | undefined
+        if (before && after && typeof raw.player_id === 'string') {
+          frames.push({
+            player_id: raw.player_id,
+            before,
+            after,
+            card_type: String(raw.type ?? 'board'),
+            moved: before.x !== after.x || before.y !== after.y || before.facing !== after.facing,
+          })
+        }
+      }
     }
   }
   return frames
@@ -71,6 +88,7 @@ async function replayExecution(log: Array<Record<string, unknown>>) {
     if (positions[frame.player_id]) continue
     const serverRobot = props.gameState.robots[frame.player_id]
     positions[frame.player_id] = {
+      ...serverRobot,
       x: frame.before.x,
       y: frame.before.y,
       facing: frame.before.facing,
@@ -151,9 +169,23 @@ watch(
   { deep: true },
 )
 
+function clearSelection() {
+  selectedCardId.value = null
+  selectedSlotIndex.value = null
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') clearSelection()
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+})
+
 onUnmounted(() => {
   animationToken += 1
   if (animationTimer) clearTimeout(animationTimer)
+  window.removeEventListener('keydown', onKeydown)
 })
 
 const robotsForDisplay = computed(() =>
@@ -176,27 +208,77 @@ const myProgram = computed(() => props.gameState.programs[props.playerId] ?? [])
 
 const isLocked = computed(() => props.gameState.lock_status[props.playerId] ?? false)
 
+const myRegisterLocks = computed(
+  () => props.gameState.register_locks?.[props.playerId] ?? [],
+)
+
 const canProgram = computed(
   () =>
     props.gameState.phase === 'programming' &&
     !isLocked.value &&
     !props.gameState.winner &&
     !isSpectator.value &&
-    !isAnimating.value,
+    !myRobot.value?.powered_down &&
+    !myRobot.value?.eliminated,
 )
 
 const registerFilled = computed(() =>
-  myProgram.value.every((slot) => slot && !slot.hidden),
+  myProgram.value.every((slot, i) => {
+    if (myRegisterLocks.value[i]) return true
+    return !!(slot && !slot.hidden)
+  }),
+)
+
+const powerDownNext = ref(false)
+
+const filledSlotCount = computed(
+  () => myProgram.value.filter((slot) => slot && !slot.hidden).length,
+)
+
+const programmingHint = computed(() => {
+  if (!canProgram.value) return ''
+  if (selectedCardId.value) {
+    return 'Click a register slot to place or replace'
+  }
+  if (selectedSlotIndex.value != null) {
+    const slot = myProgram.value[selectedSlotIndex.value]
+    if (slot && !slot.hidden) {
+      return 'Click another slot to move, or a hand card to replace'
+    }
+    return `Choose a hand card for slot ${selectedSlotIndex.value + 1}`
+  }
+  if (filledSlotCount.value === 0) {
+    return 'Click a card to fill the next slot'
+  }
+  if (!registerFilled.value) {
+    return 'Click cards to fill — or pick a slot first'
+  }
+  return 'Click a slot to reorder, or lock when ready'
+})
+
+watch(
+  () =>
+    [
+      props.gameState.phase,
+      props.gameState.round,
+      props.gameState.lock_status[props.playerId] ?? false,
+    ] as const,
+  () => clearSelection(),
 )
 
 const board = computed(() => props.gameState.board)
 
 const boardAspect = computed(() => `${board.value.width} / ${board.value.height}`)
 
-const wallSet = computed(() => {
+const edgeWallSet = computed(() => {
   const set = new Set<string>()
-  for (const [x, y] of board.value.walls) {
-    set.add(`${x},${y}`)
+  for (const w of board.value.walls ?? []) {
+    if (Array.isArray(w)) {
+      const [x, y] = w
+      for (const d of ['N', 'E', 'S', 'W']) set.add(`${x},${y},${d}`)
+    } else if (w && typeof w === 'object') {
+      set.add(`${w.x},${w.y},${w.dir}`)
+    }
   }
   return set
 })
@@ -209,11 +291,51 @@ const checkpointMap = computed(() => {
   return map
 })
 
+const pitSet = computed(() => new Set((board.value.pits ?? []).map(([x, y]) => `${x},${y}`)))
+const repairSet = computed(() => new Set((board.value.repairs ?? []).map(([x, y]) => `${x},${y}`)))
+const upgradeSet = computed(() => new Set((board.value.upgrades ?? []).map(([x, y]) => `${x},${y}`)))
+
+const conveyorMap = computed(() => {
+  const map = new Map<string, { dir: string; express: boolean }>()
+  for (const c of board.value.conveyors ?? []) {
+    map.set(`${c.x},${c.y}`, { dir: c.dir, express: !!c.express })
+  }
+  return map
+})
+
+const gearMap = computed(() => {
+  const map = new Map<string, string>()
+  for (const g of board.value.gears ?? []) map.set(`${g.x},${g.y}`, g.dir)
+  return map
+})
+
+const pusherMap = computed(() => {
+  const map = new Map<string, { dir: string; registers: number[] }>()
+  for (const p of board.value.pushers ?? []) {
+    map.set(`${p.x},${p.y}`, { dir: p.dir, registers: p.registers })
+  }
+  return map
+})
+
+const crusherMap = computed(() => {
+  const map = new Map<string, number[]>()
+  for (const c of board.value.crushers ?? []) map.set(`${c.x},${c.y}`, c.registers)
+  return map
+})
+
+const laserMap = computed(() => {
+  const map = new Map<string, { dir: string; strength: number }>()
+  for (const laser of board.value.lasers ?? []) {
+    map.set(`${laser.x},${laser.y}`, { dir: laser.dir, strength: laser.strength ?? 1 })
+  }
+  return map
+})
+
 const robotAt = computed(() => {
   const map = new Map<string, { playerId: string; facing: string; color: string; nickname: string }>()
   for (const player of props.gameState.players) {
     const robot = robotsForDisplay.value[player.id]
-    if (robot) {
+    if (robot && !robot.eliminated) {
       map.set(`${robot.x},${robot.y}`, {
         playerId: player.id,
         facing: robot.facing,
@@ -230,27 +352,24 @@ const rows = computed(() => Array.from({ length: board.value.height }, (_, i) =>
 
 const phaseLabel = computed(() => {
   const gs = props.gameState
-  if (isAnimating.value) return 'Executing'
   if (gs.winner) return 'Finished'
-  if (gs.phase === 'executing') return 'Executing'
+  if (canProgram.value) return 'Programming'
+  if (isAnimating.value || gs.phase === 'executing') return 'Executing'
   if (isLocked.value) return 'Waiting'
   return 'Programming'
 })
 
 const phaseClass = computed(() => {
   const gs = props.gameState
-  if (isAnimating.value) return 'phase--executing'
   if (gs.winner) return 'phase--finished'
-  if (gs.phase === 'executing') return 'phase--executing'
+  if (canProgram.value) return 'phase--programming'
+  if (isAnimating.value || gs.phase === 'executing') return 'phase--executing'
   if (isLocked.value) return 'phase--waiting'
   return 'phase--programming'
 })
 
 const statusText = computed(() => {
   const gs = props.gameState
-  if (isAnimating.value && animStepLabel.value) {
-    return animStepLabel.value
-  }
   if (gs.winner) {
     const winner = gs.players.find((p) => p.id === gs.winner)
     if (gs.win_reason === 'checkpoints') {
@@ -258,14 +377,20 @@ const statusText = computed(() => {
     }
     return `${winner?.nickname ?? 'Winner'} wins`
   }
+  if (canProgram.value) {
+    if (isAnimating.value && animStepLabel.value) {
+      return `${programmingHint.value} · Last round: ${animStepLabel.value}`
+    }
+    return programmingHint.value || 'Pick cards from your hand and fill every register slot'
+  }
+  if (isAnimating.value && animStepLabel.value) {
+    return animStepLabel.value
+  }
   if (gs.phase === 'executing') {
     return 'Robots are running this round\'s program…'
   }
   if (isLocked.value) {
     return 'Your program is locked — waiting for other racers'
-  }
-  if (canProgram.value) {
-    return 'Pick cards from your hand and fill every register slot'
   }
   return 'Watch the race unfold'
 })
@@ -285,8 +410,8 @@ function isAntenna(x: number, y: number): boolean {
   return x === ax && y === ay
 }
 
-function isWall(x: number, y: number): boolean {
-  return wallSet.value.has(`${x},${y}`)
+function hasEdge(x: number, y: number, dir: string): boolean {
+  return edgeWallSet.value.has(`${x},${y},${dir}`)
 }
 
 function checkpointNum(x: number, y: number): number | null {
@@ -297,39 +422,152 @@ function robotOn(x: number, y: number) {
   return robotAt.value.get(`${x},${y}`)
 }
 
-function isFloor(x: number, y: number): boolean {
-  return !isWall(x, y)
+function isPit(x: number, y: number): boolean {
+  return pitSet.value.has(`${x},${y}`)
 }
 
 function floorShade(x: number, y: number): string {
   return (x + y) % 2 === 0 ? 'floor-a' : 'floor-b'
 }
 
+function conveyorAt(x: number, y: number) {
+  return conveyorMap.value.get(`${x},${y}`)
+}
+
+function gearAt(x: number, y: number) {
+  return gearMap.value.get(`${x},${y}`)
+}
+
+function pusherAt(x: number, y: number) {
+  return pusherMap.value.get(`${x},${y}`)
+}
+
+function crusherAt(x: number, y: number) {
+  return crusherMap.value.get(`${x},${y}`)
+}
+
+function laserAt(x: number, y: number) {
+  return laserMap.value.get(`${x},${y}`)
+}
+
+function isRegisterLocked(i: number): boolean {
+  return !!myRegisterLocks.value[i]
+}
+
+function firstEmptySlot(): number | null {
+  const index = myProgram.value.findIndex(
+    (slot, i) => !isRegisterLocked(i) && (!slot || slot.hidden),
+  )
+  return index >= 0 ? index : null
+}
+
+function placeCard(slotIndex: number, cardId: string) {
+  if (isRegisterLocked(slotIndex)) return
+  emit('action', {
+    type: 'place_card',
+    slot_index: slotIndex,
+    card_id: cardId,
+  })
+  clearSelection()
+}
+
 function selectCard(cardId: string) {
   if (!canProgram.value) return
-  selectedCardId.value = selectedCardId.value === cardId ? null : cardId
+
+  if (selectedSlotIndex.value != null) {
+    placeCard(selectedSlotIndex.value, cardId)
+    return
+  }
+
+  if (selectedCardId.value === cardId) {
+    clearSelection()
+    return
+  }
+
+  const empty = firstEmptySlot()
+  if (empty != null) {
+    placeCard(empty, cardId)
+    return
+  }
+
+  selectedCardId.value = cardId
 }
 
 function onSlotClick(slotIndex: number) {
   if (!canProgram.value) return
-  const slot = myProgram.value[slotIndex]
+  if (isRegisterLocked(slotIndex)) return
+
   if (selectedCardId.value) {
-    emit('action', {
-      type: 'place_card',
-      slot_index: slotIndex,
-      card_id: selectedCardId.value,
-    })
-    selectedCardId.value = null
+    placeCard(slotIndex, selectedCardId.value)
     return
   }
-  if (slot && !slot.hidden) {
-    emit('action', { type: 'clear_slot', slot_index: slotIndex })
+
+  if (selectedSlotIndex.value === slotIndex) {
+    clearSelection()
+    return
   }
+
+  if (selectedSlotIndex.value != null) {
+    emit('action', {
+      type: 'swap_slots',
+      from_index: selectedSlotIndex.value,
+      to_index: slotIndex,
+    })
+    clearSelection()
+    return
+  }
+
+  selectedSlotIndex.value = slotIndex
+}
+
+function clearSlot(slotIndex: number) {
+  if (isRegisterLocked(slotIndex)) return
+  if (!canProgram.value) return
+  const slot = myProgram.value[slotIndex]
+  if (!slot || slot.hidden) return
+  emit('action', { type: 'clear_slot', slot_index: slotIndex })
+  if (selectedSlotIndex.value === slotIndex) clearSelection()
+}
+
+function clearAllSlots() {
+  if (!canProgram.value || filledSlotCount.value === 0) return
+  for (let i = 0; i < myProgram.value.length; i++) {
+    if (isRegisterLocked(i)) continue
+    const slot = myProgram.value[i]
+    if (slot && !slot.hidden) {
+      emit('action', { type: 'clear_slot', slot_index: i })
+    }
+  }
+  clearSelection()
 }
 
 function lockProgram() {
   if (!canProgram.value || !registerFilled.value) return
-  emit('action', { type: 'lock_program' })
+  emit('action', {
+    type: 'lock_program',
+    ...(powerDownNext.value ? { power_down: true } : {}),
+  })
+}
+
+function slotTitle(slot: { type?: string; hidden?: boolean } | null | undefined, index: number) {
+  if (!canProgram.value) {
+    return slot && !slot.hidden ? cardTitle(slot) : `Register slot ${index + 1}`
+  }
+  if (selectedCardId.value) {
+    return slot && !slot.hidden
+      ? `Replace with selected card`
+      : `Place selected card in slot ${index + 1}`
+  }
+  if (selectedSlotIndex.value === index) {
+    return 'Selected — click another slot to move, or Esc to cancel'
+  }
+  if (selectedSlotIndex.value != null) {
+    return `Move here from slot ${selectedSlotIndex.value + 1}`
+  }
+  if (slot && !slot.hidden) {
+    return `${cardTitle(slot)} — click to move`
+  }
+  return `Empty slot ${index + 1} — click to target, then pick a card`
 }
 
 function resign() {
@@ -378,6 +616,14 @@ function cardTypeClass(type?: string): string {
           <span class="stat-label">Checkpoints</span>
           <span class="stat-value">{{ myRobot.checkpoints_reached }} / {{ gameState.total_checkpoints }}</span>
         </div>
+        <div v-if="myRobot && !isSpectator" class="stat-pill">
+          <span class="stat-label">Damage</span>
+          <span class="stat-value">{{ myRobot.damage ?? 0 }}/9</span>
+        </div>
+        <div v-if="myRobot && !isSpectator" class="stat-pill">
+          <span class="stat-label">Lives</span>
+          <span class="stat-value">{{ myRobot.lives ?? 3 }}</span>
+        </div>
       </div>
 
       <button
@@ -409,18 +655,37 @@ function cardTypeClass(type?: string): string {
                 :class="[
                   floorShade(x, y),
                   {
-                    wall: isWall(x, y),
-                    floor: isFloor(x, y),
+                    floor: !isPit(x, y),
+                    pit: isPit(x, y),
                     antenna: isAntenna(x, y),
                     checkpoint: checkpointNum(x, y) != null,
+                    repair: repairSet.has(`${x},${y}`),
+                    upgrade: upgradeSet.has(`${x},${y}`),
+                    'edge-n': hasEdge(x, y, 'N'),
+                    'edge-e': hasEdge(x, y, 'E'),
+                    'edge-s': hasEdge(x, y, 'S'),
+                    'edge-w': hasEdge(x, y, 'W'),
                   },
                 ]"
               >
+                <span
+                  v-if="conveyorAt(x, y)"
+                  class="tile-belt"
+                  :class="{ express: conveyorAt(x, y)!.express }"
+                >{{ FACING_ARROW[conveyorAt(x, y)!.dir] }}</span>
+                <span v-if="gearAt(x, y)" class="tile-gear">{{ gearAt(x, y) === 'left' ? '↺' : '↻' }}</span>
+                <span v-if="pusherAt(x, y)" class="tile-pusher" :title="`Pusher ${pusherAt(x, y)!.registers}`">
+                  {{ FACING_ARROW[pusherAt(x, y)!.dir] }}P
+                </span>
+                <span v-if="crusherAt(x, y)" class="tile-crusher" :title="`Crusher ${crusherAt(x, y)}`">X</span>
+                <span v-if="laserAt(x, y)" class="tile-laser">{{ FACING_ARROW[laserAt(x, y)!.dir] }}</span>
+                <span v-if="repairSet.has(`${x},${y}`)" class="tile-site">R</span>
+                <span v-if="upgradeSet.has(`${x},${y}`)" class="tile-site tile-upgrade">U</span>
                 <span v-if="checkpointNum(x, y)" class="cp-ring">
                   <span class="cp-num">{{ checkpointNum(x, y) }}</span>
                 </span>
                 <span v-if="isAntenna(x, y)" class="antenna-glow">
-                  <span class="antenna-icon">📡</span>
+                  <span class="antenna-icon">A</span>
                 </span>
                 <div
                   v-if="robotOn(x, y)"
@@ -469,48 +734,81 @@ function cardTypeClass(type?: string): string {
             </div>
             <span class="racer-meta">
               <span class="racer-cp">{{ entry.robot?.checkpoints_reached ?? 0 }}/{{ gameState.total_checkpoints }}</span>
-              <span v-if="entry.locked" class="lock-icon" title="Program locked">🔒</span>
+              <span class="racer-hp" title="Damage / lives">{{ entry.robot?.damage ?? 0 }}★{{ entry.robot?.lives ?? 3 }}</span>
+              <span v-if="entry.locked" class="lock-icon" title="Program locked">L</span>
             </span>
           </li>
         </ol>
       </aside>
     </div>
 
-    <section v-if="!isSpectator" class="programming-dock">
+    <section v-if="!isSpectator" class="programming-dock" :class="{ 'dock--programming': canProgram }">
       <div class="dock-section dock-register">
         <div class="dock-head">
           <span class="dock-label">Register</span>
-          <span class="dock-count">{{ myProgram.filter(Boolean).length }} / {{ gameState.register_size }}</span>
+          <div class="dock-head-right">
+            <span class="dock-count">{{ filledSlotCount }} / {{ gameState.register_size }}</span>
+            <button
+              v-if="canProgram && filledSlotCount > 0"
+              type="button"
+              class="clear-all-btn"
+              title="Return all cards to hand"
+              @click="clearAllSlots"
+            >
+              Clear all
+            </button>
+          </div>
         </div>
         <div class="register-slots">
-          <button
+          <div
             v-for="(slot, i) in myProgram"
             :key="'slot-' + i"
-            type="button"
-            class="slot"
-            :class="[
-              cardTypeClass(slot?.type),
-              {
-                filled: slot && !slot.hidden,
-                active: canProgram,
-                pulsing: canProgram && !slot,
-              },
-            ]"
-            :disabled="!canProgram"
-            :title="slot && !slot.hidden ? cardTitle(slot) : `Register slot ${i + 1}`"
-            @click="onSlotClick(i)"
+            class="slot-wrap"
           >
-            <span class="slot-num">{{ i + 1 }}</span>
-            <span v-if="slot && !slot.hidden" class="slot-card">{{ cardLabel(slot) }}</span>
-            <span v-else class="slot-empty">+</span>
-          </button>
+            <button
+              type="button"
+              class="slot"
+              :class="[
+                cardTypeClass(slot?.type),
+                {
+                  filled: slot && !slot.hidden,
+                  active: canProgram && !isRegisterLocked(i),
+                  pulsing: canProgram && !isRegisterLocked(i) && !slot && selectedSlotIndex == null && !selectedCardId,
+                  selected: selectedSlotIndex === i,
+                  'slot--locked': isRegisterLocked(i),
+                  'drop-target':
+                    canProgram &&
+                    !isRegisterLocked(i) &&
+                    (selectedCardId != null ||
+                      (selectedSlotIndex != null && selectedSlotIndex !== i)),
+                },
+              ]"
+              :disabled="!canProgram || isRegisterLocked(i)"
+              :title="isRegisterLocked(i) ? 'Locked by damage' : slotTitle(slot, i)"
+              @click="onSlotClick(i)"
+            >
+              <span class="slot-num">{{ i + 1 }}{{ isRegisterLocked(i) ? '·' : '' }}</span>
+              <span v-if="slot && !slot.hidden" class="slot-card">{{ cardLabel(slot) }}</span>
+              <span v-else class="slot-empty">+</span>
+            </button>
+            <button
+              v-if="canProgram && slot && !slot.hidden && !isRegisterLocked(i)"
+              type="button"
+              class="slot-clear"
+              title="Return to hand"
+              aria-label="Clear register slot"
+              @click.stop="clearSlot(i)"
+            >
+              ×
+            </button>
+          </div>
         </div>
       </div>
 
       <div class="dock-section dock-hand">
         <div class="dock-head">
           <span class="dock-label">Hand</span>
-          <span v-if="canProgram" class="dock-hint">Select a card, then a slot</span>
+          <span v-if="canProgram" class="dock-hint">{{ programmingHint }}</span>
         </div>
         <div class="hand-cards">
           <button
@@ -520,10 +818,18 @@ function cardTypeClass(type?: string): string {
             class="hand-card"
             :class="[
               cardTypeClass(card.type),
-              { selected: selectedCardId === card.id, hidden: card.hidden },
+              {
+                selected: selectedCardId === card.id,
+                hidden: card.hidden,
+                'place-ready': canProgram && selectedSlotIndex != null && !card.hidden,
+              },
             ]"
             :disabled="!canProgram || card.hidden"
-            :title="cardTitle(card)"
+            :title="
+              canProgram && selectedSlotIndex != null
+                ? `Place in slot ${selectedSlotIndex + 1}`
+                : cardTitle(card)
+            "
             @click="selectCard(card.id)"
           >
             <span class="hand-card-glyph">{{ card.hidden ? '?' : cardLabel(card) }}</span>
@@ -533,6 +839,10 @@ function cardTypeClass(type?: string): string {
       </div>
 
       <div class="dock-actions">
+        <label v-if="canProgram" class="power-down-label">
+          <input v-model="powerDownNext" type="checkbox" />
+          Power down next round
+        </label>
         <button
           type="button"
           class="lock-btn"
@@ -540,7 +850,7 @@ function cardTypeClass(type?: string): string {
           :disabled="!canProgram || !registerFilled"
           @click="lockProgram"
         >
-          <span class="lock-btn-icon">{{ isLocked ? '✓' : '🔒' }}</span>
+          <span class="lock-btn-icon">{{ isLocked ? '✓' : '▶' }}</span>
           <span>{{ isLocked ? 'Locked in' : 'Lock program' }}</span>
         </button>
       </div>
@@ -777,11 +1087,55 @@ function cardTypeClass(type?: string): string {
   pointer-events: none;
 }
 
-.cell.wall {
-  background: linear-gradient(160deg, #64748b, #334155);
-  box-shadow:
-    inset 0 2px 4px rgba(255, 255, 255, 0.12),
-    inset 0 -2px 4px rgba(0, 0, 0, 0.35);
+.cell.pit {
+  background: radial-gradient(circle at center, #020617, #0f172a) !important;
+}
+
+.cell.edge-n { border-top: 3px solid #94a3b8; }
+.cell.edge-e { border-right: 3px solid #94a3b8; }
+.cell.edge-s { border-bottom: 3px solid #94a3b8; }
+.cell.edge-w { border-left: 3px solid #94a3b8; }
+
+.tile-belt,
+.tile-gear,
+.tile-pusher,
+.tile-crusher,
+.tile-laser,
+.tile-site {
+  position: absolute;
+  font-size: clamp(0.55rem, 1.6vw, 0.85rem);
+  font-weight: 700;
+  opacity: 0.9;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.tile-belt { color: #eab308; }
+.tile-belt.express { color: #f97316; }
+.tile-gear { color: #a78bfa; }
+.tile-pusher { color: #38bdf8; font-size: clamp(0.4rem, 1.1vw, 0.65rem); }
+.tile-crusher { color: #f87171; }
+.tile-laser { color: #fb7185; top: 2px; left: 2px; }
+.tile-site { color: #4ade80; bottom: 2px; right: 3px; }
+.tile-upgrade { color: #22d3ee; }
+
+.slot--locked {
+  opacity: 0.65;
+  outline: 1px solid rgba(248, 113, 113, 0.55);
+}
+
+.power-down-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.racer-hp {
+  font-size: 0.7rem;
+  color: var(--text-muted);
 }
 
 .cell.checkpoint {
@@ -991,21 +1345,30 @@ function cardTypeClass(type?: string): string {
 /* ── Programming dock ── */
 .programming-dock {
   flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
   display: grid;
   grid-template-columns: 1fr 1.4fr auto;
   gap: 1rem;
   align-items: end;
   padding: 1rem 1.15rem;
   border-radius: 16px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.85));
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.92));
   border: 1px solid rgba(148, 163, 184, 0.14);
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(10px);
+}
+
+.programming-dock.dock--programming {
+  border-color: rgba(99, 102, 241, 0.28);
 }
 
 @media (max-width: 960px) {
   .programming-dock {
     grid-template-columns: 1fr;
     align-items: stretch;
+    padding: 0.85rem 0.9rem calc(0.85rem + env(safe-area-inset-bottom, 0px));
   }
 
   .dock-actions {
@@ -1029,6 +1392,12 @@ function cardTypeClass(type?: string): string {
   margin-bottom: 0.55rem;
 }
 
+.dock-head-right {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
 .dock-label {
   font-size: 0.72rem;
   font-weight: 800;
@@ -1043,11 +1412,47 @@ function cardTypeClass(type?: string): string {
   color: var(--text-muted);
 }
 
+.dock-hint {
+  text-align: right;
+  line-height: 1.3;
+}
+
+.clear-all-btn {
+  border: none;
+  background: transparent;
+  color: rgba(248, 113, 113, 0.9);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+}
+
+.clear-all-btn:hover {
+  background: rgba(248, 113, 113, 0.12);
+}
+
 .register-slots,
 .hand-cards {
   display: flex;
   gap: 0.55rem;
+}
+
+.register-slots {
   flex-wrap: wrap;
+}
+
+.hand-cards {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.slot-wrap {
+  position: relative;
+  flex: 0 0 auto;
 }
 
 .slot,
@@ -1064,6 +1469,8 @@ function cardTypeClass(type?: string): string {
 .slot {
   width: clamp(3.75rem, 6vw, 5rem);
   height: clamp(4.75rem, 8vw, 6.25rem);
+  min-width: 3.5rem;
+  min-height: 4.5rem;
   border-radius: 12px;
   display: flex;
   flex-direction: column;
@@ -1092,6 +1499,22 @@ function cardTypeClass(type?: string): string {
   border-style: solid;
 }
 
+.slot.selected {
+  transform: translateY(-3px);
+  box-shadow:
+    0 0 0 3px rgba(251, 191, 36, 0.55),
+    0 8px 18px rgba(0, 0, 0, 0.3);
+}
+
+.slot.drop-target:not(.selected) {
+  border-color: rgba(129, 140, 248, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(165, 180, 252, 0.25);
+}
+
+.slot.drop-target:not(.filled) {
+  background: rgba(99, 102, 241, 0.18);
+}
+
 .slot.card--move.filled {
   background: linear-gradient(160deg, #059669, #047857);
   border-color: rgba(110, 231, 183, 0.5);
@@ -1110,6 +1533,30 @@ function cardTypeClass(type?: string): string {
 .slot:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+.slot-clear {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(15, 23, 42, 0.95);
+  color: #fca5a5;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  z-index: 1;
+}
+
+.slot-clear:hover {
+  background: rgba(127, 29, 29, 0.95);
+  color: white;
 }
 
 .slot-num {
@@ -1131,8 +1578,11 @@ function cardTypeClass(type?: string): string {
 }
 
 .hand-card {
+  flex: 0 0 auto;
   width: clamp(4rem, 6.5vw, 5.25rem);
   height: clamp(5rem, 9vw, 6.75rem);
+  min-width: 3.75rem;
+  min-height: 4.75rem;
   padding: 0.45rem 0.35rem;
   border-radius: 12px;
   display: flex;
@@ -1160,11 +1610,18 @@ function cardTypeClass(type?: string): string {
   background: linear-gradient(165deg, #64748b, #334155);
 }
 
-.hand-card.selected {
+.hand-card.selected,
+.hand-card.place-ready {
   transform: translateY(-4px) scale(1.04);
   box-shadow:
     0 0 0 3px rgba(99, 102, 241, 0.55),
     0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.hand-card.place-ready:not(.selected) {
+  box-shadow:
+    0 0 0 2px rgba(251, 191, 36, 0.5),
+    0 6px 16px rgba(0, 0, 0, 0.28);
 }
 
 .hand-card:not(:disabled):hover {

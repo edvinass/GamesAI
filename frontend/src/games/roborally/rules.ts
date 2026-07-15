@@ -2,46 +2,45 @@ import type { GameRules } from '../codenames/rules'
 
 export const roborallyRules: GameRules = {
   title: 'RoboRally',
-  subtitle: 'Race your robot through factory checkpoints',
+  subtitle: 'Program your robot through a deadly factory',
   quickStart: [
-    'Each round, pick program cards from your hand and fill every register slot.',
-    'Lock your program when ready — execution starts once everyone locks.',
-    'Robots run cards in priority order (closest to the antenna first).',
-    'Visit checkpoints 1 → 2 → 3 in order. First robot to finish all checkpoints wins!',
+    'Each round, fill every unlocked register slot from your hand, then lock.',
+    'Cards run in priority order (closest to the antenna first). Robots push.',
+    'After each register: express belts → all belts → pushers → gears → crushers → lasers → flags/repairs.',
+    'Visit checkpoints in order. First to finish wins. Fall in a pit or take 10 damage and you reboot.',
   ],
   sections: [
     {
-      heading: 'Programming phase',
-      body: 'Drag or click cards from your hand into the register slots at the bottom. You must fill all slots before locking.',
+      heading: 'Programming',
+      body: 'Draw 9 cards minus your damage. Click hand cards into register slots, then lock. High damage locks the last registers so those cards stay from last round.',
       bullets: [
-        'Move cards advance your robot forward (blocked by walls and other robots).',
-        'Turn Left / Turn Right rotate your robot in place.',
-        'Backup moves one square backward.',
-        'Your hand is hidden from other players until the round executes.',
+        'Click a hand card to fill the next empty slot; click a slot first to choose a specific register.',
+        'Click a filled slot, then another slot, to reorder. Use × to return a card to your hand.',
+        'Move 1/2/3 advances and can push other robots.',
+        'Turn Left / Right rotate in place; Backup steps backward.',
+        'Declare Power Down when locking to skip next round and clear all damage.',
       ],
     },
     {
-      heading: 'Execution',
-      body: 'When all players lock, robots execute one register slot at a time. Within each slot, robots act in priority order.',
+      heading: 'Board elements',
+      body: 'Factory tiles activate after each register card resolves.',
       bullets: [
-        'Priority is based on distance to the antenna (📡 on the board).',
-        'Hitting a checkpoint in the correct order advances your progress.',
-        'You must visit checkpoints sequentially — no skipping!',
+        'Conveyors (yellow) and express (orange) move you; gears rotate you.',
+        'Pushers shove on listed registers; crushers destroy on listed registers.',
+        'Pits and leaving the board destroy you (lose a life, reboot at archive with 2 damage).',
+        'Board lasers and robot lasers deal damage; robots block beams.',
+        'Repair heals 1 and sets archive; Upgrade also draws an option card.',
       ],
     },
     {
       heading: 'Winning',
-      body: 'The first robot to reach the final checkpoint wins the race.',
-    },
-    {
-      heading: 'Solo & AI',
-      body: 'Enable solo practice in the lobby to race against an AI opponent, or add AI players to fill empty seats.',
+      body: 'Reach every checkpoint in order. Last robot standing also wins if everyone else is eliminated.',
     },
   ],
   tips: [
-    'Plan a full register — think about where you will be after each card.',
-    'Turn cards are cheap ways to line up for the next checkpoint.',
-    'Watch the priority order — robots ahead of you may block your path.',
+    'Announce Power Down before you explode — waking at 0 damage is often worth a skipped round.',
+    'Watch register numbers on crusher/pusher tiles.',
+    'Express belts move twice each register (express phase, then all belts).',
   ],
 }
 

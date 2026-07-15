@@ -10,9 +10,14 @@ interface MapPreview {
   width: number
   height: number
   checkpoint_count?: number
-  walls: number[][]
+  walls: Array<number[] | { x: number; y: number; dir: string }>
   checkpoints: number[][]
   antenna: number[]
+  pits?: number[][]
+  conveyors?: Array<{ x: number; y: number }>
+  lasers?: Array<{ x: number; y: number }>
+  repairs?: number[][]
+  upgrades?: number[][]
   starts?: Array<{ x: number; y: number; facing: string }>
 }
 
@@ -66,9 +71,14 @@ const mapOptions = computed<MapPreview[]>(() => {
       checkpoint_count: Number(
         m.checkpoint_count ?? (Array.isArray(m.checkpoints) ? m.checkpoints.length : 0),
       ),
-      walls: Array.isArray(m.walls) ? (m.walls as number[][]) : [],
+      walls: Array.isArray(m.walls) ? (m.walls as MapPreview['walls']) : [],
       checkpoints: Array.isArray(m.checkpoints) ? (m.checkpoints as number[][]) : [],
       antenna: Array.isArray(m.antenna) ? (m.antenna as number[]) : [0, 0],
+      pits: Array.isArray(m.pits) ? (m.pits as number[][]) : [],
+      conveyors: Array.isArray(m.conveyors) ? (m.conveyors as Array<{ x: number; y: number }>) : [],
+      lasers: Array.isArray(m.lasers) ? (m.lasers as Array<{ x: number; y: number }>) : [],
+      repairs: Array.isArray(m.repairs) ? (m.repairs as number[][]) : [],
+      upgrades: Array.isArray(m.upgrades) ? (m.upgrades as number[][]) : [],
       starts: Array.isArray(m.starts)
         ? (m.starts as Array<{ x: number; y: number; facing: string }>)
         : [],
@@ -102,9 +112,13 @@ const DIFFICULTY_LABEL: Record<string, string> = {
 }
 
 function cellKind(map: MapPreview, x: number, y: number): string {
-  if (map.walls.some(([wx, wy]) => wx === x && wy === y)) return 'wall'
+  if (map.pits?.some(([px, py]) => px === x && py === y)) return 'pit'
   if (map.checkpoints.some(([cx, cy]) => cx === x && cy === y)) return 'checkpoint'
   if (map.antenna[0] === x && map.antenna[1] === y) return 'antenna'
+  if (map.lasers?.some((l) => l.x === x && l.y === y)) return 'laser'
+  if (map.conveyors?.some((c) => c.x === x && c.y === y)) return 'conveyor'
+  if (map.repairs?.some(([rx, ry]) => rx === x && ry === y)) return 'repair'
+  if (map.upgrades?.some(([ux, uy]) => ux === x && uy === y)) return 'upgrade'
   if (map.starts?.some((s) => s.x === x && s.y === y)) return 'start'
   return 'floor'
 }
@@ -333,8 +347,8 @@ function selectMap(id: string) {
   background: color-mix(in srgb, var(--surface) 80%, #64748b 20%);
 }
 
-.preview-cell.wall {
-  background: #334155;
+.preview-cell.pit {
+  background: #020617;
 }
 
 .preview-cell.checkpoint {
@@ -342,6 +356,22 @@ function selectMap(id: string) {
 }
 
 .preview-cell.antenna {
+  background: #22d3ee;
+}
+
+.preview-cell.conveyor {
+  background: #eab308;
+}
+
+.preview-cell.laser {
+  background: #fb7185;
+}
+
+.preview-cell.repair {
+  background: #4ade80;
+}
+
+.preview-cell.upgrade {
   background: #22d3ee;
 }
 

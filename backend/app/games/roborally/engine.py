@@ -9,6 +9,7 @@ from typing import Any
 from app.games.base import GamePlugin
 from app.games.roborally import board as rb
 from app.games.roborally import cards as card_lib
+from app.games.roborally import options as opt_lib
 from app.games.roborally.maps import board_for_map, get_map, list_maps
 from app.games.roborally.simulation import compute_register_order, execute_register
 
@@ -22,7 +23,7 @@ class RoboRallyEngine(GamePlugin):
             "max_players": 4,
             "solo_practice": False,
             "register_size": 5,
-            "hand_size": 9,
+            "hand_size": rb.BASE_HAND_SIZE,
             "map_id": "factory_floor",
             "ai_difficulty": "medium",
             "available_maps": list_maps(),
@@ -36,8 +37,8 @@ class RoboRallyEngine(GamePlugin):
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
         reg = int(merged.get("register_size", 5))
         merged["register_size"] = max(3, min(5, reg))
-        hand = int(merged.get("hand_size", 9))
-        merged["hand_size"] = max(merged["register_size"], min(12, hand))
+        # Base hand size is classic 9; per-robot draw uses 9 - damage.
+        merged["hand_size"] = rb.BASE_HAND_SIZE
         map_id = str(merged.get("map_id", "factory_floor"))
         try:
             get_map(map_id)
@@ -48,7 +49,6 @@ class RoboRallyEngine(GamePlugin):
         if difficulty not in ("easy", "medium", "hard"):
             difficulty = "medium"
         merged["ai_difficulty"] = difficulty
-        # Always refresh from registry so lobby clients cannot stale / forge previews.
         merged["available_maps"] = list_maps()
         return merged
 
@@ -78,7 +78,7 @@ class RoboRallyEngine(GamePlugin):
 
         rng = random.Random()
         deck = card_lib.new_deck(rng)
-        hand_size = settings["hand_size"]
+        option_deck = opt_lib.new_option_deck(rng)
         register_size = settings["register_size"]
 
         player_map: dict[str, dict[str, Any]] = {}
@@ -102,9 +102,19 @@ class RoboRallyEngine(GamePlugin):
                 "y": start["y"],
                 "facing": start["facing"],
                 "checkpoints_reached": 0,
+                "damage": 0,
+                "lives": rb.STARTING_LIVES,
+                "archive": {"x": start["x"], "y": start["y"]},
+                "options": [],
+                "powered_down": False,
+                "pending_power_down": False,
+                "eliminated": False,
             }
             start_priorities[pid] = start["priority"]
-            hands[pid] = card_lib.draw_cards(deck, hand_size)
+            draw = rb.hand_size_for_damage(0)
+            if opt_lib.has_option(robots[pid], "extra_memory"):
+                draw += 1
+            hands[pid] = card_lib.draw_cards(deck, draw)
             programs[pid] = [None] * register_size
 
         player_order = [str(p["id"]) for p in players]
@@ -123,6 +133,8 @@ class RoboRallyEngine(GamePlugin):
             "programs": programs,
             "locked_players": [],
             "deck": deck,
+            "option_deck": option_deck,
+            "option_discard": [],
             "execution_log": [],
             "winner": None,
             "win_reason": None,
@@ -147,11 +159,17 @@ class RoboRallyEngine(GamePlugin):
         if player_id not in state["robots"]:
             raise ValueError("You are not a player in this game")
 
+        robot = state["robots"][player_id]
+        if robot.get("eliminated"):
+            raise ValueError("You have been eliminated")
+
         if action_type == "place_card":
             if state["phase"] != "programming":
                 raise ValueError("Can only program during programming phase")
             if player_id in state["locked_players"]:
                 raise ValueError("Program already locked")
+            if robot.get("powered_down"):
+                raise ValueError("Powered down — no programming this round")
             return self._place_card(state, player_id, action, events)
 
         if action_type == "clear_slot":
@@ -159,36 +177,65 @@ class RoboRallyEngine(GamePlugin):
                 raise ValueError("Can only edit program during programming phase")
             if player_id in state["locked_players"]:
                 raise ValueError("Program already locked")
+            if robot.get("powered_down"):
+                raise ValueError("Powered down — no programming this round")
             return self._clear_slot(state, player_id, action, events)
+
+        if action_type == "swap_slots":
+            if state["phase"] != "programming":
+                raise ValueError("Can only edit program during programming phase")
+            if player_id in state["locked_players"]:
+                raise ValueError("Program already locked")
+            if robot.get("powered_down"):
+                raise ValueError("Powered down — no programming this round")
+            return self._swap_slots(state, player_id, action, events)
 
         if action_type == "lock_program":
             if state["phase"] != "programming":
                 raise ValueError("Can only lock during programming phase")
-            return self._lock_program(state, player_id, events)
+            return self._lock_program(state, player_id, action, events)
 
         raise ValueError(f"Unknown action type: {action_type}")
+
+    def _locked_slots(self, state: dict, player_id: str) -> set[int]:
+        robot = state["robots"][player_id]
+        register_size = state["settings"]["register_size"]
+        return rb.locked_slot_indices(int(robot.get("damage", 0)), register_size)
 
     def _handle_resign(
         self, state: dict, player_id: str, events: list[dict]
     ) -> tuple[dict, list[dict]]:
         if state.get("winner"):
             raise ValueError("Game is already over")
-        remaining = [pid for pid in state["player_order"] if pid != player_id]
+        state["robots"][player_id]["eliminated"] = True
+        state["robots"][player_id]["lives"] = 0
+        remaining = [
+            pid
+            for pid in state["player_order"]
+            if pid != player_id and not state["robots"].get(pid, {}).get("eliminated")
+        ]
+        events.append({"type": "player_resigned", "player_id": player_id})
         if len(remaining) == 1:
             state["phase"] = "finished"
             state["winner"] = remaining[0]
             state["win_reason"] = "resign"
-            events.append({"type": "player_resigned", "player_id": player_id})
             events.append({"type": "game_won", "winner": remaining[0], "reason": "resign"})
+        elif len(remaining) == 0:
+            state["phase"] = "finished"
+            state["winner"] = None
+            state["win_reason"] = "draw"
         else:
-            state["player_order"] = remaining
-            state["register_order"] = [p for p in state["register_order"] if p in remaining]
-            state["players"] = [p for p in state["players"] if p["id"] != player_id]
             state["locked_players"] = [p for p in state["locked_players"] if p != player_id]
-            del state["robots"][player_id]
-            del state["hands"][player_id]
-            del state["programs"][player_id]
-            events.append({"type": "player_resigned", "player_id": player_id})
+            state["register_order"] = [p for p in state["register_order"] if p in remaining]
+            # Auto-continue if everyone left has locked.
+            active = [
+                pid
+                for pid in state["player_order"]
+                if not state["robots"].get(pid, {}).get("eliminated")
+            ]
+            if active and len(state["locked_players"]) >= len(active) and state["phase"] == "programming":
+                state, exec_events = self._run_execution(state)
+                events.extend(exec_events)
         return state, events
 
     def _place_card(
@@ -202,6 +249,8 @@ class RoboRallyEngine(GamePlugin):
         register_size = state["settings"]["register_size"]
         if slot_index < 0 or slot_index >= register_size:
             raise ValueError("Invalid slot index")
+        if slot_index in self._locked_slots(state, player_id):
+            raise ValueError("That register is locked by damage")
 
         hand = state["hands"][player_id]
         card = card_lib.card_in_hand(hand, str(card_id))
@@ -232,6 +281,8 @@ class RoboRallyEngine(GamePlugin):
         register_size = state["settings"]["register_size"]
         if slot_index < 0 or slot_index >= register_size:
             raise ValueError("Invalid slot index")
+        if slot_index in self._locked_slots(state, player_id):
+            raise ValueError("That register is locked by damage")
 
         programs = state["programs"][player_id]
         existing = programs[slot_index]
@@ -241,21 +292,82 @@ class RoboRallyEngine(GamePlugin):
             events.append({"type": "slot_cleared", "player_id": player_id, "slot_index": slot_index})
         return state, events
 
+    def _swap_slots(
+        self, state: dict, player_id: str, action: dict, events: list[dict]
+    ) -> tuple[dict, list[dict]]:
+        from_index = action.get("from_index")
+        to_index = action.get("to_index")
+        if from_index is None or to_index is None:
+            raise ValueError("from_index and to_index required")
+        from_index = int(from_index)
+        to_index = int(to_index)
+        register_size = state["settings"]["register_size"]
+        if (
+            from_index < 0
+            or from_index >= register_size
+            or to_index < 0
+            or to_index >= register_size
+        ):
+            raise ValueError("Invalid slot index")
+        locked = self._locked_slots(state, player_id)
+        if from_index in locked or to_index in locked:
+            raise ValueError("Cannot swap a locked register")
+        if from_index == to_index:
+            return state, events
+
+        programs = state["programs"][player_id]
+        programs[from_index], programs[to_index] = programs[to_index], programs[from_index]
+        events.append(
+            {
+                "type": "slots_swapped",
+                "player_id": player_id,
+                "from_index": from_index,
+                "to_index": to_index,
+            }
+        )
+        return state, events
+
     def _lock_program(
-        self, state: dict, player_id: str, events: list[dict]
+        self, state: dict, player_id: str, action: dict, events: list[dict]
     ) -> tuple[dict, list[dict]]:
         if player_id in state["locked_players"]:
             raise ValueError("Already locked")
 
+        robot = state["robots"][player_id]
         programs = state["programs"][player_id]
         register_size = state["settings"]["register_size"]
-        if any(programs[i] is None for i in range(register_size)):
-            raise ValueError("Fill all register slots before locking")
+        locked_slots = self._locked_slots(state, player_id)
 
-        state["locked_players"].append(player_id)
-        events.append({"type": "program_locked", "player_id": player_id})
+        if robot.get("powered_down"):
+            # Powered-down robots auto-lock with empty/skipped cards.
+            state["locked_players"].append(player_id)
+            events.append({"type": "program_locked", "player_id": player_id, "powered_down": True})
+        else:
+            for i in range(register_size):
+                if i in locked_slots:
+                    if programs[i] is None:
+                        raise ValueError("Locked register missing card")
+                    continue
+                if programs[i] is None:
+                    raise ValueError("Fill all unlocked register slots before locking")
 
-        active_players = state["player_order"]
+            if action.get("power_down"):
+                robot["pending_power_down"] = True
+
+            state["locked_players"].append(player_id)
+            events.append(
+                {
+                    "type": "program_locked",
+                    "player_id": player_id,
+                    "power_down_next": bool(robot.get("pending_power_down")),
+                }
+            )
+
+        active_players = [
+            pid
+            for pid in state["player_order"]
+            if not state["robots"].get(pid, {}).get("eliminated")
+        ]
         if len(state["locked_players"]) >= len(active_players):
             state, exec_events = self._run_execution(state)
             events.extend(exec_events)
@@ -280,14 +392,45 @@ class RoboRallyEngine(GamePlugin):
 
     def _start_next_round(self, state: dict) -> None:
         register_size = state["settings"]["register_size"]
-        hand_size = state["settings"]["hand_size"]
         deck = state["deck"]
 
         for pid in state["player_order"]:
-            state["programs"][pid] = [None] * register_size
-            card_lib.refill_hand(state["hands"][pid], deck, hand_size)
+            robot = state["robots"][pid]
+            if robot.get("eliminated"):
+                continue
+
+            # Begin a declared power-down round.
+            if robot.get("pending_power_down"):
+                robot["powered_down"] = True
+                robot["pending_power_down"] = False
+
+            locked_slots = rb.locked_slot_indices(int(robot.get("damage", 0)), register_size)
+            old_program = state["programs"][pid]
+            new_program: list[dict[str, str] | None] = [None] * register_size
+            for i in range(register_size):
+                if i in locked_slots and old_program[i]:
+                    new_program[i] = dict(old_program[i])
+            state["programs"][pid] = new_program
+            state["hands"][pid] = []
+
+            if robot.get("powered_down"):
+                continue
+
+            draw = rb.hand_size_for_damage(int(robot.get("damage", 0)))
+            if opt_lib.has_option(robot, "extra_memory"):
+                draw += 1
+            state["hands"][pid] = card_lib.draw_cards(deck, draw)
+            if len(deck) < 10:
+                deck.extend(card_lib.new_deck())
 
         state["locked_players"] = []
+        for pid in state["player_order"]:
+            robot = state["robots"][pid]
+            if robot.get("eliminated"):
+                continue
+            if robot.get("powered_down"):
+                state["locked_players"].append(pid)
+
         state["phase"] = "programming"
         state["round"] = state["round"] + 1
         state["register_order"] = compute_register_order(
@@ -297,10 +440,24 @@ class RoboRallyEngine(GamePlugin):
             state["start_priorities"],
         )
 
+        active = [
+            pid
+            for pid in state["player_order"]
+            if not state["robots"].get(pid, {}).get("eliminated")
+        ]
+        # Only auto-execute when every survivor is powered down (no human input needed).
+        if active and all(state["robots"][pid].get("powered_down") for pid in active):
+            self._run_execution(state)
+
     def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
         viewer_id = str(viewer_player["id"]) if viewer_player else None
         game_over = bool(state.get("winner")) or state.get("phase") == "finished"
-        all_locked = len(state.get("locked_players", [])) >= len(state.get("player_order", []))
+        active = [
+            pid
+            for pid in state.get("player_order", [])
+            if not state["robots"].get(pid, {}).get("eliminated")
+        ]
+        all_locked = len(state.get("locked_players", [])) >= len(active) if active else False
         reveal_programs = game_over or state.get("phase") == "executing" or all_locked
 
         hands: dict[str, list[dict[str, str]]] = {}
@@ -320,6 +477,16 @@ class RoboRallyEngine(GamePlugin):
         locked = set(state.get("locked_players", []))
         lock_status = {pid: pid in locked for pid in state.get("player_order", [])}
 
+        register_locks: dict[str, list[bool]] = {}
+        for pid in state.get("player_order", []):
+            robot = state["robots"].get(pid, {})
+            locked_idxs = rb.locked_slot_indices(
+                int(robot.get("damage", 0)), state["settings"]["register_size"]
+            )
+            register_locks[pid] = [
+                i in locked_idxs for i in range(state["settings"]["register_size"])
+            ]
+
         return {
             "phase": state["phase"],
             "round": state["round"],
@@ -331,6 +498,7 @@ class RoboRallyEngine(GamePlugin):
             "hands": hands,
             "programs": programs,
             "lock_status": lock_status,
+            "register_locks": register_locks,
             "register_size": state["settings"]["register_size"],
             "execution_log": state.get("execution_log", []),
             "winner": state.get("winner"),
@@ -349,6 +517,10 @@ class RoboRallyEngine(GamePlugin):
             return None
         locked = set(state.get("locked_players", []))
         for player in state.get("players", []):
-            if player["id"] not in locked and player.get("is_ai"):
+            pid = player["id"]
+            robot = state["robots"].get(pid, {})
+            if robot.get("eliminated"):
+                continue
+            if pid not in locked and player.get("is_ai"):
                 return player
         return None

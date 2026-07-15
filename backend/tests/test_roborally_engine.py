@@ -103,6 +103,40 @@ def test_illegal_lock_incomplete():
         pass
 
 
+def test_swap_slots_and_move_to_empty():
+    engine = RoboRallyEngine()
+    state = engine.create_initial_state(_players(2), {"register_size": 3})
+    hand = state["hands"]["p1"]
+    card_a, card_b = hand[0], hand[1]
+    state, _ = engine.apply_action(
+        state,
+        {"type": "place_card", "slot_index": 0, "card_id": card_a["id"]},
+        {"id": "p1"},
+    )
+    state, _ = engine.apply_action(
+        state,
+        {"type": "place_card", "slot_index": 1, "card_id": card_b["id"]},
+        {"id": "p1"},
+    )
+
+    state, events = engine.apply_action(
+        state,
+        {"type": "swap_slots", "from_index": 0, "to_index": 1},
+        {"id": "p1"},
+    )
+    assert state["programs"]["p1"][0]["id"] == card_b["id"]
+    assert state["programs"]["p1"][1]["id"] == card_a["id"]
+    assert any(e["type"] == "slots_swapped" for e in events)
+
+    state, _ = engine.apply_action(
+        state,
+        {"type": "swap_slots", "from_index": 1, "to_index": 2},
+        {"id": "p1"},
+    )
+    assert state["programs"]["p1"][1] is None
+    assert state["programs"]["p1"][2]["id"] == card_a["id"]
+
+
 def test_public_state_hides_opponent_hand():
     engine = RoboRallyEngine()
     state = engine.create_initial_state(_players(2), {})
@@ -152,29 +186,44 @@ def test_move_cards_interleave_by_priority():
         "p2": [{"id": "2", "type": "move_1"}],
     }
 
-    # Lower priority p1 goes first: blocked by p2, only p2 moves.
-    state_blocked = {
+    # Priority is recomputed from antenna distance: p2 (closer) moves first.
+    state = {
         "settings": {"register_size": 1},
         "board": board,
         "robots": {k: dict(v) for k, v in robots.items()},
         "register_order": ["p1", "p2"],
         "programs": programs,
+        "player_order": ["p1", "p2"],
+        "start_priorities": {"p1": 0, "p2": 1},
     }
-    execute_register(state_blocked)
-    assert state_blocked["robots"]["p1"]["y"] == 7
-    assert state_blocked["robots"]["p2"]["y"] == 5
+    execute_register(state)
+    assert state["robots"]["p2"]["y"] == 5
+    assert state["robots"]["p1"]["y"] == 6
 
-    # Higher priority p2 goes first: p2 vacates, then p1 can enter former p2 square.
-    state_chain = {
-        "settings": {"register_size": 1},
-        "board": board,
-        "robots": {k: dict(v) for k, v in robots.items()},
-        "register_order": ["p2", "p1"],
-        "programs": programs,
+    # Equal distance → start priority decides. Wall blocks push so trailing robot stays.
+    board2 = {
+        **board,
+        "walls": list(board["walls"]) + [{"x": 2, "y": 5, "dir": "N"}],
     }
-    execute_register(state_chain)
-    assert state_chain["robots"]["p2"]["y"] == 5
-    assert state_chain["robots"]["p1"]["y"] == 6
+    robots2 = {
+        "p1": {"x": 2, "y": 7, "facing": "N", "checkpoints_reached": 0},
+        "p2": {"x": 4, "y": 7, "facing": "N", "checkpoints_reached": 0},
+    }
+    state_push = {
+        "settings": {"register_size": 1},
+        "board": board2,
+        "robots": {k: dict(v) for k, v in robots2.items()},
+        "register_order": ["p1", "p2"],
+        "programs": {
+            "p1": [{"id": "1", "type": "move_1"}],
+            "p2": [{"id": "2", "type": "move_1"}],
+        },
+        "player_order": ["p1", "p2"],
+        "start_priorities": {"p1": 0, "p2": 1},
+    }
+    execute_register(state_push)
+    assert state_push["robots"]["p1"]["y"] == 6
+    assert state_push["robots"]["p2"]["y"] == 6
 
 
 def test_move_three_uses_three_substeps():

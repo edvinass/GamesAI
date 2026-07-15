@@ -535,11 +535,39 @@ export interface RoboRallyCard {
   hidden?: boolean
 }
 
+export interface RoboRallyOption {
+  id: string
+  type: string
+  name: string
+  description?: string
+}
+
 export interface RoboRallyRobot {
   x: number
   y: number
   facing: 'N' | 'E' | 'S' | 'W'
   checkpoints_reached: number
+  damage?: number
+  lives?: number
+  archive?: { x: number; y: number }
+  options?: RoboRallyOption[]
+  powered_down?: boolean
+  pending_power_down?: boolean
+  eliminated?: boolean
+}
+
+export interface RoboRallyEdgeWall {
+  x: number
+  y: number
+  dir: 'N' | 'E' | 'S' | 'W'
+}
+
+export interface RoboRallyConveyor {
+  x: number
+  y: number
+  dir: 'N' | 'E' | 'S' | 'W'
+  express?: boolean
+  rotate?: 'none' | 'left' | 'right'
 }
 
 export interface RoboRallyBoardState {
@@ -547,7 +575,15 @@ export interface RoboRallyBoardState {
   name: string
   width: number
   height: number
-  walls: number[][]
+  walls: Array<RoboRallyEdgeWall | number[]>
+  conveyors?: RoboRallyConveyor[]
+  gears?: Array<{ x: number; y: number; dir: 'left' | 'right' }>
+  pushers?: Array<{ x: number; y: number; dir: string; registers: number[] }>
+  crushers?: Array<{ x: number; y: number; registers: number[] }>
+  pits?: number[][]
+  lasers?: Array<{ x: number; y: number; dir: string; strength?: number }>
+  repairs?: number[][]
+  upgrades?: number[][]
   checkpoints: number[][]
   antenna: number[]
 }
@@ -571,6 +607,7 @@ export interface RoboRallyGameState {
   hands: Record<string, RoboRallyCard[]>
   programs: Record<string, Array<RoboRallyCard | null>>
   lock_status: Record<string, boolean>
+  register_locks?: Record<string, boolean[]>
   register_size: number
   execution_log: Array<Record<string, unknown>>
   winner: string | null
