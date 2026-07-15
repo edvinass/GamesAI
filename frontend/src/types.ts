@@ -529,7 +529,59 @@ export interface GoGameState {
   viewer_color: 'B' | 'W' | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState
+export interface RoboRallyCard {
+  id: string
+  type?: string
+  hidden?: boolean
+}
+
+export interface RoboRallyRobot {
+  x: number
+  y: number
+  facing: 'N' | 'E' | 'S' | 'W'
+  checkpoints_reached: number
+}
+
+export interface RoboRallyBoardState {
+  id: string
+  name: string
+  width: number
+  height: number
+  walls: number[][]
+  checkpoints: number[][]
+  antenna: number[]
+}
+
+export interface RoboRallyPlayerState {
+  id: string
+  nickname: string
+  is_ai: boolean
+  color: string
+  seat: number
+}
+
+export interface RoboRallyGameState {
+  phase: 'programming' | 'executing' | 'finished'
+  round: number
+  board: RoboRallyBoardState
+  robots: Record<string, RoboRallyRobot>
+  players: RoboRallyPlayerState[]
+  player_order: string[]
+  register_order: string[]
+  hands: Record<string, RoboRallyCard[]>
+  programs: Record<string, Array<RoboRallyCard | null>>
+  lock_status: Record<string, boolean>
+  register_size: number
+  execution_log: Array<Record<string, unknown>>
+  winner: string | null
+  win_reason: string | null
+  settings: Record<string, unknown>
+  available_maps: Array<{ id: string; name: string }>
+  viewer_id: string | null
+  total_checkpoints: number
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -565,6 +617,10 @@ export function isChessState(state: GameState): state is ChessGameState {
 
 export function isGoState(state: GameState): state is GoGameState {
   return 'legal_plays' in state && 'black_player_id' in state && !('fen' in state)
+}
+
+export function isRoboRallyState(state: GameState): state is RoboRallyGameState {
+  return 'register_order' in state && 'robots' in state && 'register_size' in state
 }
 
 export interface WsMessage {

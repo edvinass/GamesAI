@@ -60,6 +60,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '⚫',
     lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
   },
+  roborally: {
+    name: 'RoboRally',
+    description: 'Program your robot through checkpoints on a factory floor.',
+    emoji: '🤖',
+    lobbyHint: 'Need 2–4 players. Pick a map, add AI to fill seats, then start.',
+  },
 }
 
 export interface GameListItem {
