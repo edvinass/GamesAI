@@ -31,7 +31,6 @@ import { chargeTierForTicks } from './chargeTiers'
 import { loadMilestones, recordMatchMilestones } from './stats'
 import { resolveTheme } from './themes'
 import {
-  buildDraftTierGroups,
   DRILL_HINTS,
   DRILL_LABELS,
   mutatorStackLabel,
@@ -263,8 +262,6 @@ const canvasDisplaySize = ref({ w: 0, h: 0 })
 const milestones = ref(loadMilestones())
 const matchPowerupActions = ref<string[]>([])
 const lastHazardSoundTick = ref(-1)
-const isDraftPhase = computed(() => props.gameState.phase === 'powerup_draft')
-const myBan = computed(() => props.gameState.powerup_bans?.[props.playerId] ?? null)
 const eventFeed = computed(() => (props.gameState.event_log ?? []).slice(-8).reverse())
 const roundRecapRows = computed(() =>
   props.gameState.players.map((p) => ({
@@ -280,29 +277,6 @@ const powerupUseLabel = computed(() => {
   if (!canUsePowerup.value && storedPowerup.value === 'heal') return 'Full HP'
   const key = formatBindingLabel(keybinds.value.powerup)
   return `Use [${key}]`
-})
-const draftBanSummary = computed(() => {
-  const bans = props.gameState.powerup_bans ?? {}
-  return Object.entries(bans).map(([playerId, ptype]) => {
-    const player = props.gameState.players.find((p) => p.id === playerId)
-    return {
-      nickname: player?.nickname ?? 'Player',
-      label: POWERUP_LABELS[ptype] ?? ptype,
-    }
-  })
-})
-const bannedPowerupTypes = computed(() => Object.values(props.gameState.powerup_bans ?? {}))
-const draftTierGroups = computed(() => buildDraftTierGroups(bannedPowerupTypes.value))
-const draftBanCount = computed(() => Object.keys(props.gameState.powerup_bans ?? {}).length)
-const draftPlayerCount = computed(() => props.gameState.players.length)
-const matchBanChips = computed(() => {
-  const bans = props.gameState.powerup_bans ?? {}
-  return Object.values(bans).map((ptype) => ({
-    id: ptype,
-    label: POWERUP_LABELS[ptype] ?? ptype,
-    icon: POWERUP_ICONS[ptype] ?? '★',
-    color: POWERUP_COLORS[ptype] ?? '#a855f7',
-  }))
 })
 const matchMutatorLabel = computed(() =>
   mutatorStackLabel(props.gameState.mutator, props.gameState.mutator_secondary),
@@ -401,12 +375,6 @@ function updateCoachHint() {
     return
   }
 
-  if (props.gameState.phase === 'powerup_draft') {
-    coachHint.value =
-      'Remove one orb type from the pool for the rest of the match — pick what you never want to face'
-    return
-  }
-
   if (props.gameState.phase === 'countdown') {
     if (props.gameState.round === 1 && fogActive.value) {
       coachHint.value =
@@ -421,10 +389,6 @@ function updateCoachHint() {
       } else {
         coachHint.value = 'W/S or the on-screen arrows move your ship · Space fires'
       }
-      return
-    }
-    if (draftBanSummary.value.length) {
-      coachHint.value = `Banned: ${draftBanSummary.value.map((b) => b.label).join(', ')}`
       return
     }
     coachHint.value = null
@@ -582,8 +546,6 @@ function isInputBinding(code: string): boolean {
 function showPhaseBlockedNotice() {
   if (props.gameState.phase === 'countdown') {
     showPowerupNotice('Wait for the round to start', 'info')
-  } else if (props.gameState.phase === 'powerup_draft') {
-    showPowerupNotice('Finish the power-up ban first', 'info')
   } else if (props.gameState.phase === 'round_over' || props.gameState.phase === 'finished') {
     showPowerupNotice('Round is over', 'info')
   } else if (!isAlive.value && props.gameState.phase === 'playing') {
@@ -679,10 +641,6 @@ const rematchRequestNames = computed(() =>
     .filter((id) => id !== props.playerId)
     .map((id) => props.gameState.players.find((p) => p.id === id)?.nickname ?? 'Player'),
 )
-
-function banPowerup(type: string) {
-  emit('action', { type: 'ban_powerup', powerup_type: type })
-}
 
 function sendMove(direction: 'up' | 'down' | 'stop') {
   emit('action', { type: 'set_move', direction })
@@ -1282,51 +1240,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="isDraftPhase && !myBan" class="overlay draft">
-        <div class="draft-panel">
-          <span class="overlay-label">Ban a power-up</span>
-          <p class="overlay-hint draft-explainer">
-            Remove one orb type from the pool for the rest of the match. The arena behind you is already set for the next round.
-          </p>
-          <div v-for="group in draftTierGroups" :key="group.tier" class="draft-tier-group">
-            <span class="draft-tier-label">{{ group.label }}</span>
-            <div class="draft-grid">
-              <button
-                v-for="opt in group.options"
-                :key="opt.id"
-                type="button"
-                class="draft-card"
-                :class="[`tier-${opt.tier}`, { banned: opt.banned }]"
-                :disabled="opt.banned"
-                :title="opt.hint"
-                :style="{ '--draft-accent': opt.color }"
-                @click="banPowerup(opt.id)"
-              >
-                <span class="draft-icon" :style="{ color: opt.color }">{{ opt.icon }}</span>
-                <span class="draft-name">{{ opt.label }}</span>
-                <span class="draft-hint">{{ opt.hint }}</span>
-                <span v-if="opt.banned" class="draft-banned-tag">Banned</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-else-if="isDraftPhase" class="overlay draft">
-        <div class="draft-panel draft-waiting">
-          <span class="overlay-hint">Waiting for opponent to ban…</span>
-          <div class="draft-progress-row">
-            <span class="draft-spinner" aria-hidden="true" />
-            <span class="draft-progress">{{ draftBanCount }}/{{ draftPlayerCount }} bans locked in</span>
-          </div>
-          <ul v-if="draftBanSummary.length" class="draft-bans">
-            <li v-for="ban in draftBanSummary" :key="ban.nickname">
-              {{ ban.nickname }} banned {{ ban.label }}
-            </li>
-          </ul>
-        </div>
-      </div>
-
       <div v-if="gameState.phase === 'countdown'" class="overlay countdown">
         <span class="overlay-value pulse">{{ countdownRemaining ?? '…' }}</span>
         <span class="overlay-label">Get ready!</span>
@@ -1339,19 +1252,6 @@ onUnmounted(() => {
             </template>
           </template>
         </span>
-        <div v-if="matchBanChips.length" class="countdown-bans">
-          <span class="countdown-bans-label">Banned this match</span>
-          <div class="countdown-ban-chips">
-            <span
-              v-for="chip in matchBanChips"
-              :key="chip.id"
-              class="countdown-ban-chip"
-              :style="{ borderColor: chip.color, color: chip.color }"
-            >
-              {{ chip.icon }} {{ chip.label }}
-            </span>
-          </div>
-        </div>
       </div>
 
       <div v-else-if="isRoundOver" class="overlay round-over">

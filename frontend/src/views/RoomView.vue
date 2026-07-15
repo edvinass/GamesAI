@@ -20,7 +20,6 @@ import { validateLobby as validateCodenamesLobby, teamOperatives, teamSpymaster 
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
 import { validateLobby as validateDuelLobby } from '@/games/duel/lobbyValidation'
-import { getDailyChallenge } from '@/games/duel/dailyChallenge'
 import { validateLobby as validateTetrisLobby } from '@/games/tetris/lobbyValidation'
 import { validateLobby as validateGravityMasterLobby } from '@/games/gravity_master/lobbyValidation'
 import { validateLobby as validatePokerLobby } from '@/games/poker/lobbyValidation'
@@ -124,71 +123,6 @@ const duelMatchFormat = computed({
   get: () => String(room.value?.settings?.match_format ?? 'best_of_5'),
   set: (val: string) => updateSettings({ match_format: val }),
 })
-
-const duelMutator = computed({
-  get: () => String(room.value?.settings?.mutator ?? 'classic'),
-  set: (val: string) => updateSettings({ mutator: val }),
-})
-
-const duelObstacleCount = computed({
-  get: () => Number(room.value?.settings?.obstacle_count ?? 3),
-  set: (val: number) => updateSettings({ obstacle_count: val }),
-})
-
-const duelMutatorSecondary = computed({
-  get: () => String(room.value?.settings?.mutator_secondary ?? 'none'),
-  set: (val: string) => updateSettings({ mutator_secondary: val }),
-})
-
-const duelQuickLoadout = computed({
-  get: () => String(room.value?.settings?.quick_duel_loadout ?? 'none'),
-  set: (val: string) => updateSettings({ quick_duel_loadout: val }),
-})
-
-const duelArenaTheme = computed({
-  get: () => String(room.value?.settings?.arena_theme ?? 'classic'),
-  set: (val: string) => updateSettings({ arena_theme: val }),
-})
-
-const duelTrainingDrill = computed({
-  get: () => String(room.value?.settings?.training_drill ?? 'none'),
-  set: (val: string) => updateSettings({ training_drill: val }),
-})
-
-const duelObstacleRotation = computed({
-  get: () => Boolean(room.value?.settings?.obstacle_rotation),
-  set: (val: boolean) => updateSettings({ obstacle_rotation: val }),
-})
-
-const duelTutorialMode = computed({
-  get: () => Boolean(room.value?.settings?.tutorial_mode),
-  set: (val: boolean) => updateSettings({ tutorial_mode: val }),
-})
-
-const duelPowerupDraftEnabled = computed({
-  get: () => Boolean(room.value?.settings?.powerup_draft_enabled),
-  set: (val: boolean) => updateSettings({ powerup_draft_enabled: val }),
-})
-
-const duelAiPersonality = computed({
-  get: () => String(room.value?.settings?.ai_personality ?? 'balanced'),
-  set: (val: string) => updateSettings({ ai_personality: val }),
-})
-
-function applyDailyChallenge() {
-  const daily = getDailyChallenge()
-  updateSettings({
-    match_format: daily.matchFormat,
-    mutator: daily.mutator,
-    mutator_secondary: daily.mutatorSecondary,
-    obstacle_count: daily.obstacleCount,
-    layout_seed: daily.layoutSeed,
-  })
-}
-
-function applyDuelPreset(settings: Record<string, unknown>) {
-  updateSettings(settings)
-}
 
 const baseDropTicks = computed({
   get: () => Number(room.value?.settings?.base_drop_ticks ?? 20),
@@ -390,19 +324,8 @@ async function copyUrl() {
       <DuelLobby
         v-else-if="isDuel"
         v-model:solo-practice="soloPractice"
-        v-model:tick-ms="tickMs"
         v-model:match-format="duelMatchFormat"
-        v-model:mutator="duelMutator"
-        v-model:mutator-secondary="duelMutatorSecondary"
         v-model:ai-difficulty="aiDifficulty"
-        v-model:ai-personality="duelAiPersonality"
-        v-model:obstacle-count="duelObstacleCount"
-        v-model:quick-duel-loadout="duelQuickLoadout"
-        v-model:arena-theme="duelArenaTheme"
-        v-model:training-drill="duelTrainingDrill"
-        v-model:obstacle-rotation="duelObstacleRotation"
-        v-model:tutorial-mode="duelTutorialMode"
-        v-model:powerup-draft-enabled="duelPowerupDraftEnabled"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"
@@ -412,8 +335,6 @@ async function copyUrl() {
         :validation-issues="lobbyValidation.issues"
         @add-ai="addAi()"
         @remove="removePlayer"
-        @apply-daily="applyDailyChallenge"
-        @apply-preset="applyDuelPreset"
       />
 
       <TetrisLobby
