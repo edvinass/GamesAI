@@ -360,7 +360,12 @@ function selectMap(id: string) {
 }
 
 .preview-cell.conveyor {
-  background: #eab308;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #5c6574 0 2px,
+      #eab308 2px 4px
+    );
 }
 
 .preview-cell.laser {

@@ -711,8 +711,9 @@ function cardTypeClass(type?: string): string {
                 :class="[
                   floorShade(x, y),
                   {
-                    floor: !isPit(x, y),
+                    floor: !isPit(x, y) && !conveyorAt(x, y),
                     pit: isPit(x, y),
+                    'has-belt': !!conveyorAt(x, y),
                     antenna: isAntenna(x, y),
                     checkpoint: checkpointNum(x, y) != null,
                     repair: repairSet.has(`${x},${y}`),
@@ -724,24 +725,75 @@ function cardTypeClass(type?: string): string {
                   },
                 ]"
               >
-                <span
+                <div
                   v-if="conveyorAt(x, y)"
-                  class="tile-belt"
-                  :class="{ express: conveyorAt(x, y)!.express }"
-                >{{ FACING_ARROW[conveyorAt(x, y)!.dir] }}</span>
-                <span v-if="gearAt(x, y)" class="tile-gear">{{ gearAt(x, y) === 'left' ? '↺' : '↻' }}</span>
-                <span v-if="pusherAt(x, y)" class="tile-pusher" :title="`Pusher ${pusherAt(x, y)!.registers}`">
-                  {{ FACING_ARROW[pusherAt(x, y)!.dir] }}P
-                </span>
-                <span v-if="crusherAt(x, y)" class="tile-crusher" :title="`Crusher ${crusherAt(x, y)}`">X</span>
-                <span v-if="laserAt(x, y)" class="tile-laser">{{ FACING_ARROW[laserAt(x, y)!.dir] }}</span>
-                <span v-if="repairSet.has(`${x},${y}`)" class="tile-site">R</span>
-                <span v-if="upgradeSet.has(`${x},${y}`)" class="tile-site tile-upgrade">U</span>
+                  class="belt"
+                  :class="[
+                    `belt--${conveyorAt(x, y)!.dir}`,
+                    { 'belt--express': conveyorAt(x, y)!.express },
+                  ]"
+                  :title="conveyorAt(x, y)!.express ? 'Express conveyor' : 'Conveyor'"
+                >
+                  <span class="belt-track" />
+                  <span class="belt-rails" />
+                  <span class="belt-arrow">{{ FACING_ARROW[conveyorAt(x, y)!.dir] }}</span>
+                </div>
+
+                <div
+                  v-if="gearAt(x, y)"
+                  class="gear"
+                  :class="gearAt(x, y) === 'left' ? 'gear--left' : 'gear--right'"
+                  :title="gearAt(x, y) === 'left' ? 'Gear (left)' : 'Gear (right)'"
+                >
+                  <span class="gear-disc" />
+                </div>
+
+                <div
+                  v-if="pusherAt(x, y)"
+                  class="pusher"
+                  :class="`pusher--${pusherAt(x, y)!.dir}`"
+                  :title="`Pusher on registers ${pusherAt(x, y)!.registers.join(', ')}`"
+                >
+                  <span class="pusher-arm" />
+                  <span class="pusher-regs">{{ pusherAt(x, y)!.registers.join('') }}</span>
+                </div>
+
+                <div
+                  v-if="crusherAt(x, y)"
+                  class="crusher"
+                  :title="`Crusher on registers ${crusherAt(x, y)!.join(', ')}`"
+                >
+                  <span class="crusher-plate" />
+                  <span class="crusher-regs">{{ crusherAt(x, y)!.join('') }}</span>
+                </div>
+
+                <div
+                  v-if="laserAt(x, y)"
+                  class="laser-emitter"
+                  :class="`laser--${laserAt(x, y)!.dir}`"
+                  :title="`Laser ×${laserAt(x, y)!.strength}`"
+                >
+                  <span class="laser-gun" />
+                  <span class="laser-beam" />
+                </div>
+
+                <div v-if="isPit(x, y)" class="pit-hole" title="Pit">
+                  <span class="pit-hatch" />
+                </div>
+
+                <div v-if="repairSet.has(`${x},${y}`)" class="site site--repair" title="Repair">
+                  <span class="site-wrench" />
+                </div>
+                <div v-if="upgradeSet.has(`${x},${y}`)" class="site site--upgrade" title="Upgrade">
+                  <span class="site-chip" />
+                </div>
+
                 <span v-if="checkpointNum(x, y)" class="cp-ring">
                   <span class="cp-num">{{ checkpointNum(x, y) }}</span>
                 </span>
                 <span v-if="isAntenna(x, y)" class="antenna-glow">
-                  <span class="antenna-icon">A</span>
+                  <span class="antenna-mast" />
+                  <span class="antenna-dish" />
                 </span>
                 <div
                   v-if="robotOn(x, y)"
@@ -1106,74 +1158,466 @@ function cardTypeClass(type?: string): string {
 
 .grid {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   height: 100%;
   width: auto;
   max-width: 100%;
-  padding: 6px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.35);
-  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.4);
+  padding: 8px;
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, #3f4a5a 0%, #2a3340 40%, #1e2530 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -2px 8px rgba(0, 0, 0, 0.45),
+    0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
 .cell {
   position: relative;
   min-width: 0;
   min-height: 0;
-  border-radius: 5px;
+  border-radius: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 .cell.floor-a {
-  background: linear-gradient(145deg, #1a2744, #152038);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.04), transparent 42%),
+    repeating-linear-gradient(
+      90deg,
+      #2c3545 0 1px,
+      #243041 1px 7px
+    ),
+    #243041;
 }
 
 .cell.floor-b {
-  background: linear-gradient(145deg, #162035, #121a2e);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.03), transparent 42%),
+    repeating-linear-gradient(
+      90deg,
+      #263142 0 1px,
+      #1e2838 1px 7px
+    ),
+    #1e2838;
 }
 
 .cell.floor::after {
   content: '';
   position: absolute;
-  inset: 2px;
+  inset: 0;
   border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
   pointer-events: none;
+  z-index: 2;
 }
 
-.cell.pit {
-  background: radial-gradient(circle at center, #020617, #0f172a) !important;
+.cell.has-belt {
+  background: #1a1f28;
 }
 
-.cell.edge-n { border-top: 3px solid #94a3b8; }
-.cell.edge-e { border-right: 3px solid #94a3b8; }
-.cell.edge-s { border-bottom: 3px solid #94a3b8; }
-.cell.edge-w { border-left: 3px solid #94a3b8; }
+.cell.edge-n { box-shadow: inset 0 3px 0 0 #c0c8d4; }
+.cell.edge-e { box-shadow: inset -3px 0 0 0 #c0c8d4; }
+.cell.edge-s { box-shadow: inset 0 -3px 0 0 #c0c8d4; }
+.cell.edge-w { box-shadow: inset 3px 0 0 0 #c0c8d4; }
+.cell.edge-n.edge-e { box-shadow: inset 0 3px 0 0 #c0c8d4, inset -3px 0 0 0 #c0c8d4; }
+.cell.edge-n.edge-w { box-shadow: inset 0 3px 0 0 #c0c8d4, inset 3px 0 0 0 #c0c8d4; }
+.cell.edge-s.edge-e { box-shadow: inset 0 -3px 0 0 #c0c8d4, inset -3px 0 0 0 #c0c8d4; }
+.cell.edge-s.edge-w { box-shadow: inset 0 -3px 0 0 #c0c8d4, inset 3px 0 0 0 #c0c8d4; }
+.cell.edge-n.edge-s.edge-e.edge-w {
+  box-shadow:
+    inset 0 3px 0 0 #c0c8d4,
+    inset 0 -3px 0 0 #c0c8d4,
+    inset -3px 0 0 0 #c0c8d4,
+    inset 3px 0 0 0 #c0c8d4;
+}
 
-.tile-belt,
-.tile-gear,
-.tile-pusher,
-.tile-crusher,
-.tile-laser,
-.tile-site {
+/* ── Conveyor belts ── */
+.belt {
   position: absolute;
-  font-size: clamp(0.55rem, 1.6vw, 0.85rem);
-  font-weight: 700;
-  opacity: 0.9;
+  inset: 1px;
+  border-radius: 2px;
+  overflow: hidden;
+  z-index: 1;
+  background: #3d4450;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.55),
+    inset 0 2px 4px rgba(255, 255, 255, 0.08);
+}
+
+.belt-track {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #5c6574 0 5px,
+      #8b93a1 5px 7px,
+      #4a5260 7px 12px
+    );
+  opacity: 0.95;
+  animation: belt-scroll-x 0.85s linear infinite;
+}
+
+.belt--express .belt-track {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #9a4d14 0 5px,
+      #e68a2e 5px 7px,
+      #7a3b0f 7px 12px
+    );
+  animation-duration: 0.45s;
+}
+
+.belt--N .belt-track,
+.belt--S .belt-track {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      #5c6574 0 5px,
+      #8b93a1 5px 7px,
+      #4a5260 7px 12px
+    );
+  animation-name: belt-scroll-y;
+}
+
+.belt--express.belt--N .belt-track,
+.belt--express.belt--S .belt-track {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      #9a4d14 0 5px,
+      #e68a2e 5px 7px,
+      #7a3b0f 7px 12px
+    );
+}
+
+.belt--S .belt-track,
+.belt--W .belt-track {
+  animation-direction: reverse;
+}
+
+.belt-rails {
+  position: absolute;
+  inset: 0;
   pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(250, 204, 21, 0.35),
+    inset 2px 0 0 rgba(0, 0, 0, 0.35),
+    inset -2px 0 0 rgba(0, 0, 0, 0.35);
+}
+
+.belt--express .belt-rails {
+  box-shadow:
+    inset 0 0 0 1px rgba(249, 115, 22, 0.55),
+    inset 2px 0 0 rgba(0, 0, 0, 0.35),
+    inset -2px 0 0 rgba(0, 0, 0, 0.35);
+}
+
+.belt--N .belt-rails,
+.belt--S .belt-rails {
+  box-shadow:
+    inset 0 0 0 1px rgba(250, 204, 21, 0.35),
+    inset 0 2px 0 rgba(0, 0, 0, 0.35),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.belt--express.belt--N .belt-rails,
+.belt--express.belt--S .belt-rails {
+  box-shadow:
+    inset 0 0 0 1px rgba(249, 115, 22, 0.55),
+    inset 0 2px 0 rgba(0, 0, 0, 0.35),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.belt-arrow {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(0.65rem, 1.8vmin, 1.1rem);
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  z-index: 2;
+}
+
+@keyframes belt-scroll-x {
+  from { background-position: 0 0; }
+  to { background-position: 12px 0; }
+}
+
+@keyframes belt-scroll-y {
+  from { background-position: 0 0; }
+  to { background-position: 0 12px; }
+}
+
+/* ── Gears ── */
+.gear {
+  position: absolute;
+  inset: 12%;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.gear-disc {
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, #d4d4d8, #71717a 55%, #3f3f46 100%);
+  box-shadow:
+    0 0 0 2px #52525b,
+    inset 0 1px 2px rgba(255, 255, 255, 0.35),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.45);
+  position: relative;
+  animation: gear-spin-right 3.2s linear infinite;
+}
+
+.gear--left .gear-disc {
+  animation-name: gear-spin-left;
+}
+
+.gear-disc::before {
+  content: '';
+  position: absolute;
+  inset: -14%;
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      #a1a1aa 0deg 12deg,
+      transparent 12deg 30deg
+    );
+  border-radius: 50%;
+  mask: radial-gradient(circle, transparent 52%, #000 53%);
+  -webkit-mask: radial-gradient(circle, transparent 52%, #000 53%);
+}
+
+.gear-disc::after {
+  content: '';
+  position: absolute;
+  inset: 28%;
+  border-radius: 50%;
+  background: #27272a;
+  box-shadow: inset 0 0 0 2px #52525b;
+}
+
+@keyframes gear-spin-right {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes gear-spin-left {
+  to { transform: rotate(-360deg); }
+}
+
+/* ── Pushers / crushers ── */
+.pusher,
+.crusher {
+  position: absolute;
+  inset: 8%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pusher-arm {
+  position: absolute;
+  background: linear-gradient(180deg, #7dd3fc, #0284c7);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  animation: pusher-pulse 1.4s ease-in-out infinite;
+}
+
+.pusher--N .pusher-arm,
+.pusher--S .pusher-arm {
+  left: 32%;
+  width: 36%;
+  height: 55%;
+}
+.pusher--N .pusher-arm { top: 8%; }
+.pusher--S .pusher-arm { bottom: 8%; }
+.pusher--E .pusher-arm,
+.pusher--W .pusher-arm {
+  top: 32%;
+  height: 36%;
+  width: 55%;
+}
+.pusher--E .pusher-arm { right: 8%; }
+.pusher--W .pusher-arm { left: 8%; }
+
+.pusher-regs,
+.crusher-regs {
+  position: absolute;
+  bottom: 0;
+  right: 1px;
+  font-size: clamp(0.4rem, 1vmin, 0.65rem);
+  font-weight: 800;
+  color: #e2e8f0;
+  text-shadow: 0 1px 1px #000;
+}
+
+.crusher-plate {
+  position: absolute;
+  inset: 18% 12%;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #7f1d1d 0 3px,
+      #450a0a 3px 6px
+    );
+  border: 2px solid #fca5a5;
+  border-radius: 2px;
+  animation: crusher-chomp 1.6s ease-in-out infinite;
+}
+
+@keyframes pusher-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+@keyframes crusher-chomp {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.72); }
+}
+
+/* ── Lasers ── */
+.laser-emitter {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.laser-gun {
+  position: absolute;
+  width: 28%;
+  height: 28%;
+  background: linear-gradient(145deg, #fb7185, #be123c);
+  border-radius: 2px;
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.7);
+}
+
+.laser--E .laser-gun { left: 6%; top: 36%; }
+.laser--W .laser-gun { right: 6%; top: 36%; }
+.laser--N .laser-gun { bottom: 6%; left: 36%; }
+.laser--S .laser-gun { top: 6%; left: 36%; }
+
+.laser-beam {
+  position: absolute;
+  background: linear-gradient(90deg, rgba(251, 113, 133, 0.15), rgba(251, 113, 133, 0.85), rgba(251, 113, 133, 0.15));
+  box-shadow: 0 0 6px rgba(251, 113, 133, 0.8);
+  animation: laser-flicker 0.9s ease-in-out infinite;
+}
+
+.laser--E .laser-beam,
+.laser--W .laser-beam {
+  top: 46%;
+  height: 8%;
+  width: 70%;
+}
+.laser--E .laser-beam { left: 28%; }
+.laser--W .laser-beam { right: 28%; }
+.laser--N .laser-beam,
+.laser--S .laser-beam {
+  left: 46%;
+  width: 8%;
+  height: 70%;
+  background: linear-gradient(180deg, rgba(251, 113, 133, 0.15), rgba(251, 113, 133, 0.85), rgba(251, 113, 133, 0.15));
+}
+.laser--N .laser-beam { bottom: 28%; }
+.laser--S .laser-beam { top: 28%; }
+
+@keyframes laser-flicker {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* ── Pits ── */
+.cell.pit {
+  background: #0b1220 !important;
+}
+
+.pit-hole {
+  position: absolute;
+  inset: 10%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 45%, #020617 0 42%, #111827 58%, #1f2937 100%);
+  box-shadow:
+    inset 0 0 0 2px #334155,
+    inset 0 8px 14px rgba(0, 0, 0, 0.85);
   z-index: 1;
 }
 
-.tile-belt { color: #eab308; }
-.tile-belt.express { color: #f97316; }
-.tile-gear { color: #a78bfa; }
-.tile-pusher { color: #38bdf8; font-size: clamp(0.4rem, 1.1vw, 0.65rem); }
-.tile-crusher { color: #f87171; }
-.tile-laser { color: #fb7185; top: 2px; left: 2px; }
-.tile-site { color: #4ade80; bottom: 2px; right: 3px; }
-.tile-upgrade { color: #22d3ee; }
+.pit-hatch {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(#0f172a 0 10deg, #1e293b 10deg 20deg);
+  opacity: 0.55;
+}
+
+/* ── Repair / upgrade ── */
+.site {
+  position: absolute;
+  inset: 14%;
+  border-radius: 4px;
+  z-index: 1;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.site--repair {
+  background: radial-gradient(circle, rgba(74, 222, 128, 0.22), rgba(22, 101, 52, 0.35));
+  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.55);
+}
+
+.site--upgrade {
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.22), rgba(21, 94, 117, 0.35));
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.55);
+}
+
+.site-wrench,
+.site-chip {
+  width: 42%;
+  height: 42%;
+  border-radius: 2px;
+}
+
+.site-wrench {
+  background:
+    linear-gradient(135deg, transparent 40%, #86efac 40% 55%, transparent 55%),
+    linear-gradient(45deg, transparent 40%, #86efac 40% 55%, transparent 55%);
+}
+
+.site-chip {
+  background:
+    linear-gradient(#67e8f9, #67e8f9) center / 55% 18% no-repeat,
+    linear-gradient(#67e8f9, #67e8f9) center / 18% 55% no-repeat,
+    #0e7490;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px #a5f3fc;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .belt-track,
+  .gear-disc,
+  .pusher-arm,
+  .crusher-plate,
+  .laser-beam {
+    animation: none !important;
+  }
+}
 
 .slot--locked {
   opacity: 0.65;
@@ -1204,14 +1648,16 @@ function cardTypeClass(type?: string): string {
 
 .cp-ring {
   position: absolute;
-  inset: 12%;
+  inset: 14%;
   border-radius: 50%;
-  border: 2px solid rgba(250, 204, 21, 0.55);
-  background: rgba(250, 204, 21, 0.08);
+  border: 2px solid rgba(250, 204, 21, 0.7);
+  background:
+    radial-gradient(circle at 50% 45%, rgba(253, 224, 71, 0.2), rgba(250, 204, 21, 0.05) 60%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
+  z-index: 2;
+  box-shadow: 0 0 10px rgba(250, 204, 21, 0.25);
 }
 
 .cp-num {
@@ -1222,19 +1668,37 @@ function cardTypeClass(type?: string): string {
 }
 
 .antenna-glow {
-  position: relative;
-  z-index: 1;
+  position: absolute;
+  inset: 18%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
   animation: antenna-pulse 2s ease-in-out infinite;
+  pointer-events: none;
 }
 
-.antenna-icon {
-  font-size: clamp(0.9rem, 2vmin, 1.4rem);
-  filter: drop-shadow(0 0 6px rgba(129, 140, 248, 0.8));
+.antenna-mast {
+  width: 12%;
+  height: 55%;
+  background: linear-gradient(90deg, #64748b, #e2e8f0, #64748b);
+  border-radius: 1px;
+  box-shadow: 0 0 6px rgba(129, 140, 248, 0.6);
+}
+
+.antenna-dish {
+  width: 55%;
+  height: 28%;
+  margin-top: -4%;
+  border-radius: 50% 50% 40% 40%;
+  background: radial-gradient(circle at 50% 30%, #a5b4fc, #4338ca 70%);
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.7);
 }
 
 @keyframes antenna-pulse {
   0%, 100% { transform: scale(1); opacity: 0.9; }
-  50% { transform: scale(1.08); opacity: 1; }
+  50% { transform: scale(1.06); opacity: 1; }
 }
 
 .robot {
