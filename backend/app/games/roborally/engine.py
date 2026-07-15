@@ -25,6 +25,7 @@ class RoboRallyEngine(GamePlugin):
             "hand_size": 9,
             "map_id": "factory_floor",
             "ai_difficulty": "medium",
+            "available_maps": list_maps(),
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -47,6 +48,8 @@ class RoboRallyEngine(GamePlugin):
         if difficulty not in ("easy", "medium", "hard"):
             difficulty = "medium"
         merged["ai_difficulty"] = difficulty
+        # Always refresh from registry so lobby clients cannot stale / forge previews.
+        merged["available_maps"] = list_maps()
         return merged
 
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:

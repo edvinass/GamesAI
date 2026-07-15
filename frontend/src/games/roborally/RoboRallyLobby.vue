@@ -1,7 +1,22 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Room } from '@/types'
 
-defineProps<{
+interface MapPreview {
+  id: string
+  name: string
+  description?: string
+  difficulty?: string
+  width: number
+  height: number
+  checkpoint_count?: number
+  walls: number[][]
+  checkpoints: number[][]
+  antenna: number[]
+  starts?: Array<{ x: number; y: number; facing: string }>
+}
+
+const props = defineProps<{
   room: Room
   isHost: boolean
   currentPlayerId: string
@@ -21,10 +36,49 @@ const emit = defineEmits<{
   remove: [id: string]
 }>()
 
-const mapOptions = [
-  { id: 'factory_floor', label: 'Factory Floor', detail: 'Winding course with obstacles' },
-  { id: 'open_grid', label: 'Open Grid', detail: 'Simpler layout for quick races' },
+const FALLBACK_MAPS: MapPreview[] = [
+  {
+    id: 'factory_floor',
+    name: 'Factory Floor',
+    description: 'Winding halls with mid-board chokepoints — classic race.',
+    difficulty: 'standard',
+    width: 13,
+    height: 11,
+    checkpoint_count: 3,
+    walls: [],
+    checkpoints: [],
+    antenna: [6, 5],
+  },
 ]
+
+const mapOptions = computed<MapPreview[]>(() => {
+  const raw = props.room.settings?.available_maps
+  if (!Array.isArray(raw) || raw.length === 0) return FALLBACK_MAPS
+  return raw
+    .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
+    .map((m) => ({
+      id: String(m.id ?? ''),
+      name: String(m.name ?? m.id ?? 'Map'),
+      description: String(m.description ?? ''),
+      difficulty: String(m.difficulty ?? 'standard'),
+      width: Number(m.width ?? 10),
+      height: Number(m.height ?? 10),
+      checkpoint_count: Number(
+        m.checkpoint_count ?? (Array.isArray(m.checkpoints) ? m.checkpoints.length : 0),
+      ),
+      walls: Array.isArray(m.walls) ? (m.walls as number[][]) : [],
+      checkpoints: Array.isArray(m.checkpoints) ? (m.checkpoints as number[][]) : [],
+      antenna: Array.isArray(m.antenna) ? (m.antenna as number[]) : [0, 0],
+      starts: Array.isArray(m.starts)
+        ? (m.starts as Array<{ x: number; y: number; facing: string }>)
+        : [],
+    }))
+    .filter((m) => m.id)
+})
+
+const selectedMap = computed(
+  () => mapOptions.value.find((m) => m.id === mapId.value) ?? mapOptions.value[0],
+)
 
 const registerOptions = [
   { value: 3, label: '3 cards' },
@@ -39,6 +93,26 @@ const difficultyOptions = [
 ]
 
 const maxPlayers = 4
+
+const DIFFICULTY_LABEL: Record<string, string> = {
+  easy: 'Easy',
+  standard: 'Standard',
+  hard: 'Hard',
+  long: 'Long',
+}
+
+function cellKind(map: MapPreview, x: number, y: number): string {
+  if (map.walls.some(([wx, wy]) => wx === x && wy === y)) return 'wall'
+  if (map.checkpoints.some(([cx, cy]) => cx === x && cy === y)) return 'checkpoint'
+  if (map.antenna[0] === x && map.antenna[1] === y) return 'antenna'
+  if (map.starts?.some((s) => s.x === x && s.y === y)) return 'start'
+  return 'floor'
+}
+
+function selectMap(id: string) {
+  if (!props.isHost) return
+  mapId.value = id
+}
 </script>
 
 <template>
@@ -51,11 +125,48 @@ const maxPlayers = 4
 
       <div class="setting-row">
         <span class="setting-label">Map</span>
-        <select v-model="mapId" class="setting-select">
-          <option v-for="opt in mapOptions" :key="opt.id" :value="opt.id">
-            {{ opt.label }} — {{ opt.detail }}
-          </option>
-        </select>
+        <div class="map-grid" role="listbox" :aria-label="'Select map'">
+          <button
+            v-for="opt in mapOptions"
+            :key="opt.id"
+            type="button"
+            class="map-card"
+            :class="{ selected: mapId === opt.id }"
+            role="option"
+            :aria-selected="mapId === opt.id"
+            @click="selectMap(opt.id)"
+          >
+            <div
+              class="map-preview"
+              :style="{
+                gridTemplateColumns: `repeat(${opt.width}, 1fr)`,
+                gridTemplateRows: `repeat(${opt.height}, 1fr)`,
+                aspectRatio: `${opt.width} / ${opt.height}`,
+              }"
+            >
+              <template v-for="y in opt.height" :key="'py-' + y">
+                <span
+                  v-for="x in opt.width"
+                  :key="`${opt.id}-${x - 1}-${y - 1}`"
+                  class="preview-cell"
+                  :class="cellKind(opt, x - 1, y - 1)"
+                />
+              </template>
+            </div>
+            <div class="map-meta">
+              <span class="map-name">{{ opt.name }}</span>
+              <span class="map-tags">
+                <span class="map-tag">{{ DIFFICULTY_LABEL[opt.difficulty || 'standard'] || opt.difficulty }}</span>
+                <span class="map-tag">{{ opt.width }}×{{ opt.height }}</span>
+                <span class="map-tag">{{ opt.checkpoint_count ?? opt.checkpoints.length }} CP</span>
+              </span>
+              <span class="map-desc">{{ opt.description }}</span>
+            </div>
+          </button>
+        </div>
+        <p v-if="selectedMap" class="map-selected-hint">
+          Selected: <strong>{{ selectedMap.name }}</strong>
+        </p>
       </div>
 
       <div class="setting-row">
@@ -75,6 +186,12 @@ const maxPlayers = 4
           </option>
         </select>
       </div>
+    </div>
+
+    <div v-else-if="selectedMap" class="guest-map card">
+      <span class="setting-label">Race map</span>
+      <p class="guest-map-name">{{ selectedMap.name }}</p>
+      <p class="map-desc">{{ selectedMap.description }}</p>
     </div>
 
     <div v-if="soloPractice" class="solo-notice card">
@@ -164,6 +281,117 @@ const maxPlayers = 4
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
+}
+
+.map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+  gap: 0.65rem;
+}
+
+.map-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-elevated, var(--surface));
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.map-card:hover {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border));
+  transform: translateY(-1px);
+}
+
+.map-card.selected {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #3b82f6) 40%, transparent);
+}
+
+.map-preview {
+  display: grid;
+  width: 100%;
+  gap: 1px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.preview-cell {
+  min-height: 0;
+  min-width: 0;
+  aspect-ratio: 1;
+}
+
+.preview-cell.floor {
+  background: color-mix(in srgb, var(--surface) 80%, #64748b 20%);
+}
+
+.preview-cell.wall {
+  background: #334155;
+}
+
+.preview-cell.checkpoint {
+  background: #f59e0b;
+}
+
+.preview-cell.antenna {
+  background: #22d3ee;
+}
+
+.preview-cell.start {
+  background: #22c55e;
+}
+
+.map-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.map-name {
+  font-weight: 650;
+  font-size: 0.95rem;
+}
+
+.map-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.map-tag {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.map-desc {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.map-selected-hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.guest-map-name {
+  margin: 0.2rem 0;
+  font-weight: 650;
+  font-size: 1.05rem;
 }
 
 .solo-notice p {

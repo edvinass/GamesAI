@@ -78,6 +78,21 @@ watch(lastMessage, (msg) => {
   }
 })
 
+// Refresh RoboRally map catalog for lobbies created before available_maps existed.
+watch(
+  () => [room.value, connected.value] as const,
+  ([r, isConnected]) => {
+    if (!isConnected || !r || r.game_type !== 'roborally' || r.status !== 'lobby') return
+    if (r.host_player_id !== playerStore.playerId) return
+    const maps = r.settings?.available_maps
+    if (Array.isArray(maps) && maps.length > 0) return
+    send({
+      type: 'update_settings',
+      settings: { map_id: String(r.settings?.map_id ?? 'factory_floor') },
+    })
+  },
+)
+
 const roomUrl = computed(() => `${window.location.origin}/room/${roomId.value}`)
 const isHost = computed(() => room.value?.host_player_id === playerStore.playerId)
 

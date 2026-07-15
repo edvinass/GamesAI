@@ -1,5 +1,6 @@
 from app.games.roborally.ai import choose_ai_actions
 from app.games.roborally.engine import RoboRallyEngine
+from app.games.roborally.maps import MAPS, get_map, list_maps, validate_map_definition
 
 
 def _players(count: int = 2):
@@ -18,6 +19,43 @@ def test_initial_state():
     assert len(state["hands"]["p1"]) == 9
     assert len(state["programs"]["p1"]) == 5
     assert state["robots"]["p1"]["checkpoints_reached"] == 0
+    assert state["board"]["id"] == "factory_floor"
+
+
+def test_all_maps_are_valid():
+    assert len(MAPS) >= 4
+    for map_id, map_def in MAPS.items():
+        validate_map_definition(map_def)
+        assert map_def["id"] == map_id
+
+
+def test_list_maps_includes_preview_geometry():
+    summaries = list_maps()
+    assert {m["id"] for m in summaries} == set(MAPS)
+    for summary in summaries:
+        assert summary["width"] > 0
+        assert summary["height"] > 0
+        assert summary["checkpoint_count"] >= 1
+        assert isinstance(summary["walls"], list)
+        assert isinstance(summary["checkpoints"], list)
+
+
+def test_settings_expose_available_maps_and_select_map():
+    engine = RoboRallyEngine()
+    defaults = engine.default_settings()
+    assert any(m["id"] == "chop_shop" for m in defaults["available_maps"])
+
+    settings = engine.validate_settings({"map_id": "open_grid"})
+    assert settings["map_id"] == "open_grid"
+    assert len(settings["available_maps"]) == len(MAPS)
+
+    settings = engine.validate_settings({"map_id": "does_not_exist"})
+    assert settings["map_id"] == "factory_floor"
+
+    state = engine.create_initial_state(_players(2), {"map_id": "twin_lanes"})
+    assert state["board"]["id"] == "twin_lanes"
+    assert state["board"]["name"] == get_map("twin_lanes")["name"]
+    assert state["robots"]["p1"]["x"] == get_map("twin_lanes")["starts"][0]["x"]
 
 
 def test_place_and_lock_program():
