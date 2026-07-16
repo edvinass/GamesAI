@@ -58,7 +58,8 @@ const isMyTurnToAnswer = computed(() => {
 
 const hasVoted = computed(() => {
   if (!me.value) return false
-  return props.playerId in props.gameState.votes
+  if (props.gameState.viewer_has_voted) return true
+  return props.playerId in (props.gameState.votes ?? {})
 })
 
 const otherPlayers = computed(() =>
@@ -486,8 +487,11 @@ watch(
             <button class="btn-secondary" :disabled="!selectedLocation" @click="guessLocation">Guess location</button>
           </div>
 
-          <div v-if="!isMyTurnToAsk && !isMyTurnToAnswer" class="action-block accuse-block">
+          <div class="action-block accuse-block">
             <h4>Call accusation</h4>
+            <p class="muted spoken-action-hint">
+              End questioning and vote for who you think is the Spy.
+            </p>
             <div class="accuse-buttons">
               <button
                 v-for="p in otherPlayers"
@@ -504,6 +508,14 @@ watch(
         <template v-if="gameState.phase === 'voting'">
           <div v-if="!hasVoted" class="action-block">
             <h4>Vote for the Spy</h4>
+            <p
+              v-if="gameState.accused_player_id"
+              class="muted spoken-action-hint"
+            >
+              Accusation against
+              <strong>{{ playerLabel(gameState.accused_player_id) }}</strong>
+              — vote for whoever you think is the Spy.
+            </p>
             <div class="vote-buttons">
               <button
                 v-for="p in room.players"

@@ -65,6 +65,7 @@ export interface SpyfallGameState {
   votes_total: number
   accused_player_id: string | null
   accusation_caller_id: string | null
+  viewer_has_voted: boolean
   winner: 'spy' | 'residents' | null
   win_reason: string | null
   last_action: Record<string, unknown> | null

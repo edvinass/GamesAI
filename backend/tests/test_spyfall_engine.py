@@ -129,6 +129,46 @@ def test_vote_identifies_spy(engine: SpyfallEngine, state: dict) -> None:
     assert state["win_reason"] == "spy_voted_out"
 
 
+def test_mid_vote_shows_own_vote_only(engine: SpyfallEngine, state: dict) -> None:
+    spy_id = state["spy_id"]
+    voter = next(p for p in state["players"] if p["id"] != spy_id)
+    other = next(p for p in state["players"] if p["id"] not in (spy_id, voter["id"]))
+
+    state["phase"] = "voting"
+    state["votes"] = {}
+    state, _ = engine.apply_action(
+        state,
+        {"type": "cast_vote", "vote_for_player_id": spy_id},
+        voter,
+    )
+
+    voter_view = engine.get_public_state(state, voter)
+    assert voter_view["viewer_has_voted"] is True
+    assert voter["id"] in voter_view["votes"]
+    assert other["id"] not in voter_view["votes"]
+    assert voter_view["votes_cast_count"] == 1
+
+    other_view = engine.get_public_state(state, other)
+    assert other_view["viewer_has_voted"] is False
+    assert other_view["votes"] == {}
+    assert other_view["votes_cast_count"] == 1
+
+
+def test_accusation_starts_voting_from_asker_turn(engine: SpyfallEngine, state: dict) -> None:
+    asker_id = state["turn_order"][state["current_turn_index"]]
+    accused_id = next(p["id"] for p in state["players"] if p["id"] != asker_id)
+    asker = next(p for p in state["players"] if p["id"] == asker_id)
+
+    state, events = engine.apply_action(
+        state,
+        {"type": "call_accusation", "accused_player_id": accused_id},
+        asker,
+    )
+    assert state["phase"] == "voting"
+    assert state["accused_player_id"] == accused_id
+    assert events[0]["type"] == "phase_changed"
+
+
 def test_vote_fails_spy_wins(engine: SpyfallEngine, state: dict) -> None:
     spy_id = state["spy_id"]
     innocent_id = next(p["id"] for p in state["players"] if p["id"] != spy_id)

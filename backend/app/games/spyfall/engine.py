@@ -273,7 +273,7 @@ class SpyfallEngine(GamePlugin):
         elif action_type == "cast_vote":
             if state["phase"] != "voting":
                 raise ValueError("Not in voting phase")
-            if player_id in state["votes"]:
+            if any(str(k) == str(player_id) for k in state["votes"]):
                 raise ValueError("You already voted")
 
             vote_for = action.get("vote_for_player_id")
@@ -282,9 +282,9 @@ class SpyfallEngine(GamePlugin):
                 if not self._player_by_id(state, vote_for):
                     raise ValueError("Vote target not found")
 
-            state["votes"][player_id] = vote_for
-            state["last_action"] = {"type": "cast_vote", "voter_id": player_id, "vote_for": vote_for}
-            events.append({"type": "vote_cast", "voter_id": player_id})
+            state["votes"][str(player_id)] = vote_for
+            state["last_action"] = {"type": "cast_vote", "voter_id": str(player_id), "vote_for": vote_for}
+            events.append({"type": "vote_cast", "voter_id": str(player_id)})
 
             if len(state["votes"]) >= len(state["players"]):
                 events.extend(self._resolve_votes(state))
@@ -334,9 +334,17 @@ class SpyfallEngine(GamePlugin):
         all_voted = len(state.get("votes", {})) >= len(state.get("players", []))
         votes_visible = game_over or all_voted
 
+        raw_votes = state.get("votes", {})
         public_votes: dict[str, str | None] = {}
         if votes_visible:
-            public_votes = dict(state.get("votes", {}))
+            public_votes = {str(k): v for k, v in raw_votes.items()}
+        elif viewer_id:
+            # Reveal only the viewer's own vote so the UI can show "waiting for others"
+            # without leaking everyone else's choice mid-vote.
+            for key, value in raw_votes.items():
+                if str(key) == str(viewer_id):
+                    public_votes[str(viewer_id)] = value
+                    break
 
         reveal_assignments = None
         if game_over:
@@ -357,10 +365,12 @@ class SpyfallEngine(GamePlugin):
             else None,
             "timer_ends_at": state.get("timer_ends_at"),
             "votes": public_votes,
-            "votes_cast_count": len(state.get("votes", {})),
+            "votes_cast_count": len(raw_votes),
             "votes_total": len(state.get("players", [])),
             "accused_player_id": state.get("accused_player_id"),
             "accusation_caller_id": state.get("accusation_caller_id"),
+            "viewer_has_voted": bool(viewer_id)
+            and any(str(k) == str(viewer_id) for k in raw_votes),
             "winner": state.get("winner"),
             "win_reason": state.get("win_reason"),
             "last_action": state.get("last_action"),
@@ -396,8 +406,9 @@ class SpyfallEngine(GamePlugin):
             return self._player_by_id(state, turn_id)
 
         if phase == "voting":
+            voted_ids = {str(pid) for pid in state.get("votes", {})}
             for player in state["players"]:
-                if player["id"] not in state.get("votes", {}):
+                if str(player["id"]) not in voted_ids:
                     return player
             return None
 
