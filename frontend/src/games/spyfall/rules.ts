@@ -6,7 +6,7 @@ export const spyfallRules: GameRules = {
   quickStart: [
     'When the round starts, read your assignment — Spy or Resident.',
     'Residents share one location and each get a role; everyone can see the full list of possible locations.',
-    'Take turns asking one other player a question; they must answer in the chat.',
+    'Take turns asking one other player a question (typed online, or aloud in Same room mode).',
     'Accuse someone to start a vote, or (as Spy) guess the location to end the round.',
   ],
   sections: [
@@ -24,7 +24,16 @@ export const spyfallRules: GameRules = {
       bullets: [
         'Residents: ask questions that test whether others know the location — without naming it yourself.',
         'Spy: ask vague questions that could fit many locations. Bluff if you need to.',
-        'All Q&A appears in the public conversation log.',
+        'Online: type Q&A in the app. Same room: speak aloud, then confirm on your device.',
+      ],
+    },
+    {
+      heading: 'Same room mode',
+      body: 'Enable this in the lobby when everyone is together. Phones only show secrets and track turns — you talk face to face.',
+      bullets: [
+        'Asker picks a target and asks aloud, then taps confirm.',
+        'Target answers aloud, then taps confirm to advance the turn.',
+        'Accusations, votes, and spy location guesses still happen in the app.',
       ],
     },
     {
@@ -50,13 +59,13 @@ export const spyfallRules: GameRules = {
     },
     {
       heading: 'AI & solo practice',
-      body: 'Need a full table? The host can add AI players in the lobby, or enable solo practice for a 3-player game (you + 2 AI).',
+      body: 'Need a full table? The host can add AI players in the lobby, or enable solo practice for a 3-player game (you + 2 AI). Same room mode is humans only — AI seats are disabled.',
     },
   ],
   tips: [
     'Read your assignment carefully before dismissing the reveal screen.',
     'Residents: answer naturally for your role — overly perfect answers can make you look suspicious.',
     'Everyone: keep the location list open — residents to ask sharper questions, the Spy to narrow guesses.',
-    'Voice chat is optional — all questions and answers happen in the app.',
+    'Same room: keep phones face-up for roles, but talk to each other — not the chat box.',
   ],
 }

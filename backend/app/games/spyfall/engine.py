@@ -13,6 +13,8 @@ LOCATION_DIR = Path(__file__).parent / "locations"
 class SpyfallEngine(GamePlugin):
     game_type = "spyfall"
 
+    SPOKEN_PLACEHOLDER = "(spoken)"
+
     def default_settings(self) -> dict:
         return {
             "min_players": 3,
@@ -20,6 +22,7 @@ class SpyfallEngine(GamePlugin):
             "round_timer_sec": 480,
             "location_pack": "classic",
             "solo_practice": False,
+            "same_room": False,
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -31,7 +34,14 @@ class SpyfallEngine(GamePlugin):
         if merged["location_pack"] not in ("classic",):
             merged["location_pack"] = "classic"
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
+        merged["same_room"] = bool(merged.get("same_room", False))
+        # Same-room voice play doesn't mix with solo AI practice.
+        if merged["same_room"] and merged["solo_practice"]:
+            merged["solo_practice"] = False
         return merged
+
+    def _is_same_room(self, state: dict) -> bool:
+        return bool((state.get("settings") or {}).get("same_room"))
 
     def _load_locations(self, pack: str) -> list[dict]:
         path = LOCATION_DIR / f"{pack}.json"
@@ -48,6 +58,9 @@ class SpyfallEngine(GamePlugin):
             if len(humans) != 1:
                 return "Solo practice requires exactly one human player"
             return None
+
+        if settings.get("same_room") and any(p.get("is_ai") for p in players):
+            return "Same-room mode does not allow AI players — remove them first"
 
         count = len(players)
         if count < settings["min_players"]:
@@ -174,8 +187,11 @@ class SpyfallEngine(GamePlugin):
                 raise ValueError("Not your turn to ask")
 
             target_id = str(action["target_player_id"])
-            question = str(action["question"]).strip()
-            if not question:
+            same_room = self._is_same_room(state)
+            question = str(action.get("question") or "").strip()
+            if same_room:
+                question = self.SPOKEN_PLACEHOLDER
+            elif not question:
                 raise ValueError("Question cannot be empty")
             if target_id == player_id:
                 raise ValueError("Cannot ask yourself a question")
@@ -186,12 +202,14 @@ class SpyfallEngine(GamePlugin):
                 "from_id": player_id,
                 "to_id": target_id,
                 "question": question,
+                "spoken": same_room,
             }
             state["last_action"] = {
                 "type": "ask_question",
                 "from_id": player_id,
                 "to_id": target_id,
                 "question": question,
+                "spoken": same_room,
             }
             events.append({"type": "question_asked", "from_id": player_id, "to_id": target_id})
 
@@ -204,8 +222,11 @@ class SpyfallEngine(GamePlugin):
             if player_id != pending["to_id"]:
                 raise ValueError("You were not asked this question")
 
-            answer = str(action["answer"]).strip()
-            if not answer:
+            same_room = self._is_same_room(state) or bool(pending.get("spoken"))
+            answer = str(action.get("answer") or "").strip()
+            if same_room:
+                answer = self.SPOKEN_PLACEHOLDER
+            elif not answer:
                 raise ValueError("Answer cannot be empty")
 
             from_player = self._player_by_id(state, pending["from_id"])
@@ -217,6 +238,7 @@ class SpyfallEngine(GamePlugin):
                 "to_nickname": to_player["nickname"] if to_player else "?",
                 "question": pending["question"],
                 "answer": answer,
+                "spoken": same_room,
             })
             state["pending_question"] = None
             self._advance_turn(state)
@@ -225,6 +247,7 @@ class SpyfallEngine(GamePlugin):
                 "from_id": pending["from_id"],
                 "to_id": pending["to_id"],
                 "answer": answer,
+                "spoken": same_room,
             }
             events.append({"type": "question_answered", "from_id": pending["from_id"], "to_id": pending["to_id"]})
 
@@ -346,6 +369,7 @@ class SpyfallEngine(GamePlugin):
             "viewer_location": viewer_location,
             "viewer_role": viewer_role,
             "location_names": state.get("all_location_names", []) if viewer_id and not game_over else None,
+            "same_room": self._is_same_room(state),
             "revealed_location": state["location"]["name"] if game_over else None,
             "revealed_spy_id": state["spy_id"] if game_over else None,
             "revealed_assignments": reveal_assignments,

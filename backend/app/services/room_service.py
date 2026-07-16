@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import logging
+import random
 import uuid
 from typing import Any
 
@@ -180,6 +181,9 @@ class RoomService:
 
         if room.game_type == "gravity_master":
             raise ValueError("Gravity Master is single-player only — AI players are not supported")
+
+        if room.game_type == "spyfall" and bool((room.settings or {}).get("same_room")):
+            raise ValueError("Same-room Spyfall does not allow AI players")
 
         if room.game_type in _NO_TEAM_LOBBY_GAMES:
             settings = get_game(room.game_type).validate_settings(room.settings)
@@ -927,7 +931,10 @@ async def _process_spyfall_ai_turn(
     phase = state.get("phase")
 
     if phase == "questioning" and state.get("pending_question"):
-        answer = await ai_answer_question(state, actor_data)
+        if engine._is_same_room(state):
+            answer = SpyfallEngine.SPOKEN_PLACEHOLDER
+        else:
+            answer = await ai_answer_question(state, actor_data)
         room, state, events = await service.apply_game_action(
             room_id,
             actor.id,
@@ -952,7 +959,12 @@ async def _process_spyfall_ai_turn(
                 await asyncio.sleep(AI_TURN_PAUSE_SEC)
                 return True
 
-        target_id, question = await ai_ask_question(state, actor_data)
+        if engine._is_same_room(state):
+            others = [p for p in state["players"] if p["id"] != actor_data["id"]]
+            target_id = random.choice(others)["id"] if others else actor_data["id"]
+            question = SpyfallEngine.SPOKEN_PLACEHOLDER
+        else:
+            target_id, question = await ai_ask_question(state, actor_data)
         room, state, events = await service.apply_game_action(
             room_id,
             actor.id,

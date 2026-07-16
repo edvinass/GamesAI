@@ -48,13 +48,14 @@ export interface SpyfallQuestionEntry {
   to_nickname: string
   question: string
   answer: string
+  spoken?: boolean
 }
 
 export interface SpyfallGameState {
   phase: 'questioning' | 'voting' | 'finished'
   round_id: string | null
   question_log: SpyfallQuestionEntry[]
-  pending_question: { from_id: string; to_id: string; question: string } | null
+  pending_question: { from_id: string; to_id: string; question: string; spoken?: boolean } | null
   turn_order: string[]
   current_turn_index: number
   current_turn_player_id: string | null
@@ -72,6 +73,7 @@ export interface SpyfallGameState {
   viewer_location: string | null
   viewer_role: string | null
   location_names: string[] | null
+  same_room: boolean
   revealed_location: string | null
   revealed_spy_id: string | null
   revealed_assignments: Record<string, { role: string | null; is_spy: boolean }> | null

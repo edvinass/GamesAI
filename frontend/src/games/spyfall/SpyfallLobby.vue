@@ -12,6 +12,7 @@ defineProps<{
 }>()
 
 const soloPractice = defineModel<boolean>('soloPractice', { required: true })
+const sameRoom = defineModel<boolean>('sameRoom', { required: true })
 
 const emit = defineEmits<{
   addAi: []
@@ -23,18 +24,38 @@ const emit = defineEmits<{
   <div class="spyfall-lobby">
     <div v-if="isHost" class="settings-block card">
       <label class="checkbox-label">
-        <input v-model="soloPractice" type="checkbox" />
+        <input v-model="sameRoom" type="checkbox" :disabled="soloPractice" />
+        Same room (ask &amp; answer out loud — no typing)
+      </label>
+      <p class="setting-hint">
+        Best when everyone is together. Phones show roles and locations; questions are spoken aloud.
+      </p>
+      <label class="checkbox-label">
+        <input v-model="soloPractice" type="checkbox" :disabled="sameRoom" />
         Solo practice (play against 2 AI)
       </label>
+    </div>
+
+    <div v-if="sameRoom" class="solo-notice card">
+      <p>
+        Same-room mode: on your turn, pick who to ask and speak the question aloud.
+        They answer aloud, then confirm on their device. Accusations, votes, and spy
+        location guesses stay in the app.
+      </p>
     </div>
 
     <div v-if="soloPractice" class="solo-notice card">
       <p>Solo practice auto-adds 2 AI players when you start. You'll play against them in a 3-player game.</p>
     </div>
 
-    <template v-else>
+    <template v-if="!soloPractice">
       <p v-if="isHost" class="arrange-hint">
-        Need 3–8 players. Add AI to fill empty seats, or share the room link.
+        <template v-if="sameRoom">
+          Need 3–8 human players in the same room. Share the room link — AI seats are disabled.
+        </template>
+        <template v-else>
+          Need 3–8 players. Add AI to fill empty seats, or share the room link.
+        </template>
       </p>
 
       <div class="player-list card">
@@ -56,7 +77,12 @@ const emit = defineEmits<{
         </div>
       </div>
 
-      <button v-if="isHost" type="button" class="btn-secondary add-ai-btn" @click="emit('addAi')">
+      <button
+        v-if="isHost && !sameRoom"
+        type="button"
+        class="btn-secondary add-ai-btn"
+        @click="emit('addAi')"
+      >
         + Add AI player
       </button>
 
@@ -81,6 +107,19 @@ const emit = defineEmits<{
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.settings-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.setting-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: -0.25rem 0 0.35rem 1.6rem;
+  line-height: 1.4;
 }
 
 .arrange-hint {
@@ -175,5 +214,10 @@ const emit = defineEmits<{
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
+}
+
+.checkbox-label:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 </style>

@@ -125,7 +125,20 @@ const lobbyValidation = computed(() => {
 
 const soloPractice = computed({
   get: () => Boolean(room.value?.settings?.solo_practice),
-  set: (val: boolean) => updateSettings({ solo_practice: val, ...(val ? { single_player: false } : {}) }),
+  set: (val: boolean) =>
+    updateSettings({
+      solo_practice: val,
+      ...(val ? { single_player: false, same_room: false } : {}),
+    }),
+})
+
+const sameRoom = computed({
+  get: () => Boolean(room.value?.settings?.same_room),
+  set: (val: boolean) =>
+    updateSettings({
+      same_room: val,
+      ...(val ? { solo_practice: false } : {}),
+    }),
 })
 
 const singlePlayer = computed({
@@ -324,6 +337,7 @@ async function copyUrl() {
       <SpyfallLobby
         v-if="isSpyfall"
         v-model:solo-practice="soloPractice"
+        v-model:same-room="sameRoom"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

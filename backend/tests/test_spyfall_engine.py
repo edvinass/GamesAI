@@ -167,6 +167,48 @@ def test_get_current_actor_phases(engine: SpyfallEngine, state: dict) -> None:
     assert engine.get_current_actor(state)["id"] == state["players"][1]["id"]
 
 
+def test_same_room_spoken_qa(engine: SpyfallEngine) -> None:
+    players = make_players(4)
+    state = engine.create_initial_state(players, {"round_timer_sec": 0, "same_room": True})
+    assert state["settings"]["same_room"] is True
+
+    asker_id = state["turn_order"][state["current_turn_index"]]
+    target_id = next(p["id"] for p in state["players"] if p["id"] != asker_id)
+    asker = next(p for p in state["players"] if p["id"] == asker_id)
+    target = next(p for p in state["players"] if p["id"] == target_id)
+
+    state, _ = engine.apply_action(
+        state,
+        {"type": "ask_question", "target_player_id": target_id},
+        asker,
+    )
+    assert state["pending_question"]["spoken"] is True
+    assert state["pending_question"]["question"] == SpyfallEngine.SPOKEN_PLACEHOLDER
+
+    prev_index = state["current_turn_index"]
+    state, _ = engine.apply_action(state, {"type": "answer_question"}, target)
+    assert state["pending_question"] is None
+    assert state["question_log"][-1]["spoken"] is True
+    assert state["question_log"][-1]["answer"] == SpyfallEngine.SPOKEN_PLACEHOLDER
+    assert state["current_turn_index"] == (prev_index + 1) % len(state["players"])
+
+    view = engine.get_public_state(state, asker)
+    assert view["same_room"] is True
+
+
+def test_same_room_disables_solo_practice(engine: SpyfallEngine) -> None:
+    settings = engine.validate_settings({"same_room": True, "solo_practice": True})
+    assert settings["same_room"] is True
+    assert settings["solo_practice"] is False
+
+
+def test_same_room_rejects_ai_players(engine: SpyfallEngine) -> None:
+    players = make_players(3)
+    players[2]["is_ai"] = True
+    assert engine.validate_lobby(players, {"same_room": True}) is not None
+    assert engine.validate_lobby(make_players(3), {"same_room": True}) is None
+
+
 def test_game_over_reveals_spy(engine: SpyfallEngine, state: dict) -> None:
     spy_id = state["spy_id"]
     spy = next(p for p in state["players"] if p["id"] == spy_id)

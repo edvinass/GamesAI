@@ -69,6 +69,8 @@ const isSpy = computed(() => props.gameState.is_spy === true)
 
 const isResident = computed(() => props.gameState.is_spy === false)
 
+const sameRoom = computed(() => Boolean(props.gameState.same_room))
+
 const showRoleReveal = computed(() => {
   if (isGameOver.value || props.gameState.is_spy == null) return false
   const roundId = props.gameState.round_id
@@ -116,12 +118,20 @@ const statusMessage = computed(() => {
   if (props.gameState.pending_question) {
     const pending = props.gameState.pending_question
     const asker = props.room.players.find((p) => p.id === pending.from_id)
+    const target = props.room.players.find((p) => p.id === pending.to_id)
+    if (sameRoom.value) {
+      if (isAiTurn.value) return `${target?.nickname ?? 'Someone'} is answering aloud…`
+      if (isMyTurnToAnswer.value) return 'Answer aloud, then confirm'
+      return `${asker?.nickname ?? 'Someone'} asked ${target?.nickname ?? 'someone'} aloud`
+    }
     if (isAiTurn.value) return `${asker?.nickname ?? 'Someone'} is waiting for an answer…`
     if (isMyTurnToAnswer.value) return 'Answer the question'
     return `${asker?.nickname ?? 'Someone'} asked a question`
   }
   if (isAiTurn.value) return 'AI is thinking…'
-  if (isMyTurnToAsk.value) return 'Your turn — ask a question'
+  if (isMyTurnToAsk.value) {
+    return sameRoom.value ? 'Your turn — pick someone and ask aloud' : 'Your turn — ask a question'
+  }
   const actor = currentActor.value
   return actor ? `Waiting for ${actor.nickname}` : 'Waiting…'
 })
@@ -130,6 +140,22 @@ const phaseHint = computed(() => {
   if (isGameOver.value) return ''
   if (props.gameState.phase === 'voting') {
     return 'Vote for who you think is the Spy. Majority must agree to catch them.'
+  }
+  if (sameRoom.value) {
+    if (isMyTurnToAnswer.value) {
+      return isSpy.value
+        ? 'Answer aloud vaguely — then tap confirm so the round can continue.'
+        : 'Answer aloud in character — then tap confirm. Don\'t say the location name.'
+    }
+    if (isMyTurnToAsk.value) {
+      return isSpy.value
+        ? 'Ask something vague aloud that fits many locations, then select who you asked.'
+        : 'Ask aloud to test whether they belong here — then select who you asked.'
+    }
+    if (isSpy.value) {
+      return 'Listen carefully and use the location list when you\'re ready to guess.'
+    }
+    return 'Listen for vague answers — use the location list, then accuse when ready.'
   }
   if (isMyTurnToAnswer.value) {
     return isSpy.value
@@ -159,21 +185,22 @@ const winMessage = computed(() => {
 })
 
 function askQuestion() {
-  if (!selectedTarget.value || !questionText.value.trim()) return
+  if (!selectedTarget.value) return
+  if (!sameRoom.value && !questionText.value.trim()) return
   emit('action', {
     type: 'ask_question',
     target_player_id: selectedTarget.value,
-    question: questionText.value.trim(),
+    ...(sameRoom.value ? {} : { question: questionText.value.trim() }),
   })
   questionText.value = ''
   selectedTarget.value = ''
 }
 
 function answerQuestion() {
-  if (!answerText.value.trim()) return
+  if (!sameRoom.value && !answerText.value.trim()) return
   emit('action', {
     type: 'answer_question',
-    answer: answerText.value.trim(),
+    ...(sameRoom.value ? {} : { answer: answerText.value.trim() }),
   })
   answerText.value = ''
 }
@@ -273,7 +300,12 @@ watch(
               <h2>You are the <span class="highlight">Spy</span></h2>
               <p class="role-reveal-desc">
                 You do <strong>not</strong> know the secret location or your role.
-                Listen to others, ask vague questions, and guess the location — or try to avoid detection.
+                <template v-if="sameRoom">
+                  Listen to others, ask vague questions aloud, and guess the location — or try to avoid detection.
+                </template>
+                <template v-else>
+                  Listen to others, ask vague questions, and guess the location — or try to avoid detection.
+                </template>
               </p>
             </div>
             <div v-else class="role-reveal-body">
@@ -336,6 +368,7 @@ watch(
         <div class="status-card card">
           <div class="status-bar">
             <span class="phase-tag">{{ gameState.phase }}</span>
+            <span v-if="sameRoom" class="mode-tag">Same room</span>
             <span v-if="timeRemaining" class="timer">⏱ {{ timeRemaining }}</span>
           </div>
           <p class="status-text" :class="{ 'ai-thinking': isAiTurn }">
@@ -344,13 +377,15 @@ watch(
           </p>
           <p v-if="phaseHint" class="phase-hint">{{ phaseHint }}</p>
           <div v-if="gameState.pending_question" class="pending-q card-inner">
-            <p class="q-label">Pending question</p>
+            <p class="q-label">{{ sameRoom ? 'Spoken question' : 'Pending question' }}</p>
             <p>
               <strong>{{ playerLabel(gameState.pending_question.from_id) }}</strong>
               asked
-              <strong>{{ playerLabel(gameState.pending_question.to_id) }}</strong>:
+              <strong>{{ playerLabel(gameState.pending_question.to_id) }}</strong>
+              <template v-if="sameRoom"> aloud</template>:
             </p>
-            <p class="question-text">"{{ gameState.pending_question.question }}"</p>
+            <p v-if="!sameRoom" class="question-text">"{{ gameState.pending_question.question }}"</p>
+            <p v-else class="question-text spoken-note">Listening in the room…</p>
           </div>
         </div>
       </div>
@@ -373,35 +408,70 @@ watch(
       </div>
 
       <div ref="logRef" class="question-log card">
-        <h3>Conversation</h3>
-        <p v-if="!gameState.question_log.length" class="muted empty-log">No questions yet — start probing!</p>
+        <h3>{{ sameRoom ? 'Turn log' : 'Conversation' }}</h3>
+        <p v-if="!gameState.question_log.length" class="muted empty-log">
+          {{ sameRoom ? 'No turns yet — ask someone aloud!' : 'No questions yet — start probing!' }}
+        </p>
         <div v-for="(entry, i) in gameState.question_log" :key="i" class="log-entry">
-          <p class="log-q">
-            <strong>{{ entry.from_nickname }}</strong> → {{ entry.to_nickname }}:
-            "{{ entry.question }}"
-          </p>
-          <p class="log-a">"{{ entry.answer }}"</p>
+          <template v-if="sameRoom || entry.spoken">
+            <p class="log-q">
+              <strong>{{ entry.from_nickname }}</strong> asked
+              <strong>{{ entry.to_nickname }}</strong> aloud
+              <span class="spoken-badge">spoken</span>
+            </p>
+          </template>
+          <template v-else>
+            <p class="log-q">
+              <strong>{{ entry.from_nickname }}</strong> → {{ entry.to_nickname }}:
+              "{{ entry.question }}"
+            </p>
+            <p class="log-a">"{{ entry.answer }}"</p>
+          </template>
         </div>
       </div>
 
       <div class="action-panel card">
         <template v-if="gameState.phase === 'questioning'">
           <div v-if="isMyTurnToAnswer" class="action-block">
-            <h4>Your answer</h4>
-            <textarea v-model="answerText" rows="2" placeholder="Answer in character…" maxlength="200" />
-            <button class="btn-primary" :disabled="!answerText.trim()" @click="answerQuestion">Submit answer</button>
+            <template v-if="sameRoom">
+              <h4>Answer aloud</h4>
+              <p class="muted spoken-action-hint">
+                Reply out loud in character, then confirm so the next player can go.
+              </p>
+              <button class="btn-primary" @click="answerQuestion">I've answered aloud</button>
+            </template>
+            <template v-else>
+              <h4>Your answer</h4>
+              <textarea v-model="answerText" rows="2" placeholder="Answer in character…" maxlength="200" />
+              <button class="btn-primary" :disabled="!answerText.trim()" @click="answerQuestion">Submit answer</button>
+            </template>
           </div>
 
           <div v-else-if="isMyTurnToAsk" class="action-block">
-            <h4>Ask a question</h4>
-            <select v-model="selectedTarget">
-              <option value="" disabled>Select player</option>
-              <option v-for="p in otherPlayers" :key="p.id" :value="p.id">{{ p.nickname }}</option>
-            </select>
-            <textarea v-model="questionText" rows="2" placeholder="Your question…" maxlength="120" />
-            <button class="btn-primary" :disabled="!selectedTarget || !questionText.trim()" @click="askQuestion">
-              Ask
-            </button>
+            <template v-if="sameRoom">
+              <h4>Ask aloud</h4>
+              <p class="muted spoken-action-hint">
+                Choose who you're asking, speak your question, then confirm.
+              </p>
+              <select v-model="selectedTarget">
+                <option value="" disabled>Select player</option>
+                <option v-for="p in otherPlayers" :key="p.id" :value="p.id">{{ p.nickname }}</option>
+              </select>
+              <button class="btn-primary" :disabled="!selectedTarget" @click="askQuestion">
+                I asked them aloud
+              </button>
+            </template>
+            <template v-else>
+              <h4>Ask a question</h4>
+              <select v-model="selectedTarget">
+                <option value="" disabled>Select player</option>
+                <option v-for="p in otherPlayers" :key="p.id" :value="p.id">{{ p.nickname }}</option>
+              </select>
+              <textarea v-model="questionText" rows="2" placeholder="Your question…" maxlength="120" />
+              <button class="btn-primary" :disabled="!selectedTarget || !questionText.trim()" @click="askQuestion">
+                Ask
+              </button>
+            </template>
           </div>
 
           <div v-if="isSpy" class="action-block spy-guess">
@@ -875,6 +945,17 @@ watch(
   color: var(--accent);
 }
 
+.mode-tag {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: var(--surface-elevated);
+  color: var(--text-muted);
+  margin-right: auto;
+  margin-left: 0.5rem;
+}
+
 .timer {
   font-size: 0.85rem;
   font-weight: 600;
@@ -909,6 +990,29 @@ watch(
 .question-text {
   font-style: italic;
   margin-top: 0.25rem;
+}
+
+.spoken-note {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.spoken-action-hint {
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.4;
+}
+
+.spoken-badge {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: var(--surface-elevated);
+  color: var(--text-muted);
+  margin-left: 0.35rem;
+  vertical-align: middle;
 }
 
 .player-strip {
