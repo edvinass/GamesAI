@@ -345,7 +345,7 @@ class SpyfallEngine(GamePlugin):
             "is_spy": is_spy if viewer_id and not game_over else None,
             "viewer_location": viewer_location,
             "viewer_role": viewer_role,
-            "location_names": state.get("all_location_names", []) if is_spy and not game_over else None,
+            "location_names": state.get("all_location_names", []) if viewer_id and not game_over else None,
             "revealed_location": state["location"]["name"] if game_over else None,
             "revealed_spy_id": state["spy_id"] if game_over else None,
             "revealed_assignments": reveal_assignments,

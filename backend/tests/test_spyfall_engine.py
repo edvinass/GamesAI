@@ -53,6 +53,7 @@ def test_spy_secrecy_in_public_state(engine: SpyfallEngine, state: dict) -> None
     assert resident_view["is_spy"] is False
     assert resident_view["viewer_location"] == state["location"]["name"]
     assert resident_view["viewer_role"] is not None
+    assert resident_view["location_names"] == spy_view["location_names"]
 
 
 def test_qa_turn_advance(engine: SpyfallEngine, state: dict) -> None:

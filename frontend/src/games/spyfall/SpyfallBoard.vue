@@ -102,6 +102,7 @@ const filteredLocations = computed(() => {
 })
 
 function selectLocationForGuess(loc: string) {
+  if (!isSpy.value) return
   selectedLocation.value = loc
 }
 
@@ -143,7 +144,7 @@ const phaseHint = computed(() => {
   if (isSpy.value) {
     return 'Watch the conversation and use the location list when you\'re ready to guess.'
   }
-  return 'Listen for vague or inconsistent answers — then call an accusation when you\'re ready.'
+  return 'Use the location list to craft questions that split possibilities — then accuse when ready.'
 })
 
 const winMessage = computed(() => {
@@ -302,7 +303,7 @@ watch(
         </div>
       </Transition>
 
-      <div class="play-layout" :class="{ 'has-location-panel': isSpy, dimmed: showRoleReveal }">
+      <div class="play-layout" :class="{ 'has-location-panel': showLocationPanel && (isSpy || isResident), dimmed: showRoleReveal }">
         <div class="main-column">
       <div class="top-row">
         <div class="secret-card card" :class="isSpy ? 'spy-card' : 'resident-card'">
@@ -313,13 +314,6 @@ watch(
           <template v-if="isSpy">
             <p class="spy-label">You don't know the location</p>
             <p class="muted">Blend in and deduce the location — or guess when you're confident.</p>
-            <button
-              type="button"
-              class="btn-secondary toggle-locations-btn"
-              @click="showLocationPanel = !showLocationPanel"
-            >
-              {{ showLocationPanel ? 'Hide' : 'Show' }} all locations ({{ sortedLocations.length }})
-            </button>
           </template>
           <template v-else-if="isResident">
             <p class="location-name">{{ gameState.viewer_location }}</p>
@@ -329,6 +323,14 @@ watch(
           <template v-else>
             <p class="muted">Loading your assignment…</p>
           </template>
+          <button
+            v-if="isSpy || isResident"
+            type="button"
+            class="btn-secondary toggle-locations-btn"
+            @click="showLocationPanel = !showLocationPanel"
+          >
+            {{ showLocationPanel ? 'Hide' : 'Show' }} all locations ({{ sortedLocations.length }})
+          </button>
         </div>
 
         <div class="status-card card">
@@ -450,11 +452,17 @@ watch(
       </div>
         </div>
 
-        <aside v-if="isSpy && showLocationPanel" class="location-panel card">
+        <aside v-if="(isSpy || isResident) && showLocationPanel" class="location-panel card">
           <div class="location-panel-header">
             <h3>All locations</h3>
             <span class="location-count">{{ filteredLocations.length }}/{{ sortedLocations.length }}</span>
           </div>
+          <p v-if="isResident" class="muted location-panel-hint">
+            Reference for questions — your location is highlighted.
+          </p>
+          <p v-else class="muted location-panel-hint">
+            Narrow this down from answers, then select to guess.
+          </p>
           <input
             v-model="locationSearch"
             type="search"
@@ -466,7 +474,12 @@ watch(
               <button
                 type="button"
                 class="location-item"
-                :class="{ selected: selectedLocation === loc }"
+                :class="{
+                  selected: isSpy && selectedLocation === loc,
+                  known: isResident && loc === gameState.viewer_location,
+                  readonly: isResident,
+                }"
+                :disabled="isResident"
                 @click="selectLocationForGuess(loc)"
               >
                 {{ loc }}
@@ -475,7 +488,7 @@ watch(
           </ul>
           <p v-if="!filteredLocations.length" class="muted no-results">No locations match your search.</p>
           <button
-            v-if="selectedLocation && gameState.phase === 'questioning'"
+            v-if="isSpy && selectedLocation && gameState.phase === 'questioning'"
             type="button"
             class="btn-primary guess-from-panel-btn"
             @click="guessLocation"
@@ -763,6 +776,30 @@ watch(
   background: var(--accent-muted);
   color: var(--accent);
   font-weight: 600;
+}
+
+.location-item.known {
+  background: rgba(61, 214, 140, 0.15);
+  color: var(--success);
+  font-weight: 700;
+}
+
+.location-item.readonly {
+  cursor: default;
+}
+
+.location-item.readonly:hover {
+  background: transparent;
+}
+
+.location-item.known.readonly:hover {
+  background: rgba(61, 214, 140, 0.15);
+}
+
+.location-panel-hint {
+  font-size: 0.8rem;
+  margin: 0;
+  line-height: 1.4;
 }
 
 .no-results {

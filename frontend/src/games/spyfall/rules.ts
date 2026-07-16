@@ -5,7 +5,7 @@ export const spyfallRules: GameRules = {
   subtitle: 'Find the spy hiding at a secret location',
   quickStart: [
     'When the round starts, read your assignment — Spy or Resident.',
-    'Residents share one location and each get a role; the Spy sees only a list of possible locations.',
+    'Residents share one location and each get a role; everyone can see the full list of possible locations.',
     'Take turns asking one other player a question; they must answer in the chat.',
     'Accuse someone to start a vote, or (as Spy) guess the location to end the round.',
   ],
@@ -14,8 +14,8 @@ export const spyfallRules: GameRules = {
       heading: 'Your assignment',
       body: 'At the start of each round you are either the Spy or a Resident. This app shows your assignment clearly before play begins.',
       bullets: [
-        'Resident: you know the location and your role. You are not the Spy.',
-        'Spy: you do not know the location. Use the location list on the right to reference possibilities.',
+        'Resident: you know the location and your role. Use the location list to craft distinguishing questions.',
+        'Spy: you do not know the location. Use the location list to narrow possibilities and guess.',
       ],
     },
     {
@@ -56,7 +56,7 @@ export const spyfallRules: GameRules = {
   tips: [
     'Read your assignment carefully before dismissing the reveal screen.',
     'Residents: answer naturally for your role — overly perfect answers can make you look suspicious.',
-    'Spy: keep the location list open and narrow down based on others\' answers.',
+    'Everyone: keep the location list open — residents to ask sharper questions, the Spy to narrow guesses.',
     'Voice chat is optional — all questions and answers happen in the app.',
   ],
 }
