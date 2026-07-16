@@ -328,7 +328,7 @@ watch(
 
 const board = computed(() => props.gameState.board)
 
-const boardAspect = computed(() => `${board.value.width} / ${board.value.height}`)
+const boardAspectNum = computed(() => board.value.width / Math.max(1, board.value.height))
 
 const edgeWallSet = computed(() => {
   const set = new Set<string>()
@@ -716,22 +716,22 @@ function cardTypeClass(type?: string): string {
       </div>
 
       <div class="status-stats">
-        <div class="stat-pill">
-          <span class="stat-label">Round</span>
-          <span class="stat-value">{{ gameState.round }}</span>
-        </div>
-        <div v-if="myRobot && !isSpectator" class="stat-pill stat-pill--accent">
-          <span class="stat-label">Checkpoints</span>
-          <span class="stat-value">{{ myRobot.checkpoints_reached }} / {{ gameState.total_checkpoints }}</span>
-        </div>
-        <div v-if="myRobot && !isSpectator" class="stat-pill">
-          <span class="stat-label">Damage</span>
-          <span class="stat-value">{{ myRobot.damage ?? 0 }}/9</span>
-        </div>
-        <div v-if="myRobot && !isSpectator" class="stat-pill">
-          <span class="stat-label">Lives</span>
-          <span class="stat-value">{{ myRobot.lives ?? 3 }}</span>
-        </div>
+        <span class="stat-chip">R{{ gameState.round }}</span>
+        <span
+          v-if="myRobot && !isSpectator"
+          class="stat-chip stat-chip--accent"
+          title="Checkpoints"
+        >CP {{ myRobot.checkpoints_reached }}/{{ gameState.total_checkpoints }}</span>
+        <span
+          v-if="myRobot && !isSpectator"
+          class="stat-chip"
+          title="Damage"
+        >DMG {{ myRobot.damage ?? 0 }}/9</span>
+        <span
+          v-if="myRobot && !isSpectator"
+          class="stat-chip"
+          title="Lives"
+        >♥ {{ myRobot.lives ?? 3 }}</span>
       </div>
 
       <button
@@ -750,7 +750,7 @@ function cardTypeClass(type?: string): string {
           <div
             class="grid"
             :style="{
-              aspectRatio: boardAspect,
+              '--board-aspect': boardAspectNum,
               gridTemplateColumns: `repeat(${board.width}, 1fr)`,
               gridTemplateRows: `repeat(${board.height}, 1fr)`,
             }"
@@ -881,10 +881,10 @@ function cardTypeClass(type?: string): string {
         </div>
       </div>
 
-      <aside class="racers-panel">
+      <aside class="racers-panel" aria-label="Register order">
         <div class="panel-head">
-          <h3>Register order</h3>
-          <span class="panel-sub">Closest to antenna first</span>
+          <h3>Order</h3>
+          <span class="panel-sub">antenna first</span>
         </div>
         <ol class="racer-list">
           <li
@@ -922,7 +922,7 @@ function cardTypeClass(type?: string): string {
         <div class="dock-head">
           <span class="dock-label">Register</span>
           <div class="dock-head-right">
-            <span class="dock-count">{{ filledSlotCount }} / {{ gameState.register_size }}</span>
+            <span class="dock-count">{{ filledSlotCount }}/{{ gameState.register_size }}</span>
             <button
               v-if="canProgram && filledSlotCount > 0"
               type="button"
@@ -930,7 +930,7 @@ function cardTypeClass(type?: string): string {
               title="Return all cards to hand"
               @click="clearAllSlots"
             >
-              Clear all
+              Clear
             </button>
           </div>
         </div>
@@ -1016,7 +1016,7 @@ function cardTypeClass(type?: string): string {
       <div class="dock-actions">
         <label v-if="canProgram" class="power-down-label">
           <input v-model="powerDownNext" type="checkbox" />
-          Power down next round
+          Power down next
         </label>
         <button
           type="button"
@@ -1026,7 +1026,7 @@ function cardTypeClass(type?: string): string {
           @click="lockProgram"
         >
           <span class="lock-btn-icon">{{ isLocked ? '✓' : '▶' }}</span>
-          <span>{{ isLocked ? 'Locked in' : 'Lock program' }}</span>
+          <span>{{ isLocked ? 'Locked in' : 'Lock' }}</span>
         </button>
       </div>
     </section>
@@ -1043,8 +1043,8 @@ function cardTypeClass(type?: string): string {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.65rem 1rem 1rem;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem 0.5rem;
   background:
     radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.12), transparent),
     linear-gradient(180deg, rgba(15, 23, 42, 0.4) 0%, transparent 30%);
@@ -1055,10 +1055,10 @@ function cardTypeClass(type?: string): string {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding: 0.85rem 1.15rem;
-  border-radius: 14px;
+  gap: 0.65rem;
+  flex-wrap: nowrap;
+  padding: 0.4rem 0.75rem;
+  border-radius: 10px;
   background: rgba(15, 23, 42, 0.75);
   border: 1px solid rgba(148, 163, 184, 0.15);
   backdrop-filter: blur(8px);
@@ -1067,16 +1067,16 @@ function cardTypeClass(type?: string): string {
 .status-left {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
+  gap: 0.6rem;
   flex: 1;
-  min-width: 200px;
+  min-width: 0;
 }
 
 .phase-badge {
   flex-shrink: 0;
-  padding: 0.35rem 0.75rem;
+  padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1118,94 +1118,131 @@ function cardTypeClass(type?: string): string {
 
 .map-name {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 0.95rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-line {
-  margin: 0.15rem 0 0;
-  font-size: 0.88rem;
+  margin: 0.05rem 0 0;
+  font-size: 0.75rem;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-stats {
   display: flex;
-  gap: 0.6rem;
-  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
-.stat-pill {
-  display: flex;
-  flex-direction: column;
+.stat-chip {
+  display: inline-flex;
   align-items: center;
-  padding: 0.4rem 0.85rem;
-  border-radius: 10px;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
   background: rgba(30, 41, 59, 0.8);
   border: 1px solid rgba(148, 163, 184, 0.12);
-  min-width: 4.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
-.stat-pill--accent {
+.stat-chip--accent {
   border-color: rgba(250, 204, 21, 0.25);
-  background: rgba(250, 204, 21, 0.06);
-}
-
-.stat-label {
-  font-size: 0.65rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-}
-
-.stat-value {
-  font-size: 1rem;
-  font-weight: 800;
-  margin-top: 0.1rem;
+  background: rgba(250, 204, 21, 0.08);
+  color: #fde047;
 }
 
 .forfeit-btn {
   flex-shrink: 0;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.78rem;
+}
+
+/* ── Racers panel ── */
+.racers-panel {
+  min-height: 0;
+  width: 168px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.45rem 0.5rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  overflow: hidden;
+}
+
+.panel-head {
+  flex-shrink: 0;
+  padding: 0 0.15rem 0.35rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.panel-head h3 {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.panel-sub {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.6rem;
+  color: rgba(148, 163, 184, 0.7);
 }
 
 /* ── Main stage ── */
 .main-stage {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 1fr min(240px, 24vw);
-  gap: 0.75rem;
+  display: flex;
+  gap: 0.45rem;
+  min-width: 0;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 720px) {
   .main-stage {
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr auto;
+    flex-direction: column;
   }
 
   .racers-panel {
-    max-height: 140px;
+    width: auto;
+    max-height: 88px;
   }
 
   .racer-list {
     flex-direction: row !important;
     overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .racer-card {
-    min-width: 180px;
+    min-width: 9.5rem;
+    flex: 0 0 auto;
   }
 }
 
 .arena {
+  flex: 1;
   min-height: 0;
   min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.5rem;
-  border-radius: 16px;
+  padding: 0.25rem;
+  border-radius: 12px;
   background:
     linear-gradient(145deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.6));
   border: 1px solid rgba(148, 163, 184, 0.12);
@@ -1220,23 +1257,34 @@ function cardTypeClass(type?: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.75rem;
+  padding: 0.25rem;
+  container-type: size;
 }
 
 .grid {
   display: grid;
   gap: 2px;
-  height: 100%;
+  aspect-ratio: var(--board-aspect, 1);
   width: auto;
+  height: 100%;
   max-width: 100%;
-  padding: 8px;
-  border-radius: 10px;
+  max-height: 100%;
+  padding: 5px;
+  border-radius: 8px;
   background:
     linear-gradient(180deg, #3f4a5a 0%, #2a3340 40%, #1e2530 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -2px 8px rgba(0, 0, 0, 0.45),
     0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+@supports (width: 1cqw) {
+  .grid {
+    width: min(100cqw, calc(100cqh * var(--board-aspect, 1)));
+    height: min(100cqh, calc(100cqw / var(--board-aspect, 1)));
+    aspect-ratio: auto;
+  }
 }
 
 .cell {
@@ -1940,10 +1988,11 @@ function cardTypeClass(type?: string): string {
 .power-down-label {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.8rem;
+  gap: 0.3rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .racer-hp {
@@ -2052,48 +2101,26 @@ function cardTypeClass(type?: string): string {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 
-/* ── Racers panel ── */
-.racers-panel {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 0.85rem 1rem;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.75);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  overflow: hidden;
-}
-
-.panel-head h3 {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 700;
-}
-
-.panel-sub {
-  display: block;
-  margin-top: 0.15rem;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-
+/* ── Racers ── */
 .racer-list {
   list-style: none;
-  margin: 0.75rem 0 0;
+  margin: 0.4rem 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
 }
 
 .racer-card {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  padding: 0.55rem 0.65rem;
-  border-radius: 10px;
+  gap: 0.35rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: 8px;
   background: rgba(30, 41, 59, 0.55);
   border: 1px solid transparent;
 }
@@ -2108,16 +2135,16 @@ function cardTypeClass(type?: string): string {
 }
 
 .racer-rank {
-  width: 1.25rem;
-  font-size: 0.8rem;
+  width: 1rem;
+  font-size: 0.72rem;
   font-weight: 800;
   color: var(--text-muted);
   text-align: center;
 }
 
 .racer-dot {
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 0.6rem;
+  height: 0.6rem;
   border-radius: 50%;
   flex-shrink: 0;
   box-shadow: 0 0 6px currentColor;
@@ -2130,7 +2157,7 @@ function cardTypeClass(type?: string): string {
 
 .racer-name {
   display: block;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2138,15 +2165,15 @@ function cardTypeClass(type?: string): string {
 }
 
 .you-tag {
-  margin-left: 0.35rem;
-  font-size: 0.65rem;
+  margin-left: 0.25rem;
+  font-size: 0.58rem;
   font-weight: 700;
   color: #a5b4fc;
 }
 
 .cp-track {
-  margin-top: 0.3rem;
-  height: 4px;
+  margin-top: 0.2rem;
+  height: 3px;
   border-radius: 999px;
   background: rgba(148, 163, 184, 0.15);
   overflow: hidden;
@@ -2162,17 +2189,17 @@ function cardTypeClass(type?: string): string {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 0.15rem;
+  gap: 0.05rem;
 }
 
 .racer-cp {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 700;
   color: var(--text-muted);
 }
 
 .lock-icon {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
 }
 
 /* ── Programming dock ── */
@@ -2182,11 +2209,11 @@ function cardTypeClass(type?: string): string {
   bottom: 0;
   z-index: 6;
   display: grid;
-  grid-template-columns: 1fr 1.4fr auto;
-  gap: 1rem;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
   align-items: end;
-  padding: 1rem 1.15rem;
-  border-radius: 16px;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.92));
   border: 1px solid rgba(148, 163, 184, 0.14);
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.2);
@@ -2201,14 +2228,26 @@ function cardTypeClass(type?: string): string {
   .programming-dock {
     grid-template-columns: 1fr;
     align-items: stretch;
-    padding: 0.85rem 0.9rem calc(0.85rem + env(safe-area-inset-bottom, 0px));
+    padding: 0.55rem 0.65rem calc(0.55rem + env(safe-area-inset-bottom, 0px));
   }
 
   .dock-actions {
-    justify-content: stretch;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
   }
 
   .lock-btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .status-bar {
+    flex-wrap: wrap;
+  }
+
+  .status-stats {
+    order: 3;
     width: 100%;
   }
 }
@@ -2222,17 +2261,17 @@ function cardTypeClass(type?: string): string {
   align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.35rem;
 }
 
 .dock-head-right {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.5rem;
 }
 
 .dock-label {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -2241,7 +2280,7 @@ function cardTypeClass(type?: string): string {
 
 .dock-count,
 .dock-hint {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   color: var(--text-muted);
 }
 
@@ -2254,10 +2293,10 @@ function cardTypeClass(type?: string): string {
   border: none;
   background: transparent;
   color: rgba(248, 113, 113, 0.9);
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 700;
   cursor: pointer;
-  padding: 0.15rem 0.35rem;
+  padding: 0.1rem 0.3rem;
   border-radius: 6px;
 }
 
@@ -2268,17 +2307,17 @@ function cardTypeClass(type?: string): string {
 .register-slots,
 .hand-cards {
   display: flex;
-  gap: 0.55rem;
+  gap: 0.4rem;
 }
 
 .register-slots {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .hand-cards {
   flex-wrap: nowrap;
   overflow-x: auto;
-  padding-bottom: 0.2rem;
+  padding-bottom: 0.1rem;
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
 }
@@ -2300,16 +2339,16 @@ function cardTypeClass(type?: string): string {
 }
 
 .slot {
-  width: clamp(3.75rem, 6vw, 5rem);
-  height: clamp(4.75rem, 8vw, 6.25rem);
-  min-width: 3.5rem;
-  min-height: 4.5rem;
-  border-radius: 12px;
+  width: clamp(2.85rem, 4.5vw, 3.75rem);
+  height: clamp(3.5rem, 5.5vw, 4.6rem);
+  min-width: 2.7rem;
+  min-height: 3.35rem;
+  border-radius: 9px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.2rem;
+  gap: 0.1rem;
   background: rgba(30, 41, 59, 0.8);
   border: 2px dashed rgba(148, 163, 184, 0.35);
 }
@@ -2370,15 +2409,15 @@ function cardTypeClass(type?: string): string {
 
 .slot-clear {
   position: absolute;
-  top: -0.35rem;
-  right: -0.35rem;
-  width: 1.35rem;
-  height: 1.35rem;
+  top: -0.3rem;
+  right: -0.3rem;
+  width: 1.2rem;
+  height: 1.2rem;
   border-radius: 999px;
   border: 1px solid rgba(248, 113, 113, 0.45);
   background: rgba(15, 23, 42, 0.95);
   color: #fca5a5;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
   display: grid;
@@ -2393,36 +2432,36 @@ function cardTypeClass(type?: string): string {
 }
 
 .slot-num {
-  font-size: 0.68rem;
+  font-size: 0.6rem;
   font-weight: 700;
   opacity: 0.75;
 }
 
 .slot-card {
-  font-size: clamp(1.35rem, 2.5vw, 1.85rem);
+  font-size: clamp(1.1rem, 2vw, 1.45rem);
   font-weight: 900;
   line-height: 1;
 }
 
 .slot-empty {
-  font-size: 1.75rem;
+  font-size: 1.35rem;
   font-weight: 300;
   opacity: 0.45;
 }
 
 .hand-card {
   flex: 0 0 auto;
-  width: clamp(4rem, 6.5vw, 5.25rem);
-  height: clamp(5rem, 9vw, 6.75rem);
-  min-width: 3.75rem;
-  min-height: 4.75rem;
-  padding: 0.45rem 0.35rem;
-  border-radius: 12px;
+  width: clamp(3.1rem, 5vw, 4rem);
+  height: clamp(3.75rem, 6vw, 4.85rem);
+  min-width: 2.95rem;
+  min-height: 3.55rem;
+  padding: 0.3rem 0.25rem;
+  border-radius: 9px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.25rem;
+  gap: 0.15rem;
   border: 2px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -2467,39 +2506,43 @@ function cardTypeClass(type?: string): string {
 }
 
 .hand-card-glyph {
-  font-size: clamp(1.4rem, 2.8vw, 2rem);
+  font-size: clamp(1.15rem, 2.2vw, 1.55rem);
   font-weight: 900;
   line-height: 1;
 }
 
 .hand-card-name {
-  font-size: 0.58rem;
+  font-size: 0.52rem;
   font-weight: 700;
   text-align: center;
-  line-height: 1.15;
+  line-height: 1.1;
   opacity: 0.9;
 }
 
 .dock-actions {
   display: flex;
-  align-items: flex-end;
-  padding-bottom: 0.15rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  padding-bottom: 0;
 }
 
 .lock-btn {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.85rem 1.35rem;
-  border-radius: 12px;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: 10px;
   border: 2px solid rgba(148, 163, 184, 0.25);
   background: rgba(30, 41, 59, 0.9);
   color: var(--text-muted);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s ease;
+  min-width: 7.5rem;
 }
 
 .lock-btn.ready:not(:disabled) {
@@ -2531,8 +2574,8 @@ function cardTypeClass(type?: string): string {
 
 .spectator-dock {
   flex-shrink: 0;
-  padding: 1rem 1.15rem;
-  border-radius: 14px;
+  padding: 0.55rem 0.85rem;
+  border-radius: 10px;
   background: rgba(15, 23, 42, 0.75);
   border: 1px solid rgba(148, 163, 184, 0.12);
   text-align: center;

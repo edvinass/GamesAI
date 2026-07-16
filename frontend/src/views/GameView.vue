@@ -340,19 +340,29 @@ function backToLobby() {
 }
 
 .game-page--roborally .game-header {
-  padding: 0.55rem 1rem;
+  padding: 0.35rem 0.75rem;
 }
 
 .game-page--roborally .game-header h1 {
-  font-size: 1.15rem;
+  font-size: 1rem;
 }
 
 .game-header--roborally .header-meta {
   margin-top: 0;
 }
 
+.game-header--roborally .header-meta .room-id,
+.game-header--roborally .header-meta .connection {
+  font-size: 0.75rem;
+}
+
 .game-page--roborally .av-hint {
   display: none;
+}
+
+.game-page--roborally .header-actions .btn-secondary {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.78rem;
 }
 
 .game-header--snake {
