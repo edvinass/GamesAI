@@ -22,10 +22,48 @@ let animationToken = 0
 let animationTimer: ReturnType<typeof setTimeout> | null = null
 let lastReplayedLogKey = ''
 const robotElById = new Map<string, HTMLElement>()
+/** Cumulative facing degrees so CSS never interpolates the long way (e.g. 180 → -90). */
+const robotYawDeg = ref<Record<string, number>>({})
+
+const FACING_BASE_DEG: Record<RoboRallyRobot['facing'], number> = {
+  N: 0,
+  E: 90,
+  S: 180,
+  W: 270,
+}
 
 function bindRobotEl(playerId: string, el: unknown) {
   if (el instanceof HTMLElement) robotElById.set(playerId, el)
   else robotElById.delete(playerId)
+}
+
+/** Pick the angle for `facing` closest to `current` (shortest turn, ±180 prefers +180). */
+function nearestFacingDeg(current: number, facing: RoboRallyRobot['facing']): number {
+  const base = FACING_BASE_DEG[facing]
+  let target = base + Math.round((current - base) / 360) * 360
+  let delta = target - current
+  if (delta > 180) {
+    target -= 360
+    delta -= 360
+  } else if (delta < -180) {
+    target += 360
+    delta += 360
+  }
+  if (delta === -180) target = current + 180
+  return target
+}
+
+function syncRobotYaws(robots: Record<string, RoboRallyRobot>) {
+  const next: Record<string, number> = { ...robotYawDeg.value }
+  for (const [pid, robot] of Object.entries(robots)) {
+    if (robot.eliminated || robot.pending_reboot) continue
+    const current = next[pid]
+    next[pid] =
+      typeof current === 'number'
+        ? nearestFacingDeg(current, robot.facing)
+        : FACING_BASE_DEG[robot.facing]
+  }
+  robotYawDeg.value = next
 }
 
 /** Match CSS transition; hold after each step so steps never coalesce visually. */
@@ -583,12 +621,21 @@ const robotSprites = computed(() =>
         nickname: player.nickname,
         color: player.color,
         facing: robot.facing,
+        yaw: robotYawDeg.value[player.id] ?? FACING_BASE_DEG[robot.facing],
         x: robot.x,
         y: robot.y,
         isMe: player.id === props.playerId,
       }
     })
     .filter((sprite): sprite is NonNullable<typeof sprite> => sprite != null),
+)
+
+watch(
+  robotsForDisplay,
+  (robots) => {
+    syncRobotYaws(robots)
+  },
+  { deep: true, immediate: true },
 )
 
 function robotOverlayStyle(sprite: { x: number; y: number }) {
@@ -1071,7 +1118,10 @@ function cardTypeClass(type?: string): string {
                 :title="sprite.nickname"
                 :ref="(el) => bindRobotEl(sprite.playerId, el)"
               >
-                <div class="robot-figure" :class="`face-${sprite.facing}`">
+                <div
+                  class="robot-figure"
+                  :style="{ transform: `rotate(${sprite.yaw}deg)` }"
+                >
                   <span class="robot-mast" />
                   <span class="robot-head">
                     <span class="robot-eye" />
@@ -2323,13 +2373,10 @@ function cardTypeClass(type?: string): string {
   align-items: center;
   justify-content: flex-end;
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
+  transform-origin: 50% 50%;
   transition: transform 0.28s ease;
+  will-change: transform;
 }
-
-.robot-figure.face-N { transform: rotate(0deg); }
-.robot-figure.face-E { transform: rotate(90deg); }
-.robot-figure.face-S { transform: rotate(180deg); }
-.robot-figure.face-W { transform: rotate(-90deg); }
 
 .robot--me .robot-figure {
   filter:
