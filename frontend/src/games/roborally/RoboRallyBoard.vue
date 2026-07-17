@@ -394,7 +394,7 @@ const robotAt = computed(() => {
   const map = new Map<string, { playerId: string; facing: string; color: string; nickname: string }>()
   for (const player of props.gameState.players) {
     const robot = robotsForDisplay.value[player.id]
-    if (robot && !robot.eliminated) {
+    if (robot && !robot.eliminated && !robot.pending_reboot) {
       map.set(`${robot.x},${robot.y}`, {
         playerId: player.id,
         facing: robot.facing,
@@ -698,7 +698,7 @@ function cardTitle(card: { type?: string; hidden?: boolean }) {
 function cardTypeClass(type?: string): string {
   if (!type) return 'card--unknown'
   if (type.startsWith('move_')) return 'card--move'
-  if (type.startsWith('turn_')) return 'card--turn'
+  if (type.startsWith('turn_') || type === 'u_turn') return 'card--turn'
   if (type === 'backup') return 'card--backup'
   return 'card--unknown'
 }

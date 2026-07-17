@@ -38,7 +38,7 @@ def choose_program(
     robots = state["robots"]
     register_order = state["register_order"]
     robot = robots[player_id]
-    if robot.get("powered_down") or robot.get("eliminated"):
+    if robot.get("powered_down") or robot.get("eliminated") or robot.get("pending_reboot"):
         return []
 
     target = _next_checkpoint(board, robot)

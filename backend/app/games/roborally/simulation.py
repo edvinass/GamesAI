@@ -14,20 +14,76 @@ def compute_register_order(
     board: dict[str, Any],
     player_order: list[str],
     start_priorities: dict[str, int],
+    cards: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
-    """Sort players by distance to antenna; ties broken by start priority."""
+    """Classic: higher program-card priority acts first; ties use start priority."""
 
     def sort_key(pid: str) -> tuple[int, int, int]:
         robot = robots[pid]
-        if robot.get("eliminated"):
-            return (9999, 99, 99)
-        dist = rb.manhattan_to_antenna(board, robot["x"], robot["y"])
-        priority = start_priorities.get(pid, 99)
+        if robot.get("eliminated") or robot.get("pending_reboot"):
+            return (1, 9999, 99)
+        card = (cards or {}).get(pid)
+        # Negate so higher card priority sorts first.
+        card_pri = -int(card.get("priority", 0)) if card else 0
+        start_pri = start_priorities.get(pid, 99)
         seat = player_order.index(pid) if pid in player_order else 99
-        return (dist, priority, seat)
+        return (card_pri, start_pri, seat)
 
-    active = [pid for pid in player_order if not robots.get(pid, {}).get("eliminated")]
+    active = [
+        pid
+        for pid in player_order
+        if not robots.get(pid, {}).get("eliminated")
+        and not robots.get(pid, {}).get("pending_reboot")
+    ]
     return sorted(active, key=sort_key)
+
+
+def respawn_pending_robots(
+    robots: dict[str, dict[str, Any]],
+    board: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Place destroyed robots back on their archive at the start of a new turn."""
+    events: list[dict[str, Any]] = []
+    width, height = board["width"], board["height"]
+    pits = rb.pit_set(board)
+
+    for pid, robot in list(robots.items()):
+        if not robot.get("pending_reboot") or robot.get("eliminated"):
+            continue
+        before = _snapshot_robot(robot)
+        archive = robot.get("archive") or {"x": robot["x"], "y": robot["y"]}
+        ax, ay = int(archive["x"]), int(archive["y"])
+        candidates = [(ax, ay)] + [(ax + dx, ay + dy) for dx, dy in rb.DELTA.values()]
+        occ = _occupant_map(robots)
+        place = None
+        for px, py in candidates:
+            if not rb.in_bounds(px, py, width, height):
+                continue
+            if (px, py) in pits:
+                continue
+            if (px, py) in occ and occ[(px, py)] != pid:
+                continue
+            place = (px, py)
+            break
+        if place is None:
+            place = (ax, ay)
+
+        robot["x"], robot["y"] = place
+        robot["facing"] = rb.facing_away_from_antenna(board, robot["x"], robot["y"])
+        robot["damage"] = rb.REBOOT_DAMAGE
+        robot["powered_down"] = False
+        robot["pending_reboot"] = False
+        robot["pending_power_down"] = False
+        events.append(
+            {
+                "type": "reboot",
+                "player_id": pid,
+                "reason": robot.pop("_destroy_reason", "destroyed"),
+                "before": before,
+                "after": _snapshot_robot(robot),
+            }
+        )
+    return events
 
 
 def _snapshot_robot(robot: dict[str, Any]) -> dict[str, Any]:
@@ -52,14 +108,18 @@ def _move_distance(card_type: str) -> int:
 
 
 def _active_robots(robots: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {pid: r for pid, r in robots.items() if not r.get("eliminated")}
+    return {
+        pid: r
+        for pid, r in robots.items()
+        if not r.get("eliminated") and not r.get("pending_reboot")
+    }
 
 
 def _occupant_map(robots: dict[str, dict[str, Any]]) -> dict[tuple[int, int], str]:
     return {
         (r["x"], r["y"]): pid
         for pid, r in robots.items()
-        if not r.get("eliminated")
+        if not r.get("eliminated") and not r.get("pending_reboot")
     }
 
 
@@ -136,14 +196,19 @@ def _destroy_robot(
     reason: str,
     events: list[dict[str, Any]],
 ) -> None:
+    """Destroy a robot for the rest of the turn; respawn at archive next turn."""
     robot = robots[pid]
-    if robot.get("eliminated"):
+    if robot.get("eliminated") or robot.get("pending_reboot"):
         return
     before = _snapshot_robot(robot)
     lives = int(robot.get("lives", rb.STARTING_LIVES)) - 1
     robot["lives"] = lives
+    robot["powered_down"] = False
+    robot["pending_power_down"] = False
+    robot["_destroy_reason"] = reason
     if lives <= 0:
         robot["eliminated"] = True
+        robot["pending_reboot"] = False
         events.append(
             {
                 "type": "eliminated",
@@ -155,35 +220,11 @@ def _destroy_robot(
         )
         return
 
-    archive = robot.get("archive") or {"x": robot["x"], "y": robot["y"]}
-    ax, ay = int(archive["x"]), int(archive["y"])
-    # Find free archive cell (prefer archive, else adjacent).
-    width, height = board["width"], board["height"]
-    pits = rb.pit_set(board)
-    candidates = [(ax, ay)] + [
-        (ax + dx, ay + dy) for dx, dy in rb.DELTA.values()
-    ]
-    occ = _occupant_map(robots)
-    place = None
-    for px, py in candidates:
-        if not rb.in_bounds(px, py, width, height):
-            continue
-        if (px, py) in pits:
-            continue
-        if (px, py) in occ and occ[(px, py)] != pid:
-            continue
-        place = (px, py)
-        break
-    if place is None:
-        place = (ax, ay)
-
-    robot["x"], robot["y"] = place
-    robot["facing"] = rb.facing_away_from_antenna(board, robot["x"], robot["y"])
-    robot["damage"] = rb.REBOOT_DAMAGE
-    robot["powered_down"] = False
+    # Classic: off the board until the start of the next turn.
+    robot["pending_reboot"] = True
     events.append(
         {
-            "type": "reboot",
+            "type": "destroyed",
             "player_id": pid,
             "reason": reason,
             "before": before,
@@ -258,30 +299,30 @@ def _execute_move_substeps(
     pits: set[tuple[int, int]],
     step: int,
 ) -> list[dict[str, Any]]:
-    move_cards = {pid: card for pid, card in cards.items() if _move_distance(card["type"]) > 0}
-    if not move_cards:
-        return []
-
-    max_steps = max(_move_distance(card["type"]) for card in move_cards.values())
+    """Resolve each robot's move card fully before the next (classic priority)."""
     events: list[dict[str, Any]] = []
 
-    for sub in range(max_steps):
-        for pid in register_order:
-            card = move_cards.get(pid)
-            if not card or sub >= _move_distance(card["type"]):
-                continue
-            robot = robots[pid]
-            if robot.get("eliminated") or robot.get("powered_down"):
-                continue
-            before = _snapshot_robot(robot)
+    for pid in register_order:
+        card = cards.get(pid)
+        if not card or _move_distance(card["type"]) <= 0:
+            continue
+        robot = robots[pid]
+        if (
+            robot.get("eliminated")
+            or robot.get("powered_down")
+            or robot.get("pending_reboot")
+        ):
+            continue
+        distance = _move_distance(card["type"])
+        for sub in range(distance):
+            if robots[pid].get("eliminated") or robots[pid].get("pending_reboot"):
+                break
+            before = _snapshot_robot(robots[pid])
             moved = _try_push_move(
-                pid, robot["facing"], robots, board, walls, pits, pusher_id=pid
+                pid, robots[pid]["facing"], robots, board, walls, pits, pusher_id=pid
             )
             if moved:
                 _fall_check(robots, board, pits, events)
-            cp_hit = False
-            if not robots[pid].get("eliminated") and moved:
-                cp_hit = check_checkpoint(robots[pid], board)
             events.append(
                 {
                     "player_id": pid,
@@ -291,10 +332,12 @@ def _execute_move_substeps(
                     "before": before,
                     "after": _snapshot_robot(robots[pid]),
                     "moved": moved,
-                    "checkpoint_hit": cp_hit,
+                    "checkpoint_hit": False,
                     "checkpoints_reached": robots[pid].get("checkpoints_reached", 0),
                 }
             )
+            if not moved:
+                break
 
     return events
 
@@ -308,16 +351,22 @@ def _execute_turns(
     events: list[dict[str, Any]] = []
     for pid in register_order:
         card = cards.get(pid)
-        if not card or card["type"] not in ("turn_left", "turn_right"):
+        if not card or card["type"] not in ("turn_left", "turn_right", "u_turn"):
             continue
         robot = robots[pid]
-        if robot.get("eliminated") or robot.get("powered_down"):
+        if (
+            robot.get("eliminated")
+            or robot.get("powered_down")
+            or robot.get("pending_reboot")
+        ):
             continue
         before = _snapshot_robot(robot)
         if card["type"] == "turn_left":
             robot["facing"] = rb.turn_left(robot["facing"])
-        else:
+        elif card["type"] == "turn_right":
             robot["facing"] = rb.turn_right(robot["facing"])
+        else:
+            robot["facing"] = rb.turn_around(robot["facing"])
         events.append(
             {
                 "player_id": pid,
@@ -348,16 +397,17 @@ def _execute_backups(
         if not card or card["type"] != "backup":
             continue
         robot = robots[pid]
-        if robot.get("eliminated") or robot.get("powered_down"):
+        if (
+            robot.get("eliminated")
+            or robot.get("powered_down")
+            or robot.get("pending_reboot")
+        ):
             continue
         before = _snapshot_robot(robot)
         direction = rb.OPPOSITE[robot["facing"]]
         moved = _try_push_move(pid, direction, robots, board, walls, pits, pusher_id=pid)
         if moved:
             _fall_check(robots, board, pits, events)
-        cp_hit = False
-        if not robots[pid].get("eliminated") and moved:
-            cp_hit = check_checkpoint(robots[pid], board)
         events.append(
             {
                 "player_id": pid,
@@ -366,7 +416,7 @@ def _execute_backups(
                 "before": before,
                 "after": _snapshot_robot(robots[pid]),
                 "moved": moved,
-                "checkpoint_hit": cp_hit,
+                "checkpoint_hit": False,
                 "checkpoints_reached": robots[pid].get("checkpoints_reached", 0),
             }
         )
@@ -387,8 +437,6 @@ def _run_conveyors(
     intents: dict[str, tuple[int, int, str, dict[str, Any]]] = {}
 
     for pid, robot in active.items():
-        if robot.get("powered_down"):
-            continue
         conv = rb.conveyor_at(board, robot["x"], robot["y"])
         if not conv:
             continue
@@ -463,8 +511,6 @@ def _run_pushers(
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for pid, robot in list(_active_robots(robots).items()):
-        if robot.get("powered_down"):
-            continue
         pusher = rb.pusher_at(board, robot["x"], robot["y"])
         if not pusher:
             continue
@@ -496,8 +542,6 @@ def _run_gears(
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for pid, robot in _active_robots(robots).items():
-        if robot.get("powered_down"):
-            continue
         gear = rb.gear_at(board, robot["x"], robot["y"])
         if not gear:
             continue
@@ -605,7 +649,9 @@ def _run_robot_lasers(
     events: list[dict[str, Any]] = []
     for pid in register_order:
         robot = robots.get(pid)
-        if not robot or robot.get("eliminated") or robot.get("powered_down"):
+        if not robot or robot.get("eliminated") or robot.get("powered_down") or robot.get(
+            "pending_reboot"
+        ):
             continue
         strength = 1 + opt_lib.laser_bonus(robot)
         directions = [robot["facing"]]
@@ -636,14 +682,15 @@ def _run_sites(
     robots: dict[str, dict[str, Any]],
     board: dict[str, Any],
     step: int,
+    *,
+    end_of_turn: bool,
 ) -> list[dict[str, Any]]:
+    """Checkpoints every register; repairs/upgrades only at end of turn (classic)."""
     events: list[dict[str, Any]] = []
     option_deck = state.setdefault("option_deck", [])
     option_discard = state.setdefault("option_discard", [])
 
     for pid, robot in _active_robots(robots).items():
-        if robot.get("powered_down"):
-            continue
         x, y = robot["x"], robot["y"]
         before = _snapshot_robot(robot)
 
@@ -651,20 +698,22 @@ def _run_sites(
 
         healed = False
         gained_option = None
-        if rb.is_repair(board, x, y):
-            if robot.get("damage", 0) > 0:
-                robot["damage"] -= 1
-                healed = True
-            robot["archive"] = {"x": x, "y": y}
-        if rb.is_upgrade(board, x, y):
-            if robot.get("damage", 0) > 0:
-                robot["damage"] -= 1
-                healed = True
-            robot["archive"] = {"x": x, "y": y}
-            drawn = opt_lib.draw_option(option_deck, option_discard)
-            if drawn:
-                robot.setdefault("options", []).append(drawn)
-                gained_option = drawn
+        # Classic: wrench sites resolve at end of turn, not each register.
+        if end_of_turn and not robot.get("powered_down"):
+            if rb.is_repair(board, x, y):
+                if robot.get("damage", 0) > 0:
+                    robot["damage"] -= 1
+                    healed = True
+                robot["archive"] = {"x": x, "y": y}
+            if rb.is_upgrade(board, x, y):
+                if robot.get("damage", 0) > 0:
+                    robot["damage"] -= 1
+                    healed = True
+                robot["archive"] = {"x": x, "y": y}
+                drawn = opt_lib.draw_option(option_deck, option_discard)
+                if drawn:
+                    robot.setdefault("options", []).append(drawn)
+                    gained_option = drawn
 
         if cp_hit or healed or gained_option:
             events.append(
@@ -687,6 +736,8 @@ def _board_elements_phase(
     state: dict[str, Any],
     step: int,
     register_order: list[str],
+    *,
+    end_of_turn: bool = False,
 ) -> list[dict[str, Any]]:
     board = state["board"]
     robots = state["robots"]
@@ -702,14 +753,54 @@ def _board_elements_phase(
     events.extend(_run_crushers(robots, board, register_num, step))
     events.extend(_run_board_lasers(robots, board, walls, step))
     events.extend(_run_robot_lasers(robots, board, walls, register_order, step))
-    events.extend(_run_sites(state, robots, board, step))
+    events.extend(_run_sites(state, robots, board, step, end_of_turn=end_of_turn))
     return events
+
+
+def _check_winners(state: dict[str, Any], events: list[dict[str, Any]]) -> bool:
+    """Return True if the game ended."""
+    board = state["board"]
+    robots = state["robots"]
+    winners = []
+    total_cps = len(board["checkpoints"])
+    for pid, robot in robots.items():
+        if robot.get("eliminated") or robot.get("pending_reboot"):
+            continue
+        if robot["checkpoints_reached"] >= total_cps:
+            winners.append(pid)
+
+    alive = [
+        pid
+        for pid, r in robots.items()
+        if not r.get("eliminated")
+    ]
+    if winners:
+        state["phase"] = "finished"
+        state["winner"] = winners[0]
+        state["win_reason"] = "checkpoints"
+        events.append({"type": "game_won", "winner": winners[0], "all_finishers": winners})
+        return True
+    if len(alive) == 1:
+        state["phase"] = "finished"
+        state["winner"] = alive[0]
+        state["win_reason"] = "last_standing"
+        events.append({"type": "game_won", "winner": alive[0], "reason": "last_standing"})
+        return True
+    if len(alive) == 0:
+        state["phase"] = "finished"
+        state["winner"] = None
+        state["win_reason"] = "draw"
+        events.append({"type": "game_won", "winner": None, "reason": "draw"})
+        return True
+    return False
 
 
 def _execute_register_slot(
     state: dict[str, Any],
     step: int,
     register_order: list[str],
+    *,
+    end_of_turn: bool = False,
 ) -> list[dict[str, Any]]:
     board = state["board"]
     robots = state["robots"]
@@ -720,7 +811,7 @@ def _execute_register_slot(
     cards = _cards_at_step(programs, register_order, step)
     events: list[dict[str, Any]] = []
 
-    # Powered-down robots skip cards but still take board effects.
+    # Powered-down / destroyed robots skip cards but board still affects powered-down.
     card_events: list[dict[str, Any]] = []
     card_events.extend(
         _execute_move_substeps(register_order, cards, robots, board, walls, pits, step)
@@ -732,7 +823,9 @@ def _execute_register_slot(
     if card_events:
         events.append({"type": "register_step", "step": step, "robots": card_events})
 
-    board_events = _board_elements_phase(state, step, register_order)
+    board_events = _board_elements_phase(
+        state, step, register_order, end_of_turn=end_of_turn
+    )
     if board_events:
         events.append({"type": "board_step", "step": step, "events": board_events})
 
@@ -747,58 +840,36 @@ def execute_register(
     register_size = state["settings"]["register_size"]
     robots = state["robots"]
     board = state["board"]
-    register_order = [
-        pid
-        for pid in state["register_order"]
-        if pid in robots and not robots[pid].get("eliminated")
-    ]
-
     player_order = state.get("player_order") or list(robots.keys())
+
     for step in range(register_size):
-        # Recompute priority each register from current positions.
+        cards = _cards_at_step(state["programs"], player_order, step)
         register_order = compute_register_order(
             robots,
             board,
             player_order,
             state.get("start_priorities", {}),
+            cards,
         )
-        step_events = _execute_register_slot(state, step, register_order)
+        state["register_order"] = register_order
+        end_of_turn = step == register_size - 1
+        step_events = _execute_register_slot(
+            state, step, register_order, end_of_turn=end_of_turn
+        )
         events.extend(step_events)
+        if _check_winners(state, events):
+            return state, events
 
     # End of a powered-down round: repair all damage and wake for next round.
     for pid, robot in robots.items():
-        if robot.get("eliminated"):
+        if robot.get("eliminated") or robot.get("pending_reboot"):
             continue
         if robot.get("powered_down"):
             robot["damage"] = 0
             robot["powered_down"] = False
             events.append({"type": "power_down_complete", "player_id": pid})
 
-    winners = []
-    total_cps = len(board["checkpoints"])
-    for pid, robot in robots.items():
-        if robot.get("eliminated"):
-            continue
-        if robot["checkpoints_reached"] >= total_cps:
-            winners.append(pid)
-
-    alive = [pid for pid, r in robots.items() if not r.get("eliminated")]
-    if winners:
-        state["phase"] = "finished"
-        state["winner"] = winners[0]
-        state["win_reason"] = "checkpoints"
-        events.append({"type": "game_won", "winner": winners[0], "all_finishers": winners})
-    elif len(alive) == 1:
-        state["phase"] = "finished"
-        state["winner"] = alive[0]
-        state["win_reason"] = "last_standing"
-        events.append({"type": "game_won", "winner": alive[0], "reason": "last_standing"})
-    elif len(alive) == 0:
-        state["phase"] = "finished"
-        state["winner"] = None
-        state["win_reason"] = "draw"
-        events.append({"type": "game_won", "winner": None, "reason": "draw"})
-
+    _check_winners(state, events)
     return state, events
 
 
@@ -832,6 +903,8 @@ def apply_card_to_robot(
         robot["facing"] = rb.turn_left(robot["facing"])
     elif card_type == "turn_right":
         robot["facing"] = rb.turn_right(robot["facing"])
+    elif card_type == "u_turn":
+        robot["facing"] = rb.turn_around(robot["facing"])
     elif card_type == "backup":
         _try_push_move("_self", rb.OPPOSITE[robot["facing"]], robots, board, walls, pits)
     elif card_type in ("move_1", "move_2", "move_3"):

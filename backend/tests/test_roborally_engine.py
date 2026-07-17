@@ -161,8 +161,8 @@ def test_resign_two_player():
     assert state["win_reason"] == "resign"
 
 
-def test_move_cards_interleave_by_priority():
-    """Move 2/3 must advance one square at a time in priority order, not per-robot."""
+def test_move_cards_resolve_full_card_by_priority():
+    """Higher priority completes its entire move before the next robot acts."""
     from app.games.roborally.simulation import execute_register
 
     board = {
@@ -176,38 +176,85 @@ def test_move_cards_interleave_by_priority():
         ),
         "checkpoints": [],
         "antenna": [5, 4],
+        "conveyors": [],
+        "gears": [],
+        "pushers": [],
+        "crushers": [],
+        "pits": [],
+        "lasers": [],
+        "repairs": [],
+        "upgrades": [],
     }
+    # p1 behind p2, both facing north. p1 has higher priority Move 1 and pushes p2.
     robots = {
-        "p1": {"x": 2, "y": 7, "facing": "N", "checkpoints_reached": 0},
-        "p2": {"x": 2, "y": 6, "facing": "N", "checkpoints_reached": 0},
+        "p1": {
+            "x": 2,
+            "y": 7,
+            "facing": "N",
+            "checkpoints_reached": 0,
+            "damage": 0,
+            "lives": 3,
+            "eliminated": False,
+            "pending_reboot": False,
+            "powered_down": False,
+        },
+        "p2": {
+            "x": 2,
+            "y": 6,
+            "facing": "N",
+            "checkpoints_reached": 0,
+            "damage": 0,
+            "lives": 3,
+            "eliminated": False,
+            "pending_reboot": False,
+            "powered_down": False,
+        },
     }
-    programs = {
-        "p1": [{"id": "1", "type": "move_1"}],
-        "p2": [{"id": "2", "type": "move_1"}],
-    }
-
-    # Priority is recomputed from antenna distance: p2 (closer) moves first.
     state = {
         "settings": {"register_size": 1},
         "board": board,
         "robots": {k: dict(v) for k, v in robots.items()},
         "register_order": ["p1", "p2"],
-        "programs": programs,
+        "programs": {
+            "p1": [{"id": "1", "type": "move_1", "priority": 600}],
+            "p2": [{"id": "2", "type": "move_1", "priority": 500}],
+        },
         "player_order": ["p1", "p2"],
         "start_priorities": {"p1": 0, "p2": 1},
     }
     execute_register(state)
-    assert state["robots"]["p2"]["y"] == 5
+    # p1 (higher priority) moves first onto p2's square, pushing p2 north; then p2's Move 1.
     assert state["robots"]["p1"]["y"] == 6
+    assert state["robots"]["p2"]["y"] == 4
 
-    # Equal distance → start priority decides. Wall blocks push so trailing robot stays.
+    # Lower priority cannot be pushed through a wall ahead of them.
     board2 = {
         **board,
-        "walls": list(board["walls"]) + [{"x": 2, "y": 5, "dir": "N"}],
+        "walls": list(board["walls"]) + [{"x": 2, "y": 6, "dir": "N"}],
     }
     robots2 = {
-        "p1": {"x": 2, "y": 7, "facing": "N", "checkpoints_reached": 0},
-        "p2": {"x": 4, "y": 7, "facing": "N", "checkpoints_reached": 0},
+        "p1": {
+            "x": 2,
+            "y": 7,
+            "facing": "N",
+            "checkpoints_reached": 0,
+            "damage": 0,
+            "lives": 3,
+            "eliminated": False,
+            "pending_reboot": False,
+            "powered_down": False,
+        },
+        "p2": {
+            "x": 2,
+            "y": 6,
+            "facing": "N",
+            "checkpoints_reached": 0,
+            "damage": 0,
+            "lives": 3,
+            "eliminated": False,
+            "pending_reboot": False,
+            "powered_down": False,
+        },
     }
     state_push = {
         "settings": {"register_size": 1},
@@ -215,14 +262,15 @@ def test_move_cards_interleave_by_priority():
         "robots": {k: dict(v) for k, v in robots2.items()},
         "register_order": ["p1", "p2"],
         "programs": {
-            "p1": [{"id": "1", "type": "move_1"}],
-            "p2": [{"id": "2", "type": "move_1"}],
+            "p1": [{"id": "1", "type": "move_1", "priority": 600}],
+            "p2": [{"id": "2", "type": "move_1", "priority": 500}],
         },
         "player_order": ["p1", "p2"],
         "start_priorities": {"p1": 0, "p2": 1},
     }
     execute_register(state_push)
-    assert state_push["robots"]["p1"]["y"] == 6
+    # p1's push is blocked by the wall in front of p2; p2's own move is also blocked.
+    assert state_push["robots"]["p1"]["y"] == 7
     assert state_push["robots"]["p2"]["y"] == 6
 
 
@@ -240,15 +288,37 @@ def test_move_three_uses_three_substeps():
         ),
         "checkpoints": [],
         "antenna": [5, 4],
+        "conveyors": [],
+        "gears": [],
+        "pushers": [],
+        "crushers": [],
+        "pits": [],
+        "lasers": [],
+        "repairs": [],
+        "upgrades": [],
     }
-    robots = {"p1": {"x": 5, "y": 7, "facing": "N", "checkpoints_reached": 0}}
-    programs = {"p1": [{"id": "1", "type": "move_3"}]}
+    robots = {
+        "p1": {
+            "x": 5,
+            "y": 7,
+            "facing": "N",
+            "checkpoints_reached": 0,
+            "damage": 0,
+            "lives": 3,
+            "eliminated": False,
+            "pending_reboot": False,
+            "powered_down": False,
+        }
+    }
+    programs = {"p1": [{"id": "1", "type": "move_3", "priority": 840}]}
     state = {
         "settings": {"register_size": 1},
         "board": board,
         "robots": robots,
         "register_order": ["p1"],
         "programs": programs,
+        "player_order": ["p1"],
+        "start_priorities": {"p1": 0},
     }
     _, log = execute_register(state)
     assert state["robots"]["p1"]["y"] == 4
@@ -257,7 +327,7 @@ def test_move_three_uses_three_substeps():
     assert all(e["moved"] for e in step_events)
 
 
-def test_turn_executes_in_priority_order():
+def test_card_priority_orders_turns():
     from app.games.roborally.simulation import execute_register
 
     board = {
@@ -271,14 +341,42 @@ def test_turn_executes_in_priority_order():
         ),
         "checkpoints": [],
         "antenna": [5, 4],
+        "conveyors": [],
+        "gears": [],
+        "pushers": [],
+        "crushers": [],
+        "pits": [],
+        "lasers": [],
+        "repairs": [],
+        "upgrades": [],
     }
     robots = {
-        "p1": {"x": 2, "y": 7, "facing": "N", "checkpoints_reached": 0},
-        "p2": {"x": 4, "y": 7, "facing": "N", "checkpoints_reached": 0},
+        "p1": {
+            "x": 2,
+            "y": 7,
+            "facing": "N",
+            "checkpoints_reached": 0,
+            "damage": 0,
+            "lives": 3,
+            "eliminated": False,
+            "pending_reboot": False,
+            "powered_down": False,
+        },
+        "p2": {
+            "x": 4,
+            "y": 7,
+            "facing": "N",
+            "checkpoints_reached": 0,
+            "damage": 0,
+            "lives": 3,
+            "eliminated": False,
+            "pending_reboot": False,
+            "powered_down": False,
+        },
     }
     programs = {
-        "p1": [{"id": "1", "type": "turn_right"}],
-        "p2": [{"id": "2", "type": "turn_left"}],
+        "p1": [{"id": "1", "type": "turn_right", "priority": 80}],
+        "p2": [{"id": "2", "type": "turn_left", "priority": 410}],
     }
     state = {
         "settings": {"register_size": 1},
@@ -286,7 +384,21 @@ def test_turn_executes_in_priority_order():
         "robots": robots,
         "register_order": ["p1", "p2"],
         "programs": programs,
+        "player_order": ["p1", "p2"],
+        "start_priorities": {"p1": 0, "p2": 1},
     }
-    execute_register(state)
+    _, log = execute_register(state)
     assert state["robots"]["p1"]["facing"] == "E"
     assert state["robots"]["p2"]["facing"] == "W"
+    # Higher priority (p2's 410) should appear first in the register log.
+    order = [e["player_id"] for e in log[0]["robots"]]
+    assert order == ["p2", "p1"]
+
+
+def test_deck_includes_u_turns_and_priorities():
+    from app.games.roborally import cards as card_lib
+
+    deck = card_lib.new_deck()
+    assert len(deck) == 84
+    assert sum(1 for c in deck if c["type"] == "u_turn") == 6
+    assert all("priority" in c for c in deck)

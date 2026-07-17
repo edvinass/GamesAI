@@ -535,6 +535,7 @@ export interface GoGameState {
 export interface RoboRallyCard {
   id: string
   type?: string
+  priority?: number
   hidden?: boolean
 }
 
@@ -556,6 +557,7 @@ export interface RoboRallyRobot {
   options?: RoboRallyOption[]
   powered_down?: boolean
   pending_power_down?: boolean
+  pending_reboot?: boolean
   eliminated?: boolean
 }
 

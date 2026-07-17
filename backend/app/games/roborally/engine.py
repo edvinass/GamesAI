@@ -11,7 +11,11 @@ from app.games.roborally import board as rb
 from app.games.roborally import cards as card_lib
 from app.games.roborally import options as opt_lib
 from app.games.roborally.maps import board_for_map, get_map, list_maps
-from app.games.roborally.simulation import compute_register_order, execute_register
+from app.games.roborally.simulation import (
+    compute_register_order,
+    execute_register,
+    respawn_pending_robots,
+)
 
 
 class RoboRallyEngine(GamePlugin):
@@ -108,6 +112,7 @@ class RoboRallyEngine(GamePlugin):
                 "options": [],
                 "powered_down": False,
                 "pending_power_down": False,
+                "pending_reboot": False,
                 "eliminated": False,
             }
             start_priorities[pid] = start["priority"]
@@ -133,6 +138,7 @@ class RoboRallyEngine(GamePlugin):
             "programs": programs,
             "locked_players": [],
             "deck": deck,
+            "discard": [],
             "option_deck": option_deck,
             "option_discard": [],
             "execution_log": [],
@@ -262,7 +268,11 @@ class RoboRallyEngine(GamePlugin):
         if existing:
             hand.append(existing)
         card_lib.remove_card_from_hand(hand, str(card_id))
-        programs[slot_index] = {"id": card["id"], "type": card["type"]}
+        programs[slot_index] = {
+            "id": card["id"],
+            "type": card["type"],
+            "priority": int(card.get("priority", 0)),
+        }
 
         events.append(
             {
@@ -393,6 +403,12 @@ class RoboRallyEngine(GamePlugin):
     def _start_next_round(self, state: dict) -> None:
         register_size = state["settings"]["register_size"]
         deck = state["deck"]
+        discard = state.setdefault("discard", [])
+
+        # Classic: clones return at the start of the next turn.
+        respawn_events = respawn_pending_robots(state["robots"], state["board"])
+        if respawn_events:
+            state.setdefault("execution_log", []).extend(respawn_events)
 
         for pid in state["player_order"]:
             robot = state["robots"][pid]
@@ -410,7 +426,13 @@ class RoboRallyEngine(GamePlugin):
             for i in range(register_size):
                 if i in locked_slots and old_program[i]:
                     new_program[i] = dict(old_program[i])
+                elif old_program[i]:
+                    discard.append(dict(old_program[i]))
             state["programs"][pid] = new_program
+
+            # Unused hand cards return to the shared discard.
+            for card in state["hands"].get(pid, []):
+                discard.append(dict(card))
             state["hands"][pid] = []
 
             if robot.get("powered_down"):
@@ -419,9 +441,10 @@ class RoboRallyEngine(GamePlugin):
             draw = rb.hand_size_for_damage(int(robot.get("damage", 0)))
             if opt_lib.has_option(robot, "extra_memory"):
                 draw += 1
-            state["hands"][pid] = card_lib.draw_cards(deck, draw)
-            if len(deck) < 10:
-                deck.extend(card_lib.new_deck())
+            state["hands"][pid] = card_lib.draw_cards_reshuffling(deck, discard, draw)
+            # Keep a healthy draw pile for multi-player games.
+            if len(deck) < 10 and discard:
+                card_lib.reshuffle_discard_into_deck(deck, discard)
 
         state["locked_players"] = []
         for pid in state["player_order"]:

@@ -43,6 +43,7 @@ def _robot(x=3, y=5, facing="N", **extra):
         "options": [],
         "powered_down": False,
         "pending_power_down": False,
+        "pending_reboot": False,
         "eliminated": False,
     }
     base.update(extra)
@@ -75,7 +76,7 @@ def test_express_then_normal_conveyor_and_gear():
         "settings": {"register_size": 1},
         "board": board,
         "robots": {"p1": _robot(3, 4, "N")},
-        "programs": {"p1": [{"id": "c1", "type": "turn_left"}]},
+        "programs": {"p1": [{"id": "c1", "type": "turn_left", "priority": 70}]},
         "register_order": ["p1"],
         "player_order": ["p1"],
         "start_priorities": {"p1": 0},
@@ -100,7 +101,7 @@ def test_pusher_and_crusher_register_gating():
         "settings": {"register_size": 1},
         "board": board,
         "robots": {"p1": _robot(3, 4, "N", archive={"x": 1, "y": 1})},
-        "programs": {"p1": [{"id": "c1", "type": "turn_right"}]},
+        "programs": {"p1": [{"id": "c1", "type": "turn_right", "priority": 100}]},
         "register_order": ["p1"],
         "player_order": ["p1"],
         "start_priorities": {"p1": 0},
@@ -109,8 +110,14 @@ def test_pusher_and_crusher_register_gating():
     }
     execute_register(state)
     r = state["robots"]["p1"]
-    # Pushed east onto crusher, crushed → reboot at archive with 2 damage, 2 lives
+    # Destroyed for the rest of the turn; respawns next turn at archive.
     assert r["lives"] == 2
+    assert r["pending_reboot"] is True
+    from app.games.roborally.simulation import respawn_pending_robots
+
+    respawn_pending_robots(state["robots"], board)
+    r = state["robots"]["p1"]
+    assert r["pending_reboot"] is False
     assert r["damage"] == rb.REBOOT_DAMAGE
     assert (r["x"], r["y"]) == (1, 1)
 
@@ -121,7 +128,7 @@ def test_pit_destroys_and_reboots():
         "settings": {"register_size": 1},
         "board": board,
         "robots": {"p1": _robot(3, 4, "N", archive={"x": 5, "y": 5})},
-        "programs": {"p1": [{"id": "c1", "type": "move_1"}]},
+        "programs": {"p1": [{"id": "c1", "type": "move_1", "priority": 500}]},
         "register_order": ["p1"],
         "player_order": ["p1"],
         "start_priorities": {"p1": 0},
@@ -131,6 +138,11 @@ def test_pit_destroys_and_reboots():
     execute_register(state)
     r = state["robots"]["p1"]
     assert r["lives"] == 2
+    assert r["pending_reboot"] is True
+    from app.games.roborally.simulation import respawn_pending_robots
+
+    respawn_pending_robots(state["robots"], board)
+    r = state["robots"]["p1"]
     assert r["damage"] == 2
     assert (r["x"], r["y"]) == (5, 5)
 
@@ -147,8 +159,8 @@ def test_board_and_robot_lasers():
             "p2": _robot(5, 3, "W"),
         },
         "programs": {
-            "p1": [{"id": "c1", "type": "turn_left"}],
-            "p2": [{"id": "c2", "type": "turn_left"}],
+            "p1": [{"id": "c1", "type": "turn_left", "priority": 70}],
+            "p2": [{"id": "c2", "type": "turn_left", "priority": 90}],
         },
         "register_order": ["p1", "p2"],
         "player_order": ["p1", "p2"],
@@ -210,7 +222,7 @@ def test_checkpoint_still_wins_after_board_phases():
         "settings": {"register_size": 1},
         "board": board,
         "robots": {"p1": _robot(3, 5, "N")},
-        "programs": {"p1": [{"id": "c1", "type": "turn_right"}]},
+        "programs": {"p1": [{"id": "c1", "type": "turn_right", "priority": 80}]},
         "register_order": ["p1"],
         "player_order": ["p1"],
         "start_priorities": {"p1": 0},
@@ -221,3 +233,78 @@ def test_checkpoint_still_wins_after_board_phases():
     execute_register(state)
     assert state["robots"]["p1"]["checkpoints_reached"] == 1
     assert state.get("winner") == "p1"
+
+
+def test_checkpoint_not_claimed_mid_move():
+    """Classic: only ending a register on the flag counts."""
+    board = _blank_board(
+        checkpoints=[[3, 3, 1]],
+        pits=[],
+    )
+    state = {
+        "settings": {"register_size": 1},
+        "board": board,
+        "robots": {"p1": _robot(3, 5, "N")},
+        "programs": {"p1": [{"id": "c1", "type": "move_3", "priority": 840}]},
+        "register_order": ["p1"],
+        "player_order": ["p1"],
+        "start_priorities": {"p1": 0},
+        "option_deck": [],
+        "option_discard": [],
+    }
+    execute_register(state)
+    # Move 3: (3,5)->(3,4)->(3,3)->(3,2). Passes through flag but ends on (3,2).
+    r = state["robots"]["p1"]
+    assert (r["x"], r["y"]) == (3, 2)
+    assert r["checkpoints_reached"] == 0
+
+
+def test_powered_down_still_moved_by_conveyor():
+    board = _blank_board(
+        conveyors=[{"x": 3, "y": 4, "dir": "N", "express": False, "rotate": "none"}],
+    )
+    state = {
+        "settings": {"register_size": 1},
+        "board": board,
+        "robots": {"p1": _robot(3, 4, "N", powered_down=True)},
+        "programs": {"p1": [{"id": "c1", "type": "move_1", "priority": 500}]},
+        "register_order": ["p1"],
+        "player_order": ["p1"],
+        "start_priorities": {"p1": 0},
+        "option_deck": [],
+        "option_discard": [],
+    }
+    execute_register(state)
+    r = state["robots"]["p1"]
+    # Skips programmed move, but belt still carries north.
+    assert (r["x"], r["y"]) == (3, 3)
+
+
+def test_repair_only_at_end_of_turn():
+    board = _blank_board(repairs=[[3, 4]], checkpoints=[[0, 0, 1]])
+    state = {
+        "settings": {"register_size": 2},
+        "board": board,
+        "robots": {"p1": _robot(3, 4, "N", damage=3)},
+        "programs": {
+            "p1": [
+                {"id": "c1", "type": "turn_left", "priority": 70},
+                {"id": "c2", "type": "turn_right", "priority": 80},
+            ]
+        },
+        "register_order": ["p1"],
+        "player_order": ["p1"],
+        "start_priorities": {"p1": 0},
+        "option_deck": [],
+        "option_discard": [],
+    }
+    from app.games.roborally.simulation import _execute_register_slot, compute_register_order
+
+    cards = {"p1": state["programs"]["p1"][0]}
+    order = compute_register_order(
+        state["robots"], board, ["p1"], {"p1": 0}, cards
+    )
+    _execute_register_slot(state, 0, order, end_of_turn=False)
+    assert state["robots"]["p1"]["damage"] == 3
+    _execute_register_slot(state, 1, order, end_of_turn=True)
+    assert state["robots"]["p1"]["damage"] == 2
