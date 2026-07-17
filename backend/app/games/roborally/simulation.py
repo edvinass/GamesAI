@@ -133,27 +133,27 @@ def _try_push_move(
     *,
     allow_into_pit: bool = True,
     pusher_id: str | None = None,
-) -> bool:
+) -> list[dict[str, Any]]:
     """Attempt to move robot one step in direction, pushing a chain of robots.
 
-    Returns True if the originating robot moved (chain succeeded).
+    Returns displacement records for every robot that moved, or [] if the move failed.
     """
     robot = robots[pid]
-    if robot.get("eliminated"):
-        return False
+    if robot.get("eliminated") or robot.get("pending_reboot"):
+        return []
 
     chain: list[str] = [pid]
     cx, cy = robot["x"], robot["y"]
     while True:
         if rb.blocked_step(board, cx, cy, direction, walls):
-            return False
+            return []
         dx, dy = rb.DELTA[direction]
         nx, ny = cx + dx, cy + dy
         if not rb.in_bounds(nx, ny, board["width"], board["height"]):
             # Leaving the board destroys the end of the chain — allow the push.
             break
         if (nx, ny) in pits and not allow_into_pit:
-            return False
+            return []
         occ = _occupant_map(robots)
         other = occ.get((nx, ny))
         if other is None or other in chain:
@@ -161,11 +161,13 @@ def _try_push_move(
         chain.append(other)
         cx, cy = nx, ny
 
+    befores = {mover_id: _snapshot_robot(robots[mover_id]) for mover_id in chain}
+
     # Apply moves from the far end so cells free up.
     for mover_id in reversed(chain):
         mover = robots[mover_id]
         if rb.blocked_step(board, mover["x"], mover["y"], direction, walls):
-            return False
+            return []
         dx, dy = rb.DELTA[direction]
         nx = mover["x"] + dx
         ny = mover["y"] + dy
@@ -174,7 +176,14 @@ def _try_push_move(
         if pusher_id and mover_id != pusher_id and opt_lib.has_option(robots[pusher_id], "ramming_gear"):
             mover["damage"] = int(mover.get("damage", 0)) + 1
 
-    return True
+    return [
+        {
+            "player_id": mover_id,
+            "before": befores[mover_id],
+            "after": _snapshot_robot(robots[mover_id]),
+        }
+        for mover_id in chain
+    ]
 
 
 def check_checkpoint(robot: dict[str, Any], board: dict[str, Any]) -> bool:
@@ -318,9 +327,10 @@ def _execute_move_substeps(
             if robots[pid].get("eliminated") or robots[pid].get("pending_reboot"):
                 break
             before = _snapshot_robot(robots[pid])
-            moved = _try_push_move(
+            displacements = _try_push_move(
                 pid, robots[pid]["facing"], robots, board, walls, pits, pusher_id=pid
             )
+            moved = bool(displacements)
             if moved:
                 _fall_check(robots, board, pits, events)
             events.append(
@@ -332,6 +342,7 @@ def _execute_move_substeps(
                     "before": before,
                     "after": _snapshot_robot(robots[pid]),
                     "moved": moved,
+                    "pushed": [d for d in displacements if d["player_id"] != pid],
                     "checkpoint_hit": False,
                     "checkpoints_reached": robots[pid].get("checkpoints_reached", 0),
                 }
@@ -405,7 +416,10 @@ def _execute_backups(
             continue
         before = _snapshot_robot(robot)
         direction = rb.OPPOSITE[robot["facing"]]
-        moved = _try_push_move(pid, direction, robots, board, walls, pits, pusher_id=pid)
+        displacements = _try_push_move(
+            pid, direction, robots, board, walls, pits, pusher_id=pid
+        )
+        moved = bool(displacements)
         if moved:
             _fall_check(robots, board, pits, events)
         events.append(
@@ -416,6 +430,7 @@ def _execute_backups(
                 "before": before,
                 "after": _snapshot_robot(robots[pid]),
                 "moved": moved,
+                "pushed": [d for d in displacements if d["player_id"] != pid],
                 "checkpoint_hit": False,
                 "checkpoints_reached": robots[pid].get("checkpoints_reached", 0),
             }
@@ -519,7 +534,8 @@ def _run_pushers(
             continue
         before = _snapshot_robot(robot)
         direction = str(pusher["dir"])
-        moved = _try_push_move(pid, direction, robots, board, walls, pits)
+        displacements = _try_push_move(pid, direction, robots, board, walls, pits)
+        moved = bool(displacements)
         if moved:
             _fall_check(robots, board, pits, events)
         events.append(
@@ -530,6 +546,7 @@ def _run_pushers(
                 "before": before,
                 "after": _snapshot_robot(robots[pid]),
                 "moved": moved,
+                "pushed": [d for d in displacements if d["player_id"] != pid],
             }
         )
     return events

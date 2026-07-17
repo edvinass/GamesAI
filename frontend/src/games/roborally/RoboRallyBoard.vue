@@ -21,20 +21,35 @@ const animStepLabel = ref('')
 let animationToken = 0
 let animationTimer: ReturnType<typeof setTimeout> | null = null
 let lastReplayedLogKey = ''
+const robotElById = new Map<string, HTMLElement>()
 
-/** Hold each sub-step so the race is readable one action at a time. */
-const EXEC_STEP_MS = 550
-const EXEC_REGISTER_PAUSE_MS = 350
+function bindRobotEl(playerId: string, el: unknown) {
+  if (el instanceof HTMLElement) robotElById.set(playerId, el)
+  else robotElById.delete(playerId)
+}
+
+/** Match CSS transition; hold after each step so steps never coalesce visually. */
+const EXEC_MOVE_MS = 420
+const EXEC_HOLD_MS = 180
+const EXEC_TURN_MS = 280
+const EXEC_REGISTER_PAUSE_MS = 320
+
+interface Pose {
+  x: number
+  y: number
+  facing: RoboRallyRobot['facing']
+}
 
 interface ExecFrame {
   player_id: string
-  before: { x: number; y: number; facing: RoboRallyRobot['facing'] }
-  after: { x: number; y: number; facing: RoboRallyRobot['facing'] }
+  before: Pose
+  after: Pose
   card_type?: string
   moved?: boolean
   step?: number
   phase?: 'card' | 'board'
   checkpoints_reached?: number
+  pushed?: Array<{ player_id: string; before: Pose; after: Pose }>
 }
 
 function cloneRobots(robots: Record<string, RoboRallyRobot>) {
@@ -48,21 +63,62 @@ function executionLogKey(log: Array<Record<string, unknown>> | undefined | null)
   return JSON.stringify(log)
 }
 
+function asPose(value: unknown): Pose | null {
+  if (!value || typeof value !== 'object') return null
+  const pose = value as Record<string, unknown>
+  if (
+    typeof pose.x !== 'number' ||
+    typeof pose.y !== 'number' ||
+    (pose.facing !== 'N' && pose.facing !== 'E' && pose.facing !== 'S' && pose.facing !== 'W')
+  ) {
+    return null
+  }
+  return { x: pose.x, y: pose.y, facing: pose.facing }
+}
+
+function parsePushed(raw: unknown): ExecFrame['pushed'] {
+  if (!Array.isArray(raw)) return []
+  const pushed: NonNullable<ExecFrame['pushed']> = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const entry = item as Record<string, unknown>
+    const before = asPose(entry.before)
+    const after = asPose(entry.after)
+    if (typeof entry.player_id === 'string' && before && after) {
+      pushed.push({ player_id: entry.player_id, before, after })
+    }
+  }
+  return pushed
+}
+
 function flattenExecutionLog(log: Array<Record<string, unknown>>): ExecFrame[] {
   const frames: ExecFrame[] = []
   for (const entry of log) {
     const step = typeof entry.step === 'number' ? entry.step : undefined
     if (entry.type === 'register_step' && Array.isArray(entry.robots)) {
-      for (const raw of entry.robots as ExecFrame[]) {
-        if (raw.before && raw.after && raw.player_id) {
-          frames.push({ ...raw, step: raw.step ?? step, phase: 'card' })
+      for (const raw of entry.robots as Array<Record<string, unknown>>) {
+        const before = asPose(raw.before)
+        const after = asPose(raw.after)
+        if (before && after && typeof raw.player_id === 'string') {
+          frames.push({
+            player_id: raw.player_id,
+            before,
+            after,
+            card_type: typeof raw.card_type === 'string' ? raw.card_type : undefined,
+            moved: Boolean(raw.moved),
+            step: typeof raw.step === 'number' ? raw.step : step,
+            phase: 'card',
+            checkpoints_reached:
+              typeof raw.checkpoints_reached === 'number' ? raw.checkpoints_reached : undefined,
+            pushed: parsePushed(raw.pushed),
+          })
         }
       }
     }
     if (entry.type === 'board_step' && Array.isArray(entry.events)) {
       for (const raw of entry.events as Array<Record<string, unknown>>) {
-        const before = raw.before as ExecFrame['before'] | undefined
-        const after = raw.after as ExecFrame['after'] | undefined
+        const before = asPose(raw.before)
+        const after = asPose(raw.after)
         if (before && after && typeof raw.player_id === 'string') {
           const eventType = String(raw.type ?? raw.card_type ?? 'board')
           frames.push({
@@ -73,6 +129,9 @@ function flattenExecutionLog(log: Array<Record<string, unknown>>): ExecFrame[] {
             moved: before.x !== after.x || before.y !== after.y || before.facing !== after.facing,
             step: typeof raw.step === 'number' ? raw.step : step,
             phase: 'board',
+            checkpoints_reached:
+              typeof raw.checkpoints_reached === 'number' ? raw.checkpoints_reached : undefined,
+            pushed: parsePushed(raw.pushed),
           })
         }
       }
@@ -95,16 +154,41 @@ function frameLabel(frame: ExecFrame): string {
   return `${register} · ${nick}: ${action}${blocked}`
 }
 
+function frameDurationMs(frame: ExecFrame): number {
+  const movedSelf =
+    frame.before.x !== frame.after.x ||
+    frame.before.y !== frame.after.y ||
+    (frame.pushed?.length ?? 0) > 0
+  if (movedSelf) return EXEC_MOVE_MS + EXEC_HOLD_MS
+  if (frame.before.facing !== frame.after.facing) return EXEC_TURN_MS
+  return EXEC_HOLD_MS
+}
+
 function sleep(ms: number, token: number) {
-  return new Promise<void>((resolve) => {
+  return new Promise<void>((resolve, reject) => {
     animationTimer = setTimeout(() => {
       animationTimer = null
+      if (token !== animationToken) {
+        reject(new Error('animation-cancelled'))
+        return
+      }
       resolve()
     }, ms)
-  }).then(() => {
-    if (token !== animationToken) {
-      throw new Error('animation-cancelled')
-    }
+  })
+}
+
+/** Ensure the browser paints between steps (avoids coalesced timer bursts). */
+function nextPaint(token: number) {
+  return new Promise<void>((resolve, reject) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (token !== animationToken) {
+          reject(new Error('animation-cancelled'))
+          return
+        }
+        resolve()
+      })
+    })
   })
 }
 
@@ -113,6 +197,62 @@ function cancelAnimation() {
   if (animationTimer) {
     clearTimeout(animationTimer)
     animationTimer = null
+  }
+}
+
+function applyPose(
+  positions: Record<string, RoboRallyRobot>,
+  playerId: string,
+  pose: Pose,
+  checkpoints?: number,
+) {
+  const current = positions[playerId]
+  if (!current) return
+  positions[playerId] = {
+    ...current,
+    x: pose.x,
+    y: pose.y,
+    facing: pose.facing,
+    checkpoints_reached:
+      typeof checkpoints === 'number' ? checkpoints : current.checkpoints_reached,
+    pending_reboot: false,
+  }
+}
+
+function captureRobotRects(playerIds: string[]) {
+  const rects = new Map<string, DOMRect>()
+  for (const id of playerIds) {
+    const el = robotElById.get(id)
+    if (el) rects.set(id, el.getBoundingClientRect())
+  }
+  return rects
+}
+
+/** FLIP: keep the same DOM node and slide it between cells. */
+function playRobotFlips(playerIds: string[], fromRects: Map<string, DOMRect>) {
+  for (const id of playerIds) {
+    const el = robotElById.get(id)
+    const from = fromRects.get(id)
+    if (!el || !from) continue
+    const to = el.getBoundingClientRect()
+    const dx = from.left - to.left
+    const dy = from.top - to.top
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue
+    el.style.transition = 'none'
+    el.style.transform = `translate(${dx}px, ${dy}px)`
+    // Force layout so the invert transform is applied before we animate.
+    void el.getBoundingClientRect()
+    el.style.transition = `transform ${EXEC_MOVE_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1)`
+    el.style.transform = 'translate(0, 0)'
+  }
+}
+
+function clearRobotFlips(playerIds: string[]) {
+  for (const id of playerIds) {
+    const el = robotElById.get(id)
+    if (!el) continue
+    el.style.transition = ''
+    el.style.transform = ''
   }
 }
 
@@ -131,14 +271,27 @@ async function replayExecution(log: Array<Record<string, unknown>>) {
 
   // Rewind every robot to its first logged position for this execution.
   for (const frame of frames) {
-    if (positions[frame.player_id]) continue
     const serverRobot = props.gameState.robots[frame.player_id]
-    if (!serverRobot) continue
-    positions[frame.player_id] = {
-      ...serverRobot,
-      x: frame.before.x,
-      y: frame.before.y,
-      facing: frame.before.facing,
+    if (serverRobot && !positions[frame.player_id]) {
+      positions[frame.player_id] = {
+        ...serverRobot,
+        x: frame.before.x,
+        y: frame.before.y,
+        facing: frame.before.facing,
+        pending_reboot: false,
+      }
+    }
+    for (const pushed of frame.pushed ?? []) {
+      const pushedRobot = props.gameState.robots[pushed.player_id]
+      if (pushedRobot && !positions[pushed.player_id]) {
+        positions[pushed.player_id] = {
+          ...pushedRobot,
+          x: pushed.before.x,
+          y: pushed.before.y,
+          facing: pushed.before.facing,
+          pending_reboot: false,
+        }
+      }
     }
   }
 
@@ -149,6 +302,9 @@ async function replayExecution(log: Array<Record<string, unknown>>) {
   }
 
   displayRobots.value = cloneRobots(positions)
+  // Let the rewind pose paint before the first transition.
+  await nextPaint(token)
+  await sleep(80, token)
 
   try {
     let previousStep: number | undefined
@@ -158,33 +314,43 @@ async function replayExecution(log: Array<Record<string, unknown>>) {
       if (previousStep !== undefined && frame.step !== undefined && frame.step !== previousStep) {
         animStepLabel.value = `Register ${frame.step + 1}`
         await sleep(EXEC_REGISTER_PAUSE_MS, token)
+        await nextPaint(token)
       }
       previousStep = frame.step
 
       animStepLabel.value = frameLabel(frame)
-      // Show the "before" pose briefly, then apply the move.
-      await sleep(EXEC_STEP_MS, token)
 
-      const current = displayRobots.value[frame.player_id]
-      if (!current) continue
+      const movingIds = [
+        frame.player_id,
+        ...(frame.pushed ?? []).map((p) => p.player_id),
+      ]
+      const fromRects = captureRobotRects(movingIds)
 
-      displayRobots.value = {
-        ...displayRobots.value,
-        [frame.player_id]: {
-          ...current,
-          x: frame.after.x,
-          y: frame.after.y,
-          facing: frame.after.facing,
-          checkpoints_reached:
-            typeof frame.checkpoints_reached === 'number'
-              ? frame.checkpoints_reached
-              : current.checkpoints_reached,
-        },
+      const next = cloneRobots(displayRobots.value)
+      applyPose(next, frame.player_id, frame.after, frame.checkpoints_reached)
+      for (const pushed of frame.pushed ?? []) {
+        applyPose(next, pushed.player_id, pushed.after)
       }
+
+      // Hide robots that were destroyed this step.
+      if (
+        frame.card_type === 'destroyed' ||
+        frame.card_type === 'eliminated' ||
+        frame.card_type === 'crusher'
+      ) {
+        if (next[frame.player_id]) {
+          next[frame.player_id] = { ...next[frame.player_id], pending_reboot: true }
+        }
+      }
+
+      displayRobots.value = next
+      await nextPaint(token)
+      playRobotFlips(movingIds, fromRects)
+      await sleep(frameDurationMs(frame), token)
+      clearRobotFlips(movingIds)
     }
 
     if (token !== animationToken) return
-    // Brief hold on the final pose before handing control back.
     await sleep(EXEC_REGISTER_PAUSE_MS, token)
     displayRobots.value = cloneRobots(props.gameState.robots)
     isAnimating.value = false
@@ -406,6 +572,32 @@ const robotAt = computed(() => {
   return map
 })
 
+/** Stable sprites (keyed by player) so cell-to-cell moves can CSS-transition. */
+const robotSprites = computed(() =>
+  props.gameState.players
+    .map((player) => {
+      const robot = robotsForDisplay.value[player.id]
+      if (!robot || robot.eliminated || robot.pending_reboot) return null
+      return {
+        playerId: player.id,
+        nickname: player.nickname,
+        color: player.color,
+        facing: robot.facing,
+        x: robot.x,
+        y: robot.y,
+        isMe: player.id === props.playerId,
+      }
+    })
+    .filter((sprite): sprite is NonNullable<typeof sprite> => sprite != null),
+)
+
+function robotOverlayStyle(sprite: { x: number; y: number }) {
+  return {
+    gridColumn: sprite.x + 1,
+    gridRow: sprite.y + 1,
+  }
+}
+
 /** Full board-laser paths for rendering (emitters + beam cells until wall/robot). */
 const laserBeamCells = computed(() => {
   const map = new Map<
@@ -524,10 +716,6 @@ function hasEdge(x: number, y: number, dir: string): boolean {
 
 function checkpointNum(x: number, y: number): number | null {
   return checkpointMap.value.get(`${x},${y}`) ?? null
-}
-
-function robotOn(x: number, y: number) {
-  return robotAt.value.get(`${x},${y}`)
 }
 
 function isPit(x: number, y: number): boolean {
@@ -751,6 +939,8 @@ function cardTypeClass(type?: string): string {
             class="grid"
             :style="{
               '--board-aspect': boardAspectNum,
+              '--board-cols': board.width,
+              '--board-rows': board.height,
               gridTemplateColumns: `repeat(${board.width}, 1fr)`,
               gridTemplateRows: `repeat(${board.height}, 1fr)`,
             }"
@@ -862,21 +1052,45 @@ function cardTypeClass(type?: string): string {
                   <span class="antenna-mast" />
                   <span class="antenna-dish" />
                 </span>
-                <div
-                  v-if="robotOn(x, y)"
-                  class="robot"
-                  :class="{
-                    'robot--me': robotOn(x, y)?.playerId === playerId,
-                    'robot--animating': isAnimating,
-                  }"
-                  :style="{ '--robot-color': robotOn(x, y)?.color }"
-                  :title="robotOn(x, y)?.nickname"
-                >
-                  <span class="robot-shell" />
-                  <span class="robot-arrow">{{ FACING_ARROW[robotOn(x, y)!.facing] }}</span>
-                </div>
               </div>
             </template>
+
+            <div class="robot-layer" aria-hidden="false">
+              <div
+                v-for="sprite in robotSprites"
+                :key="sprite.playerId"
+                class="robot robot--overlay"
+                :class="{
+                  'robot--me': sprite.isMe,
+                  'robot--animating': isAnimating,
+                }"
+                :style="{
+                  ...robotOverlayStyle(sprite),
+                  '--robot-color': sprite.color,
+                }"
+                :title="sprite.nickname"
+                :ref="(el) => bindRobotEl(sprite.playerId, el)"
+              >
+                <div class="robot-figure" :class="`face-${sprite.facing}`">
+                  <span class="robot-mast" />
+                  <span class="robot-head">
+                    <span class="robot-eye" />
+                    <span class="robot-eye" />
+                  </span>
+                  <span class="robot-torso">
+                    <span class="robot-plate" />
+                    <span class="robot-vent" />
+                    <span class="robot-arm arm-l" />
+                    <span class="robot-arm arm-r" />
+                  </span>
+                  <span class="robot-tracks">
+                    <span class="robot-track" />
+                    <span class="robot-track" />
+                  </span>
+                  <span class="robot-nose" aria-hidden="true" />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -884,7 +1098,7 @@ function cardTypeClass(type?: string): string {
       <aside class="racers-panel" aria-label="Register order">
         <div class="panel-head">
           <h3>Order</h3>
-          <span class="panel-sub">antenna first</span>
+          <span class="panel-sub">card priority</span>
         </div>
         <ol class="racer-list">
           <li
@@ -894,7 +1108,14 @@ function cardTypeClass(type?: string): string {
             :class="{ 'racer-card--me': entry.isMe, 'racer-card--locked': entry.locked }"
           >
             <span class="racer-rank">{{ entry.rank }}</span>
-            <span class="racer-dot" :style="{ background: entry.player?.color }" />
+            <span
+              class="racer-bot"
+              :style="{ '--robot-color': entry.player?.color }"
+              :title="entry.player?.nickname"
+            >
+              <span class="racer-bot-head" />
+              <span class="racer-bot-body" />
+            </span>
             <div class="racer-info">
               <span class="racer-name">
                 {{ entry.player?.nickname }}
@@ -1262,6 +1483,7 @@ function cardTypeClass(type?: string): string {
 }
 
 .grid {
+  position: relative;
   display: grid;
   gap: 2px;
   aspect-ratio: var(--board-aspect, 1);
@@ -2063,42 +2285,242 @@ function cardTypeClass(type?: string): string {
   50% { transform: scale(1.06); opacity: 1; }
 }
 
+.robot-layer {
+  position: absolute;
+  inset: 5px;
+  display: grid;
+  grid-template-columns: repeat(var(--board-cols), 1fr);
+  grid-template-rows: repeat(var(--board-rows), 1fr);
+  gap: 2px;
+  pointer-events: none;
+  z-index: 4;
+}
+
 .robot {
   position: relative;
-  width: 78%;
-  height: 78%;
+  width: 86%;
+  height: 86%;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 3;
 }
 
-.robot--me .robot-shell {
-  box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.85),
-    0 0 14px var(--robot-color),
-    0 4px 10px rgba(0, 0, 0, 0.45);
+.robot--overlay {
+  width: 86%;
+  height: 86%;
+  justify-self: center;
+  align-self: center;
+  z-index: 5;
 }
 
-.robot--animating .robot-shell {
-  transition: transform 0.2s ease;
-}
-
-.robot-shell {
+.robot-figure {
+  position: relative;
   width: 100%;
   height: 100%;
-  border-radius: 6px;
-  background: linear-gradient(145deg, var(--robot-color), color-mix(in srgb, var(--robot-color) 70%, black));
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
+  transition: transform 0.28s ease;
 }
 
-.robot-arrow {
+.robot-figure.face-N { transform: rotate(0deg); }
+.robot-figure.face-E { transform: rotate(90deg); }
+.robot-figure.face-S { transform: rotate(180deg); }
+.robot-figure.face-W { transform: rotate(-90deg); }
+
+.robot--me .robot-figure {
+  filter:
+    drop-shadow(0 0 1.5px #fff)
+    drop-shadow(0 0 5px var(--robot-color))
+    drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
+}
+
+.robot-mast {
+  width: 7%;
+  height: 10%;
+  margin-bottom: -2%;
+  border-radius: 1px;
+  background: linear-gradient(90deg, #6b7280, #d1d5db, #6b7280);
+  box-shadow: 0 -2px 0 1px color-mix(in srgb, var(--robot-color) 80%, white);
+}
+
+.robot-head {
+  width: 52%;
+  height: 22%;
+  border-radius: 4px 4px 2px 2px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--robot-color) 75%, white) 0%,
+      var(--robot-color) 45%,
+      color-mix(in srgb, var(--robot-color) 65%, black) 100%);
+  border: 1.5px solid color-mix(in srgb, var(--robot-color) 40%, #111);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14%;
+  z-index: 2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.robot-eye {
+  width: 22%;
+  height: 38%;
+  border-radius: 1px;
+  background: linear-gradient(180deg, #fef3c7, #f59e0b 60%, #b45309);
+  box-shadow:
+    0 0 3px rgba(245, 158, 11, 0.9),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.robot-torso {
+  position: relative;
+  width: 62%;
+  height: 36%;
+  margin-top: -1%;
+  border-radius: 3px;
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--robot-color) 55%, #e5e7eb) 0%,
+      var(--robot-color) 40%,
+      color-mix(in srgb, var(--robot-color) 55%, #111) 100%);
+  border: 1.5px solid color-mix(in srgb, var(--robot-color) 35%, #0a0a0a);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  z-index: 1;
+}
+
+.robot-plate {
   position: absolute;
-  font-size: clamp(0.9rem, 2.2vmin, 1.5rem);
-  font-weight: 900;
-  color: white;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  left: 18%;
+  right: 18%;
+  top: 18%;
+  height: 28%;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--robot-color) 35%, #1f2937);
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.robot-vent {
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  bottom: 16%;
+  height: 22%;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.35) 0 2px,
+      transparent 2px 5px
+    );
+  opacity: 0.85;
+}
+
+.robot-arm {
+  position: absolute;
+  top: 12%;
+  width: 18%;
+  height: 70%;
+  border-radius: 2px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--robot-color) 50%, #9ca3af),
+      color-mix(in srgb, var(--robot-color) 60%, #111));
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  z-index: 0;
+}
+
+.robot-arm.arm-l { left: -20%; }
+.robot-arm.arm-r { right: -20%; }
+
+.robot-tracks {
+  display: flex;
+  width: 78%;
+  height: 16%;
+  margin-top: -2%;
+  gap: 6%;
+  z-index: 2;
+}
+
+.robot-track {
+  flex: 1;
+  border-radius: 3px;
+  background:
+    linear-gradient(180deg, #4b5563 0%, #1f2937 40%, #111827 100%);
+  border: 1px solid #0a0a0a;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.35);
+  position: relative;
+}
+
+.robot-track::after {
+  content: '';
+  position: absolute;
+  inset: 22% 10%;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(156, 163, 175, 0.55) 0 2px,
+      transparent 2px 4px
+    );
+}
+
+.robot-nose {
+  position: absolute;
+  top: 2%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 6px solid #f8fafc;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+  z-index: 3;
+}
+
+.racer-bot {
+  width: 1.35rem;
+  height: 1.35rem;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.racer-bot-head {
+  width: 55%;
+  height: 32%;
+  border-radius: 2px;
+  background: var(--robot-color);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  position: relative;
+}
+
+.racer-bot-head::before,
+.racer-bot-head::after {
+  content: '';
+  position: absolute;
+  top: 30%;
+  width: 18%;
+  height: 30%;
+  background: #fbbf24;
+  border-radius: 1px;
+}
+
+.racer-bot-head::before { left: 18%; }
+.racer-bot-head::after { right: 18%; }
+
+.racer-bot-body {
+  width: 70%;
+  height: 42%;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--robot-color), color-mix(in srgb, var(--robot-color) 60%, #111));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
 }
 
 /* ── Racers ── */
@@ -2140,14 +2562,6 @@ function cardTypeClass(type?: string): string {
   font-weight: 800;
   color: var(--text-muted);
   text-align: center;
-}
-
-.racer-dot {
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
-  flex-shrink: 0;
-  box-shadow: 0 0 6px currentColor;
 }
 
 .racer-info {
