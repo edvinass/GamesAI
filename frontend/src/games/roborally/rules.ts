@@ -25,7 +25,7 @@ export const roborallyRules: GameRules = {
       heading: 'Board elements',
       body: 'Factory tiles activate after each register card resolves. Powered-down robots still ride belts and get pushed.',
       bullets: [
-        'Conveyors (yellow) and express (orange) move you; gears rotate you.',
+        'Conveyors (black) and express (black with gold trim) move you; gears rotate you.',
         'Pushers shove on listed registers; crushers destroy on listed registers.',
         'Pits and leaving the board destroy you (lose a life, reboot next turn at archive with 2 damage).',
         'Board lasers and robot lasers deal damage; robots block beams.',

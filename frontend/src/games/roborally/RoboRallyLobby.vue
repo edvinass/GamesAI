@@ -331,10 +331,10 @@ function selectMap(id: string) {
   display: grid;
   width: 100%;
   gap: 1px;
-  background: color-mix(in srgb, var(--border) 70%, transparent);
-  border-radius: 6px;
+  background: #3a424e;
+  border-radius: 3px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 2px solid #1c1f24;
 }
 
 .preview-cell {
@@ -344,40 +344,41 @@ function selectMap(id: string) {
 }
 
 .preview-cell.floor {
-  background: color-mix(in srgb, var(--surface) 80%, #64748b 20%);
+  background: #9aa3af;
 }
 
 .preview-cell.pit {
-  background: #020617;
+  background:
+    repeating-conic-gradient(#f5c518 0% 25%, #1a1a1a 0% 50%) 0 0 / 6px 6px;
 }
 
 .preview-cell.checkpoint {
-  background: #f59e0b;
+  background: #dc2626;
 }
 
 .preview-cell.antenna {
-  background: #22d3ee;
+  background: #c9a24a;
 }
 
 .preview-cell.conveyor {
   background:
     repeating-linear-gradient(
       90deg,
-      #5c6574 0 2px,
-      #eab308 2px 4px
+      #111418 0 2px,
+      #4b5563 2px 4px
     );
 }
 
 .preview-cell.laser {
-  background: #fb7185;
+  background: #ef4444;
 }
 
 .preview-cell.repair {
-  background: #4ade80;
+  background: #f5c518;
 }
 
 .preview-cell.upgrade {
-  background: #22d3ee;
+  background: #3b82f6;
 }
 
 .preview-cell.start {

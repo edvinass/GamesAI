@@ -279,6 +279,366 @@ MAPS: dict[str, dict[str, Any]] = {
             {"x": 9, "y": 10, "facing": "N", "priority": 3},
         ],
     },
+    "sprint_line": {
+        "id": "sprint_line",
+        "name": "Sprint Line",
+        "description": "Short open race — learn programming without heavy hazards.",
+        "difficulty": "easy",
+        "width": 10,
+        "height": 8,
+        "walls": _border_edges(10, 8)
+        + _wall(4, 3, "E")
+        + _wall(5, 3, "W")
+        + _wall(4, 4, "E")
+        + _wall(5, 4, "W"),
+        "conveyors": [
+            _belt(1, 2, "E"),
+            _belt(2, 2, "E"),
+            _belt(7, 2, "W"),
+            _belt(8, 2, "W"),
+        ],
+        "gears": [{"x": 3, "y": 4, "dir": "right"}],
+        "pushers": [],
+        "crushers": [],
+        "pits": [[4, 1], [5, 6]],
+        "lasers": [],
+        "repairs": [[8, 6]],
+        "upgrades": [],
+        "checkpoints": [
+            [2, 1, 1],
+            [7, 3, 2],
+            [2, 6, 3],
+        ],
+        "antenna": [8, 1],
+        "starts": [
+            {"x": 2, "y": 7, "facing": "N", "priority": 0},
+            {"x": 3, "y": 7, "facing": "N", "priority": 1},
+            {"x": 6, "y": 7, "facing": "N", "priority": 2},
+            {"x": 7, "y": 7, "facing": "N", "priority": 3},
+        ],
+    },
+    "gear_yard": {
+        "id": "gear_yard",
+        "name": "Gear Yard",
+        "description": "Turning puzzle — gears and corners punish bad facing.",
+        "difficulty": "standard",
+        "width": 12,
+        "height": 10,
+        "walls": _border_edges(12, 10)
+        + _wall(3, 2, "S")
+        + _wall(4, 2, "S")
+        + _wall(7, 2, "S")
+        + _wall(8, 2, "S")
+        + _wall(3, 7, "N")
+        + _wall(4, 7, "N")
+        + _wall(7, 7, "N")
+        + _wall(8, 7, "N")
+        + _wall(5, 4, "E", "W")
+        + _wall(6, 5, "E", "W"),
+        "conveyors": [
+            _belt(1, 3, "S"),
+            _belt(1, 4, "S", rotate="left"),
+            _belt(2, 4, "E"),
+            _belt(3, 4, "E"),
+            _belt(10, 3, "N"),
+            _belt(10, 4, "N", rotate="right"),
+            _belt(9, 4, "W"),
+            _belt(8, 4, "W"),
+        ],
+        "gears": [
+            {"x": 2, "y": 2, "dir": "left"},
+            {"x": 9, "y": 2, "dir": "right"},
+            {"x": 2, "y": 7, "dir": "right"},
+            {"x": 9, "y": 7, "dir": "left"},
+            {"x": 5, "y": 5, "dir": "left"},
+            {"x": 6, "y": 4, "dir": "right"},
+        ],
+        "pushers": [],
+        "crushers": [],
+        "pits": [[5, 3], [6, 6]],
+        "lasers": [{"x": 0, "y": 5, "dir": "E", "strength": 1}],
+        "repairs": [[1, 8]],
+        "upgrades": [[10, 8]],
+        "checkpoints": [
+            [4, 1, 1],
+            [10, 5, 2],
+            [1, 5, 3],
+            [7, 8, 4],
+        ],
+        "antenna": [6, 1],
+        "starts": [
+            {"x": 2, "y": 9, "facing": "N", "priority": 0},
+            {"x": 4, "y": 9, "facing": "N", "priority": 1},
+            {"x": 7, "y": 9, "facing": "N", "priority": 2},
+            {"x": 9, "y": 9, "facing": "N", "priority": 3},
+        ],
+    },
+    "crossfire": {
+        "id": "crossfire",
+        "name": "Crossfire",
+        "description": "Laser corridors and cover walls — tank damage or dodge.",
+        "difficulty": "hard",
+        "width": 12,
+        "height": 11,
+        "walls": _border_edges(12, 11)
+        + _wall(3, 2, "E")
+        + _wall(3, 3, "E")
+        + _wall(3, 4, "E")
+        + _wall(8, 2, "W")
+        + _wall(8, 3, "W")
+        + _wall(8, 4, "W")
+        + _wall(3, 6, "E")
+        + _wall(3, 7, "E")
+        + _wall(3, 8, "E")
+        + _wall(8, 6, "W")
+        + _wall(8, 7, "W")
+        + _wall(8, 8, "W")
+        + _wall(5, 5, "N", "S")
+        + _wall(6, 5, "N", "S"),
+        "conveyors": [
+            _belt(1, 5, "E"),
+            _belt(2, 5, "E"),
+            _belt(9, 5, "W"),
+            _belt(10, 5, "W"),
+        ],
+        "gears": [{"x": 4, "y": 5, "dir": "right"}, {"x": 7, "y": 5, "dir": "left"}],
+        "pushers": [{"x": 5, "y": 3, "dir": "S", "registers": [2, 4]}],
+        "crushers": [],
+        "pits": [[5, 1], [6, 1], [5, 9], [6, 9]],
+        "lasers": [
+            {"x": 0, "y": 2, "dir": "E", "strength": 1},
+            {"x": 11, "y": 4, "dir": "W", "strength": 1},
+            {"x": 0, "y": 6, "dir": "E", "strength": 1},
+            {"x": 11, "y": 8, "dir": "W", "strength": 2},
+        ],
+        "repairs": [[1, 9]],
+        "upgrades": [[10, 9]],
+        "checkpoints": [
+            [2, 1, 1],
+            [9, 3, 2],
+            [2, 7, 3],
+            [9, 9, 4],
+        ],
+        "antenna": [10, 1],
+        "starts": [
+            {"x": 2, "y": 10, "facing": "N", "priority": 0},
+            {"x": 4, "y": 10, "facing": "N", "priority": 1},
+            {"x": 7, "y": 10, "facing": "N", "priority": 2},
+            {"x": 9, "y": 10, "facing": "N", "priority": 3},
+        ],
+    },
+    "maelstrom": {
+        "id": "maelstrom",
+        "name": "Maelstrom",
+        "description": "Spiral conveyors suck you inward — ride or fight the current.",
+        "difficulty": "hard",
+        "width": 13,
+        "height": 11,
+        "walls": _border_edges(13, 11)
+        + _wall(3, 3, "N", "W")
+        + _wall(9, 3, "N", "E")
+        + _wall(3, 7, "S", "W")
+        + _wall(9, 7, "S", "E"),
+        "conveyors": [
+            # Outer ring clockwise
+            _belt(2, 2, "E", rotate="right"),
+            *[_belt(x, 2, "E") for x in range(3, 10)],
+            _belt(10, 2, "S", rotate="right"),
+            *[_belt(10, y, "S") for y in range(3, 8)],
+            _belt(10, 8, "W", rotate="right"),
+            *[_belt(x, 8, "W") for x in range(3, 10)],
+            _belt(2, 8, "N", rotate="right"),
+            *[_belt(2, y, "N") for y in range(3, 8)],
+            # Inner express spiral
+            _belt(4, 4, "E", express=True, rotate="right"),
+            *[_belt(x, 4, "E", express=True) for x in range(5, 8)],
+            _belt(8, 4, "S", express=True, rotate="right"),
+            _belt(8, 5, "S", express=True),
+            _belt(8, 6, "W", express=True, rotate="right"),
+            *[_belt(x, 6, "W", express=True) for x in range(5, 8)],
+            _belt(4, 6, "N", express=True, rotate="right"),
+            _belt(4, 5, "N", express=True),
+        ],
+        "gears": [{"x": 6, "y": 5, "dir": "left"}],
+        "pushers": [],
+        "crushers": [{"x": 6, "y": 3, "registers": [3]}],
+        "pits": [[6, 1], [1, 5], [11, 5]],
+        "lasers": [{"x": 6, "y": 0, "dir": "S", "strength": 1}],
+        "repairs": [[11, 9]],
+        "upgrades": [[1, 9]],
+        "checkpoints": [
+            [4, 1, 1],
+            [11, 4, 2],
+            [6, 9, 3],
+            [1, 4, 4],
+        ],
+        "antenna": [11, 1],
+        "starts": [
+            {"x": 3, "y": 10, "facing": "N", "priority": 0},
+            {"x": 5, "y": 10, "facing": "N", "priority": 1},
+            {"x": 7, "y": 10, "facing": "N", "priority": 2},
+            {"x": 9, "y": 10, "facing": "N", "priority": 3},
+        ],
+    },
+    "island_hop": {
+        "id": "island_hop",
+        "name": "Island Hop",
+        "description": "Pit seas and narrow bridges — one misstep and you reboot.",
+        "difficulty": "standard",
+        "width": 13,
+        "height": 10,
+        "walls": _border_edges(13, 10)
+        + _wall(4, 2, "E")
+        + _wall(8, 4, "W")
+        + _wall(4, 7, "E")
+        + _wall(8, 7, "W"),
+        "conveyors": [
+            _belt(3, 4, "E"),
+            _belt(4, 4, "E"),
+            _belt(5, 4, "E"),
+            _belt(7, 4, "W"),
+            _belt(8, 4, "W"),
+            _belt(9, 4, "W"),
+            _belt(6, 2, "S", express=True),
+            _belt(6, 3, "S", express=True),
+            _belt(6, 5, "N", express=True),
+            _belt(6, 6, "N", express=True),
+        ],
+        "gears": [{"x": 6, "y": 4, "dir": "right"}],
+        "pushers": [{"x": 6, "y": 7, "dir": "N", "registers": [1, 3, 5]}],
+        "crushers": [],
+        "pits": [
+            [2, 2], [3, 2], [2, 3],
+            [9, 2], [10, 2], [10, 3],
+            [2, 6], [2, 7], [3, 7],
+            [9, 7], [10, 6], [10, 7],
+            [5, 1], [7, 1],
+            [5, 8], [7, 8],
+        ],
+        "lasers": [{"x": 0, "y": 4, "dir": "E", "strength": 1}],
+        "repairs": [[1, 8]],
+        "upgrades": [[11, 8]],
+        "checkpoints": [
+            [1, 1, 1],
+            [11, 2, 2],
+            [1, 5, 3],
+            [11, 5, 4],
+        ],
+        "antenna": [11, 1],
+        "starts": [
+            {"x": 3, "y": 9, "facing": "N", "priority": 0},
+            {"x": 5, "y": 9, "facing": "N", "priority": 1},
+            {"x": 7, "y": 9, "facing": "N", "priority": 2},
+            {"x": 9, "y": 9, "facing": "N", "priority": 3},
+        ],
+    },
+    "vault_run": {
+        "id": "vault_run",
+        "name": "Vault Run",
+        "description": "Long factory maze with pushers and a crusher choke point.",
+        "difficulty": "long",
+        "width": 14,
+        "height": 12,
+        "walls": _border_edges(14, 12)
+        + [{"x": 3, "y": y, "dir": "E"} for y in range(1, 5)]
+        + [{"x": 4, "y": y, "dir": "W"} for y in range(1, 5)]
+        + [{"x": 9, "y": y, "dir": "E"} for y in range(3, 8)]
+        + [{"x": 10, "y": y, "dir": "W"} for y in range(3, 8)]
+        + [{"x": x, "y": 5, "dir": "S"} for x in range(5, 9)]
+        + [{"x": x, "y": 6, "dir": "N"} for x in range(5, 9)]
+        + _wall(6, 2, "S")
+        + _wall(7, 8, "N")
+        + _wall(2, 8, "E")
+        + _wall(11, 3, "W"),
+        "conveyors": [
+            *[_belt(1, y, "S") for y in range(2, 7)],
+            _belt(1, 7, "E", rotate="left"),
+            *[_belt(x, 7, "E") for x in range(2, 5)],
+            *[_belt(12, y, "N") for y in range(4, 9)],
+            _belt(12, 3, "W", rotate="right"),
+            *[_belt(x, 3, "W") for x in range(10, 12)],
+            _belt(5, 9, "W", express=True),
+            _belt(6, 9, "W", express=True),
+            _belt(7, 9, "E", express=True),
+            _belt(8, 9, "E", express=True),
+        ],
+        "gears": [
+            {"x": 5, "y": 3, "dir": "left"},
+            {"x": 8, "y": 7, "dir": "right"},
+        ],
+        "pushers": [
+            {"x": 4, "y": 6, "dir": "E", "registers": [1, 3, 5]},
+            {"x": 9, "y": 2, "dir": "S", "registers": [2, 4]},
+        ],
+        "crushers": [{"x": 6, "y": 6, "registers": [2, 4]}],
+        "pits": [[6, 4], [7, 4], [6, 10], [7, 1]],
+        "lasers": [
+            {"x": 0, "y": 9, "dir": "E", "strength": 1},
+            {"x": 13, "y": 5, "dir": "W", "strength": 1},
+        ],
+        "repairs": [[2, 10]],
+        "upgrades": [[11, 10]],
+        "checkpoints": [
+            [2, 1, 1],
+            [11, 1, 2],
+            [11, 8, 3],
+            [2, 6, 4],
+            [7, 10, 5],
+        ],
+        "antenna": [12, 1],
+        "starts": [
+            {"x": 3, "y": 11, "facing": "N", "priority": 0},
+            {"x": 5, "y": 11, "facing": "N", "priority": 1},
+            {"x": 8, "y": 11, "facing": "N", "priority": 2},
+            {"x": 10, "y": 11, "facing": "N", "priority": 3},
+        ],
+    },
+    "pit_row": {
+        "id": "pit_row",
+        "name": "Pit Row",
+        "description": "Parallel pit trenches and side belts — choose your lane.",
+        "difficulty": "standard",
+        "width": 12,
+        "height": 10,
+        "walls": _border_edges(12, 10)
+        + _wall(2, 3, "S")
+        + _wall(5, 3, "S")
+        + _wall(8, 3, "S")
+        + _wall(2, 6, "N")
+        + _wall(5, 6, "N")
+        + _wall(8, 6, "N"),
+        "conveyors": [
+            *[_belt(1, y, "N") for y in range(4, 8)],
+            *[_belt(4, y, "S") for y in range(2, 6)],
+            *[_belt(7, y, "N", express=True) for y in range(4, 8)],
+            *[_belt(10, y, "S", express=True) for y in range(2, 6)],
+        ],
+        "gears": [{"x": 3, "y": 5, "dir": "left"}, {"x": 6, "y": 4, "dir": "right"}],
+        "pushers": [],
+        "crushers": [],
+        "pits": [
+            [2, 4], [2, 5],
+            [5, 4], [5, 5],
+            [8, 4], [8, 5],
+            [3, 1], [9, 8],
+        ],
+        "lasers": [{"x": 6, "y": 0, "dir": "S", "strength": 1}],
+        "repairs": [[1, 8]],
+        "upgrades": [[10, 1]],
+        "checkpoints": [
+            [3, 2, 1],
+            [9, 2, 2],
+            [3, 7, 3],
+            [9, 7, 4],
+        ],
+        "antenna": [6, 8],
+        "starts": [
+            {"x": 1, "y": 9, "facing": "N", "priority": 0},
+            {"x": 4, "y": 9, "facing": "N", "priority": 1},
+            {"x": 7, "y": 9, "facing": "N", "priority": 2},
+            {"x": 10, "y": 9, "facing": "N", "priority": 3},
+        ],
+    },
 }
 
 

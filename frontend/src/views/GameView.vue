@@ -341,10 +341,13 @@ function backToLobby() {
 
 .game-page--roborally .game-header {
   padding: 0.35rem 0.75rem;
+  border-bottom: 2px solid #c9a24a;
 }
 
 .game-page--roborally .game-header h1 {
   font-size: 1rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .game-header--roborally .header-meta {
