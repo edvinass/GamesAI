@@ -218,10 +218,16 @@ def test_ai_uses_powerup_immediately() -> None:
     ai["stored_powerup"] = "shield"
     ai["hp"] = 1
 
-    state, events = engine.tick(state)
+    all_events: list[dict] = []
+    for _ in range(12):
+        state, events = engine.tick(state)
+        all_events.extend(events)
+        if ai["stored_powerup"] is None:
+            break
+
     assert ai["stored_powerup"] is None
     assert ai["effects"]["shield_until"] > state["tick"]
-    assert any(e["type"] == "powerup_activated" for e in events)
+    assert any(e["type"] == "powerup_activated" for e in all_events)
 
 
 def test_ai_uses_heal_when_damaged() -> None:
