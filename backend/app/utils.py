@@ -3,6 +3,10 @@ import secrets
 import uuid
 from typing import Any
 
+# Crockford base32 — unambiguous for voice / typing (no I, L, O, U)
+_ROOM_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+_ROOM_CODE_LENGTH = 6
+
 
 def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
@@ -10,6 +14,14 @@ def generate_session_token() -> str:
 
 def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def generate_room_code(length: int = _ROOM_CODE_LENGTH) -> str:
+    return "".join(secrets.choice(_ROOM_CODE_ALPHABET) for _ in range(length))
+
+
+def normalize_room_code(value: str) -> str:
+    return value.strip().upper().replace(" ", "").replace("-", "")
 
 
 def player_to_dict(player: Any, room_settings: dict | None = None) -> dict:
@@ -33,6 +45,7 @@ def room_to_dict(room: Any, players: list[Any] | None = None) -> dict:
     settings = room.settings or {}
     return {
         "id": str(room.id),
+        "code": getattr(room, "code", None),
         "game_type": room.game_type,
         "status": room.status.value,
         "settings": settings,

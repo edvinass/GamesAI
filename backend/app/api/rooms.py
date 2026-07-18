@@ -1,16 +1,11 @@
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
 from app.games.registry import get_game, list_games
-from app.models import Room, RoomPlayer, RoomStatus
 from app.services.room_service import RoomService
-from app.utils import generate_session_token, hash_session_token, room_to_dict
+from app.utils import room_to_dict
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -26,6 +21,7 @@ class JoinRoomRequest(BaseModel):
 
 class RoomResponse(BaseModel):
     room_id: str
+    code: str
     session_token: str
     player_id: str
 
@@ -44,25 +40,33 @@ async def create_room(body: CreateRoomRequest, db: AsyncSession = Depends(get_db
 
     service = RoomService(db)
     room, player, token = await service.create_room(body.game_type, body.nickname)
-    return RoomResponse(room_id=str(room.id), session_token=token, player_id=str(player.id))
+    return RoomResponse(
+        room_id=str(room.id),
+        code=room.code,
+        session_token=token,
+        player_id=str(player.id),
+    )
 
 
-@router.post("/{room_id}/join", response_model=RoomResponse)
-async def join_room(room_id: uuid.UUID, body: JoinRoomRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/{room_ref}/join", response_model=RoomResponse)
+async def join_room(room_ref: str, body: JoinRoomRequest, db: AsyncSession = Depends(get_db)):
     service = RoomService(db)
     try:
-        room, player, token = await service.join_room(room_id, body.nickname)
+        room, player, token = await service.join_room(room_ref, body.nickname)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return RoomResponse(room_id=str(room.id), session_token=token, player_id=str(player.id))
-
-
-@router.get("/{room_id}")
-async def get_room(room_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Room).options(selectinload(Room.players)).where(Room.id == room_id)
+    return RoomResponse(
+        room_id=str(room.id),
+        code=room.code,
+        session_token=token,
+        player_id=str(player.id),
     )
-    room = result.scalar_one_or_none()
+
+
+@router.get("/{room_ref}")
+async def get_room(room_ref: str, db: AsyncSession = Depends(get_db)):
+    service = RoomService(db)
+    room = await service.resolve_room_ref(room_ref)
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     return room_to_dict(room)

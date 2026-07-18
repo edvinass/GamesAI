@@ -29,6 +29,7 @@ class Room(Base):
     __tablename__ = "rooms"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(6), unique=True, nullable=False, index=True)
     game_type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[RoomStatus] = mapped_column(
         Enum(RoomStatus, name="room_status", values_callable=lambda x: [e.value for e in x]),

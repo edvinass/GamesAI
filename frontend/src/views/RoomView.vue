@@ -6,6 +6,7 @@ import { useRoom } from '@/composables/useRoom'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useLeaveRoom } from '@/composables/useLeaveRoom'
 import GameRulesModal from '@/components/GameRulesModal.vue'
+import ShareInvite from '@/components/ShareInvite.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import LobbyTeamPanel from '@/components/lobby/LobbyTeamPanel.vue'
 import SpyfallLobby from '@/games/spyfall/SpyfallLobby.vue'
@@ -41,27 +42,32 @@ const router = useRouter()
 const playerStore = usePlayerStore()
 const { fetchRoom, joinRoom, loading: joinLoading } = useRoom()
 
-const roomId = computed(() => route.params.id as string)
 const room = ref<Room | null>(null)
 const joinNickname = ref(playerStore.nickname || '')
 const needsJoin = ref(false)
-const copied = ref(false)
 const toast = ref('')
 const showRules = ref(false)
 const showPokerHands = ref(false)
 
+/** Route may be a short code (`/r/ABC123`) or UUID (`/room/<uuid>`). */
+const roomRef = computed(
+  () => (route.params.code as string | undefined) ?? (route.params.id as string),
+)
+/** WebSocket + play routes always use the canonical UUID. */
+const roomUuid = computed(() => room.value?.id ?? '')
+
 const wsToken = ref(playerStore.sessionToken)
-const { connected, lastMessage, send, disconnect } = useWebSocket(roomId, wsToken)
+const { connected, lastMessage, send, disconnect } = useWebSocket(roomUuid, wsToken)
 const { leaveRoom } = useLeaveRoom()
 
 onMounted(async () => {
   try {
-    room.value = await fetchRoom(roomId.value)
+    room.value = await fetchRoom(roomRef.value)
     if (room.value.status === 'playing') {
-      router.replace(`/room/${roomId.value}/play`)
+      router.replace(`/room/${room.value.id}/play`)
       return
     }
-    if (!playerStore.sessionToken || playerStore.roomId !== roomId.value) {
+    if (!playerStore.sessionToken || playerStore.roomId !== room.value.id) {
       needsJoin.value = true
       wsToken.value = ''
     } else {
@@ -76,7 +82,7 @@ watch(lastMessage, (msg) => {
   if (!msg) return
   if (msg.room) room.value = msg.room
   if (msg.type === 'game_started' && msg.room) {
-    router.push(`/room/${roomId.value}/play`)
+    router.push(`/room/${msg.room.id}/play`)
   }
   if (msg.type === 'error') {
     toast.value = msg.message ?? 'Error'
@@ -99,7 +105,6 @@ watch(
   },
 )
 
-const roomUrl = computed(() => `${window.location.origin}/room/${roomId.value}`)
 const isHost = computed(() => room.value?.host_player_id === playerStore.playerId)
 
 const isSpyfall = computed(() => room.value?.game_type === 'spyfall')
@@ -232,7 +237,7 @@ const soloAiDifficulties = computed({
 
 async function handleJoin() {
   if (!joinNickname.value.trim()) return
-  const result = await joinRoom(roomId.value, joinNickname.value.trim())
+  const result = await joinRoom(roomRef.value, joinNickname.value.trim())
   playerStore.saveSession({
     nickname: joinNickname.value.trim(),
     sessionToken: result.session_token,
@@ -241,7 +246,7 @@ async function handleJoin() {
   })
   needsJoin.value = false
   wsToken.value = result.session_token
-  room.value = await fetchRoom(roomId.value)
+  room.value = await fetchRoom(result.room_id)
 }
 
 function updateSettings(settings: Record<string, unknown>) {
@@ -286,12 +291,6 @@ function assignPlayer(
 function startGame() {
   send({ type: 'start_game' })
 }
-
-async function copyUrl() {
-  await navigator.clipboard.writeText(roomUrl.value)
-  copied.value = true
-  setTimeout(() => (copied.value = false), 2000)
-}
 </script>
 
 <template>
@@ -331,13 +330,7 @@ async function copyUrl() {
 
       <div class="toolbar card">
         <div class="share-block">
-          <span class="toolbar-label">Invite friends</span>
-          <div class="share-row">
-            <input :value="roomUrl" readonly class="url-input" />
-            <button class="btn-secondary copy-btn" :class="{ copied }" @click="copyUrl">
-              {{ copied ? '✓ Copied!' : 'Copy URL' }}
-            </button>
-          </div>
+          <ShareInvite v-if="room.code" :code="room.code" :game-name="gameMeta.name" />
         </div>
         <div v-if="isHost && isCodenames" class="settings-block">
           <span class="toolbar-label">Host settings</span>
@@ -746,23 +739,6 @@ async function copyUrl() {
   text-transform: uppercase;
   color: var(--text-muted);
   margin-bottom: 0.5rem;
-}
-
-.share-row {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.url-input {
-  flex: 1;
-  font-size: 0.85rem;
-}
-
-.copy-btn.copied {
-  background: rgba(61, 214, 140, 0.15);
-  border-color: var(--success);
-  color: var(--success);
-  animation: celebrate 0.4s var(--ease-bounce);
 }
 
 .av-tip {

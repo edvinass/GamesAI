@@ -10,6 +10,7 @@ export interface Player {
 
 export interface Room {
   id: string
+  code: string
   game_type: string
   status: 'lobby' | 'playing' | 'finished'
   settings: Record<string, unknown>

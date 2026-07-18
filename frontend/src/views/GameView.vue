@@ -212,7 +212,7 @@ function backToLobby() {
       <div class="header-left">
         <h1>{{ gameTitle }}</h1>
         <div class="header-meta">
-          <span class="room-id">Room {{ roomId.slice(0, 8) }}…</span>
+          <span class="room-id">{{ room?.code ? `Code ${room.code}` : `Room ${roomId.slice(0, 8)}…` }}</span>
           <span class="connection" :class="{ online: connected }">
             <span class="connection-dot" />
             {{ connected ? 'Live' : 'Reconnecting' }}

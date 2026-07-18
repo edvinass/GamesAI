@@ -10,6 +10,7 @@ import {
   GAME_CATEGORIES,
   type GameCategory,
 } from '@/games/gameMeta'
+import { parseRoomRef, roomInvitePath } from '@/utils/roomRef'
 
 const router = useRouter()
 const playerStore = usePlayerStore()
@@ -73,18 +74,19 @@ async function enterGame() {
     playerStore.setNickname(nickname.value.trim())
 
     if (mode.value === 'join') {
-      if (!joinRoomId.value.trim()) {
-        error.value = 'Enter a room ID to join'
+      const roomRef = parseRoomRef(joinRoomId.value)
+      if (!roomRef) {
+        error.value = 'Enter a room code or paste an invite link'
         return
       }
-      const result = await joinRoom(joinRoomId.value.trim(), nickname.value.trim())
+      const result = await joinRoom(roomRef, nickname.value.trim())
       playerStore.saveSession({
         nickname: nickname.value.trim(),
         sessionToken: result.session_token,
         playerId: result.player_id,
         roomId: result.room_id,
       })
-      await router.push(`/room/${result.room_id}`)
+      await router.push(result.code ? roomInvitePath(result.code) : `/room/${result.room_id}`)
     } else {
       const result = await createRoom(gameType.value, nickname.value.trim())
       playerStore.saveSession({
@@ -93,7 +95,7 @@ async function enterGame() {
         playerId: result.player_id,
         roomId: result.room_id,
       })
-      await router.push(`/room/${result.room_id}`)
+      await router.push(result.code ? roomInvitePath(result.code) : `/room/${result.room_id}`)
     }
   } catch {
     // error message shown via useRoom.error
@@ -121,7 +123,7 @@ function switchToJoin() {
       </p>
       <div class="feature-chips stagger-in">
         <span class="chip">🤖 AI opponents</span>
-        <span class="chip">🔗 Share a link</span>
+        <span class="chip">🔗 Share a code</span>
         <span class="chip">⚡ Instant rooms</span>
       </div>
     </header>
@@ -203,12 +205,14 @@ function switchToJoin() {
       </div>
 
       <div v-show="mode === 'join'" class="join-panel">
-        <p class="hint">Paste the room ID from your friend's link — game type is set by the host.</p>
+        <p class="hint">Enter a 6-character room code, or paste the full invite link.</p>
         <label>
-          Room ID
+          Room code or link
           <input
             v-model="joinRoomId"
-            placeholder="Paste room ID from URL"
+            placeholder="e.g. K7M2PQ or https://…/r/K7M2PQ"
+            autocomplete="off"
+            spellcheck="false"
             @keyup.enter="enterGame"
           />
         </label>

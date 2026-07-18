@@ -27,7 +27,13 @@ from app.games.spyfall.ai import ai_answer_question, ai_ask_question, ai_cast_vo
 from app.games.spyfall.engine import SpyfallEngine
 from app.games.registry import get_game
 from app.models import GameState, Room, RoomPlayer, RoomStatus, Role, Team
-from app.utils import generate_session_token, hash_session_token, player_to_dict
+from app.utils import (
+    generate_room_code,
+    generate_session_token,
+    hash_session_token,
+    normalize_room_code,
+    player_to_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +85,44 @@ class RoomService:
         )
         return result.scalar_one_or_none()
 
+    async def resolve_room_ref(self, room_ref: str) -> Room | None:
+        """Resolve a room by UUID or short invite code."""
+        raw = room_ref.strip()
+        if not raw:
+            return None
+
+        try:
+            room_id = uuid.UUID(raw)
+        except ValueError:
+            room_id = None
+
+        if room_id is not None:
+            return await self._load_room(room_id)
+
+        code = normalize_room_code(raw)
+        if len(code) != 6:
+            return None
+
+        result = await self.db.execute(
+            select(Room)
+            .options(selectinload(Room.players), selectinload(Room.game_state))
+            .where(Room.code == code)
+        )
+        return result.scalar_one_or_none()
+
+    async def _allocate_room_code(self) -> str:
+        for _ in range(20):
+            code = generate_room_code()
+            existing = await self.db.execute(select(Room.id).where(Room.code == code).limit(1))
+            if existing.scalar_one_or_none() is None:
+                return code
+        raise RuntimeError("Could not allocate a unique room code")
+
     async def create_room(self, game_type: str, nickname: str) -> tuple[Room, RoomPlayer, str]:
         game = get_game(game_type)
         token = generate_session_token()
         room = Room(
+            code=await self._allocate_room_code(),
             game_type=game_type,
             status=RoomStatus.LOBBY,
             settings=game.default_settings(),
@@ -106,8 +146,8 @@ class RoomService:
         await self.db.refresh(room, ["players"])
         return room, player, token
 
-    async def join_room(self, room_id: uuid.UUID, nickname: str) -> tuple[Room, RoomPlayer, str]:
-        room = await self._load_room(room_id)
+    async def join_room(self, room_ref: str, nickname: str) -> tuple[Room, RoomPlayer, str]:
+        room = await self.resolve_room_ref(room_ref)
         if not room:
             raise ValueError("Room not found")
         if room.status != RoomStatus.LOBBY:
