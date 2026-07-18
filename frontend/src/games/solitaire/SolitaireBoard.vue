@@ -282,7 +282,7 @@ const foundationProgress = computed(() => {
               selected: isInSelectedStack(colIndex, cardIndex),
               'face-down': !card.face_up,
             }"
-            :style="{ top: `${cardIndex * 28}px`, zIndex: cardIndex + 1 }"
+            :style="{ '--card-index': cardIndex, zIndex: cardIndex + 1 }"
             @click="selectTableauCard(colIndex, cardIndex)"
           >
             <div v-if="card.face_up" class="playing-card" :class="{ red: isRed(card.suit) }">
@@ -637,6 +637,7 @@ const foundationProgress = computed(() => {
   justify-content: center;
   flex: 1;
   min-height: 400px;
+  --card-offset: 28px;
 }
 
 .tableau-column {
@@ -659,6 +660,7 @@ const foundationProgress = computed(() => {
 .tableau-card {
   position: absolute;
   left: 0;
+  top: calc(var(--card-index, 0) * var(--card-offset, 28px));
   width: 80px;
   height: 112px;
   cursor: pointer;
@@ -806,6 +808,10 @@ const foundationProgress = computed(() => {
     height: 78px;
   }
 
+  .tableau {
+    --card-offset: 22px;
+  }
+
   .tableau-column {
     width: 56px;
   }
@@ -813,10 +819,6 @@ const foundationProgress = computed(() => {
   .tableau-card {
     width: 56px;
     height: 78px;
-  }
-
-  .tableau-card {
-    top: calc(var(--index) * 20px);
   }
 
   .corner__rank {
@@ -874,6 +876,11 @@ const foundationProgress = computed(() => {
     border-radius: 6px;
   }
 
+  .tableau {
+    --card-offset: 18px;
+    gap: 0.25rem;
+  }
+
   .tableau-column {
     width: 44px;
   }
@@ -881,10 +888,6 @@ const foundationProgress = computed(() => {
   .tableau-card {
     width: 44px;
     height: 62px;
-  }
-
-  .tableau {
-    gap: 0.25rem;
   }
 
   .foundations {
@@ -922,6 +925,224 @@ const foundationProgress = computed(() => {
 
   .controls-hint {
     display: none;
+  }
+}
+
+/* Phone landscape mode */
+@media (max-height: 500px) and (orientation: landscape) {
+  .solitaire-board {
+    padding: 0.25rem 0.5rem;
+    min-height: calc(100vh - 3.5rem);
+    gap: 0.35rem;
+  }
+
+  .status-bar {
+    padding: 0.35rem 0.65rem;
+    flex-wrap: nowrap;
+  }
+
+  .status-pill {
+    font-size: 0.65rem;
+    padding: 0.2rem 0.45rem;
+  }
+
+  .status-bar__right {
+    gap: 0.35rem;
+  }
+
+  .status-bar__right .btn-secondary {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.72rem;
+  }
+
+  .game-area {
+    flex-direction: row;
+    gap: 0.5rem;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .top-row {
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    width: auto;
+  }
+
+  .stock-waste {
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .foundations {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .card-slot {
+    width: 52px;
+    height: 72px;
+    border-radius: 6px;
+  }
+
+  .tableau {
+    flex: 1;
+    gap: 0.25rem;
+    min-height: 0;
+    align-items: flex-start;
+    --card-offset: 16px;
+  }
+
+  .tableau-column {
+    width: 52px;
+    min-height: 72px;
+  }
+
+  .tableau-card {
+    width: 52px;
+    height: 72px;
+  }
+
+  .corner__rank {
+    font-size: 0.7rem;
+  }
+
+  .corner__suit {
+    font-size: 0.6rem;
+  }
+
+  .suit--center {
+    font-size: 1.2rem;
+  }
+
+  .corner--tl {
+    top: 2px;
+    left: 3px;
+  }
+
+  .corner--br {
+    bottom: 2px;
+    right: 3px;
+  }
+
+  .foundation-suit {
+    font-size: 1.3rem;
+  }
+
+  .recycle-icon {
+    font-size: 1.5rem;
+  }
+
+  .empty-slot {
+    font-size: 0.9rem;
+    border-radius: 6px;
+  }
+
+  .stock-count {
+    font-size: 0.55rem;
+    padding: 0.05rem 0.25rem;
+    bottom: 2px;
+    right: 3px;
+  }
+
+  .foundation-count {
+    font-size: 0.5rem;
+    padding: 0.05rem 0.2rem;
+    bottom: 2px;
+    right: 3px;
+  }
+
+  .controls-hint {
+    display: none;
+  }
+
+  .winner-banner {
+    padding: 1rem 1.5rem;
+    max-width: 320px;
+  }
+
+  .winner-banner__title {
+    font-size: 1.75rem;
+  }
+
+  .winner-banner__eyebrow {
+    font-size: 0.7rem;
+  }
+
+  .winner-banner__stats {
+    font-size: 0.9rem;
+    margin: 0.5rem 0 0.75rem;
+  }
+
+  .play-again-btn {
+    font-size: 0.9rem;
+    padding: 0.6rem 1.5rem;
+  }
+}
+
+/* Very small landscape (iPhone SE landscape, etc.) */
+@media (max-height: 400px) and (orientation: landscape) {
+  .solitaire-board {
+    padding: 0.15rem 0.35rem;
+    gap: 0.25rem;
+  }
+
+  .status-bar {
+    padding: 0.25rem 0.5rem;
+  }
+
+  .status-pill {
+    font-size: 0.6rem;
+    padding: 0.15rem 0.35rem;
+  }
+
+  .card-slot {
+    width: 42px;
+    height: 58px;
+    border-radius: 5px;
+  }
+
+  .tableau {
+    --card-offset: 14px;
+  }
+
+  .tableau-column {
+    width: 42px;
+    min-height: 58px;
+  }
+
+  .tableau-card {
+    width: 42px;
+    height: 58px;
+  }
+
+  .corner__rank {
+    font-size: 0.6rem;
+  }
+
+  .corner__suit {
+    font-size: 0.5rem;
+  }
+
+  .suit--center {
+    font-size: 1rem;
+  }
+
+  .foundation-suit {
+    font-size: 1.1rem;
+  }
+
+  .recycle-icon {
+    font-size: 1.2rem;
+  }
+
+  .stock-waste {
+    gap: 0.25rem;
+  }
+
+  .foundations {
+    gap: 0.2rem;
   }
 }
 </style>
