@@ -623,6 +623,42 @@ export interface RoboRallyGameState {
   total_checkpoints: number
 }
 
+export interface Connect4PlayerState {
+  id: string
+  nickname: string
+  is_ai: boolean
+  color: 'red' | 'yellow'
+}
+
+export interface Connect4Move {
+  col: number
+  row: number
+  color: 'red' | 'yellow'
+  player_id: string
+}
+
+export interface Connect4GameState {
+  phase: 'playing' | 'game_over'
+  board: Array<Array<string | null>>
+  rows: number
+  cols: number
+  players: Connect4PlayerState[]
+  red_player_id: string
+  yellow_player_id: string
+  current_color: 'red' | 'yellow'
+  current_actor_id: string | null
+  move_history: Connect4Move[]
+  last_move: Connect4Move | null
+  winner: string | null
+  winner_color: 'red' | 'yellow' | null
+  win_reason: string | null
+  winning_cells: Array<[number, number]> | null
+  legal_moves: Array<{ col: number }>
+  settings: Record<string, unknown>
+  viewer_id: string | null
+  viewer_color: 'red' | 'yellow' | null
+}
+
 export interface SolitaireCard {
   rank: string | null
   suit: string | null
@@ -651,7 +687,7 @@ export interface SolitaireGameState {
   can_auto_complete: boolean
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | SolitaireGameState
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | SolitaireGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -691,6 +727,10 @@ export function isGoState(state: GameState): state is GoGameState {
 
 export function isRoboRallyState(state: GameState): state is RoboRallyGameState {
   return 'register_order' in state && 'robots' in state && 'register_size' in state
+}
+
+export function isConnect4State(state: GameState): state is Connect4GameState {
+  return 'red_player_id' in state && 'yellow_player_id' in state && 'cols' in state
 }
 
 export function isSolitaireState(state: GameState): state is SolitaireGameState {
