@@ -188,21 +188,20 @@ function tryMoveSelectedToFoundation(_targetSuit: string) {
 
 function moveToTableau(targetCol: number) {
   if (!selectedCard.value) return
-  if (!canMoveSelectionToTableau(targetCol)) {
-    // Keep selection on illegal drops so the player can try another target
-    if (
-      selectedCard.value.source === 'tableau' &&
-      selectedCard.value.sourceIndex === targetCol
-    ) {
-      clearSelection()
-    }
+
+  // Same-column click just clears selection (engine would reject anyway)
+  if (
+    selectedCard.value.source === 'tableau' &&
+    selectedCard.value.sourceIndex === targetCol
+  ) {
+    clearSelection()
     return
   }
 
   emit('action', {
     type: 'move_to_tableau',
     source: selectedCard.value.source,
-    source_index: selectedCard.value.sourceIndex,
+    source_index: selectedCard.value.sourceIndex ?? null,
     card_index: selectedCard.value.cardIndex ?? 0,
     target_col: targetCol,
   })
@@ -402,6 +401,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
             'tableau-column--drop-ok': hasSelection && canMoveSelectionToTableau(colIndex),
             'tableau-column--has-selection': hasSelection,
           }"
+          @click.self="hasSelection && moveToTableau(colIndex)"
         >
           <div
             v-if="col.length === 0"
@@ -982,20 +982,28 @@ const hasSelection = computed(() => selectedCard.value !== null)
   left: 0;
   top: calc(var(--card-index, 0) * var(--card-offset));
   width: var(--card-width);
-  /* Buried cards only expose a peek hit-target so pile bases stay clickable */
-  height: var(--card-offset);
-  overflow: hidden;
+  height: var(--card-height);
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.25s ease;
 }
 
-.tableau-card .playing-card {
+/* Buried cards: only the exposed peek captures clicks so pile bases stay selectable */
+.tableau-card:not(.tableau-card--top) {
+  height: var(--card-offset);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.tableau-card:not(.tableau-card--top) .playing-card {
   height: var(--card-height);
+  pointer-events: none;
 }
 
 .tableau-card--top {
   height: var(--card-height);
   overflow: visible;
+  /* Keep above buried peeks for reliable drop/select hits */
+  z-index: 20 !important;
 }
 
 .tableau-card:hover:not(.face-down):not(.selected) {
@@ -1024,8 +1032,12 @@ const hasSelection = computed(() => selectedCard.value !== null)
     0 8px 30px rgba(255, 215, 0, 0.4);
 }
 
+.tableau-card.selected:not(.tableau-card--top) {
+  z-index: 30 !important;
+}
+
 .tableau-card.selected.tableau-card--top {
-  z-index: 50;
+  z-index: 40 !important;
 }
 
 .winner-overlay {

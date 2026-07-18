@@ -128,7 +128,11 @@ class SolitaireEngine(GamePlugin):
             try:
                 if source_index is not None and not isinstance(source_index, str):
                     source_index = int(source_index)
+                if card_index is None:
+                    card_index = 0
                 card_index = int(card_index)
+                if target_col is None:
+                    return state, events
                 target_col = int(target_col)
             except (TypeError, ValueError):
                 return state, events
