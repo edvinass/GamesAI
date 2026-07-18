@@ -37,20 +37,27 @@ const lastSoundActionKey = ref('')
 const coachMessage = ref('')
 let coachMessageTimer: ReturnType<typeof setTimeout> | null = null
 
-/** Dynamic tableau stack spacing so long columns stay on-screen. */
+/** Per-column tableau spacing — only tall decks get compacted. */
 const boardEl = ref<HTMLElement | null>(null)
 const tableauEl = ref<HTMLElement | null>(null)
-const faceDownOffsetPx = ref(12)
-const faceUpOffsetPx = ref(28)
 const MIN_FACE_DOWN_OFFSET = 8
 const MAX_FACE_DOWN_OFFSET = 14
 const MIN_FACE_UP_OFFSET = 18
 const MAX_FACE_UP_OFFSET = 34
+type ColumnOffsets = { fd: number; fu: number }
+const defaultColumnOffsets = (): ColumnOffsets => ({
+  fd: MAX_FACE_DOWN_OFFSET,
+  fu: MAX_FACE_UP_OFFSET,
+})
+const columnOffsets = ref<ColumnOffsets[]>(
+  Array.from({ length: 7 }, () => defaultColumnOffsets()),
+)
 let tableauResizeObserver: ResizeObserver | null = null
 
+/** Board-level defaults for waste fan / drag ghost (tableau overrides per column). */
 const boardLayoutStyle = computed((): CSSProperties => ({
-  '--card-offset': `${faceUpOffsetPx.value}px`,
-  '--card-offset-down': `${faceDownOffsetPx.value}px`,
+  '--card-offset': `${MAX_FACE_UP_OFFSET}px`,
+  '--card-offset-down': `${MAX_FACE_DOWN_OFFSET}px`,
 }))
 
 function peekStats(col: SolitaireCard[]): { down: number; up: number } {
@@ -63,10 +70,23 @@ function peekStats(col: SolitaireCard[]): { down: number; up: number } {
   return { down, up }
 }
 
-function cardStackTop(col: SolitaireCard[], cardIndex: number): number {
+function offsetsForColumn(colIndex: number): ColumnOffsets {
+  return columnOffsets.value[colIndex] ?? defaultColumnOffsets()
+}
+
+function columnLayoutStyle(colIndex: number): CSSProperties {
+  const { fd, fu } = offsetsForColumn(colIndex)
+  return {
+    '--card-offset': `${fu}px`,
+    '--card-offset-down': `${fd}px`,
+  }
+}
+
+function cardStackTop(colIndex: number, col: SolitaireCard[], cardIndex: number): number {
+  const { fd, fu } = offsetsForColumn(colIndex)
   let top = 0
   for (let i = 0; i < cardIndex; i++) {
-    top += col[i]?.face_up ? faceUpOffsetPx.value : faceDownOffsetPx.value
+    top += col[i]?.face_up ? fu : fd
   }
   return top
 }
@@ -83,6 +103,42 @@ function measureCardHeight(tableau: HTMLElement, root: HTMLElement): number {
   return Number.isFinite(width) && width > 0 ? width * 1.4 : 110
 }
 
+function computeColumnOffsets(
+  down: number,
+  up: number,
+  cardHeight: number,
+  available: number,
+): ColumnOffsets {
+  let fd = MAX_FACE_DOWN_OFFSET
+  let fu = MAX_FACE_UP_OFFSET
+  if (down + up === 0) return { fd, fu }
+
+  const fits = (d: number, u: number) => cardHeight + down * d + up * u <= available
+
+  if (!fits(fd, fu)) {
+    // Shrink face-up peeks first (they're the bulk of long cascades)
+    if (up > 0) {
+      const room = available - cardHeight - down * fd
+      fu = Math.max(MIN_FACE_UP_OFFSET, Math.floor(room / up))
+    }
+    if (!fits(fd, fu) && down > 0) {
+      fu = Math.max(fu, MIN_FACE_UP_OFFSET)
+      const room = available - cardHeight - up * fu
+      fd = Math.max(MIN_FACE_DOWN_OFFSET, Math.floor(room / down))
+    }
+    if (!fits(fd, fu)) {
+      fd = MIN_FACE_DOWN_OFFSET
+      if (up > 0) {
+        const room = available - cardHeight - down * fd
+        fu = Math.max(MIN_FACE_UP_OFFSET, Math.floor(room / up))
+      } else {
+        fu = MIN_FACE_UP_OFFSET
+      }
+    }
+  }
+  return { fd, fu }
+}
+
 function recomputeStackOffsets() {
   const tableau = tableauEl.value
   const root = boardEl.value
@@ -92,57 +148,11 @@ function recomputeStackOffsets() {
   // Leave a little slack so the top card isn't flush against the chrome
   const available = Math.max(tableau.clientHeight - 8, cardHeight + 24)
   const cols = board.value.tableau
-  let worstDown = 0
-  let worstUp = 0
-  let worstHeightAtMax = 0
 
-  for (const col of cols) {
-    if (col.length <= 1) continue
+  columnOffsets.value = cols.map((col) => {
     const { down, up } = peekStats(col)
-    const atMax = cardHeight + down * MAX_FACE_DOWN_OFFSET + up * MAX_FACE_UP_OFFSET
-    if (atMax > worstHeightAtMax) {
-      worstHeightAtMax = atMax
-      worstDown = down
-      worstUp = up
-    }
-  }
-
-  if (worstDown + worstUp === 0) {
-    faceDownOffsetPx.value = MAX_FACE_DOWN_OFFSET
-    faceUpOffsetPx.value = MAX_FACE_UP_OFFSET
-    return
-  }
-
-  let fd = MAX_FACE_DOWN_OFFSET
-  let fu = MAX_FACE_UP_OFFSET
-  const fits = (d: number, u: number) =>
-    cardHeight + worstDown * d + worstUp * u <= available
-
-  if (!fits(fd, fu)) {
-    // Shrink face-up peeks first (they're the bulk of long cascades)
-    if (worstUp > 0) {
-      const room = available - cardHeight - worstDown * fd
-      fu = Math.max(MIN_FACE_UP_OFFSET, Math.floor(room / worstUp))
-    }
-    if (!fits(fd, fu) && worstDown > 0) {
-      fu = Math.max(fu, MIN_FACE_UP_OFFSET)
-      const room = available - cardHeight - worstUp * fu
-      fd = Math.max(MIN_FACE_DOWN_OFFSET, Math.floor(room / worstDown))
-    }
-    // Final squeeze if still overflowing
-    if (!fits(fd, fu)) {
-      fd = MIN_FACE_DOWN_OFFSET
-      if (worstUp > 0) {
-        const room = available - cardHeight - worstDown * fd
-        fu = Math.max(MIN_FACE_UP_OFFSET, Math.floor(room / worstUp))
-      } else {
-        fu = MIN_FACE_UP_OFFSET
-      }
-    }
-  }
-
-  faceDownOffsetPx.value = fd
-  faceUpOffsetPx.value = fu
+    return computeColumnOffsets(down, up, cardHeight, available)
+  })
 }
 
 const AUTOPLAY_FLIGHT_MS = 900
@@ -1173,6 +1183,9 @@ const wasteFan = computed(() => {
   return board.value.waste_top ? [board.value.waste_top] : []
 })
 
+/** Draw-3 needs a top-row stock/waste fan; Draw-1 keeps the side rail. */
+const isDrawThree = computed(() => Number(board.value.settings?.draw_count ?? 1) === 3)
+
 const hasSelection = computed(() => selectedCard.value !== null)
 
 const hintReason = computed(() => {
@@ -1239,6 +1252,7 @@ function isHintTargetFoundation(suit: string): boolean {
     :class="{
       'solitaire-board--dragging': isDragging,
       'solitaire-board--autoplay': isAutoplay || isFlightAnimating,
+      'solitaire-board--draw3': isDrawThree,
     }"
     :style="boardLayoutStyle"
     @click.self="clearSelection"
@@ -1307,9 +1321,12 @@ function isHintTargetFoundation(suit: string): boolean {
 
     <p v-if="hintReason" class="coach-banner" role="status">{{ hintReason }}</p>
 
-    <div class="game-area">
-      <!-- Stock/waste + foundations sit beside the tableau so cascades keep full height -->
-      <aside class="side-rail" aria-label="Stock and foundations">
+    <div class="game-area" :class="isDrawThree ? 'game-area--standard' : 'game-area--rail'">
+      <!-- Draw-1: side rail for tall cascades. Draw-3: classic top row for the waste fan. -->
+      <aside
+        :class="isDrawThree ? 'top-row' : 'side-rail'"
+        aria-label="Stock and foundations"
+      >
         <div class="stock-waste">
           <div
             class="card-slot stock"
@@ -1428,6 +1445,7 @@ function isHintTargetFoundation(suit: string): boolean {
             'tableau-column--drag-over': dragOverTableau === colIndex && isDropHighlightTableau(colIndex),
             'tableau-column--hint-target': isHintTargetTableau(colIndex),
           }"
+          :style="columnLayoutStyle(colIndex)"
           :data-drop="'tableau'"
           :data-col="colIndex"
           @click.self="hasSelection && moveToTableau(colIndex)"
@@ -1460,7 +1478,7 @@ function isHintTargetFoundation(suit: string): boolean {
             :data-col="colIndex"
             :data-card="cardIndex"
             :style="{
-              top: `${cardStackTop(col, cardIndex)}px`,
+              top: `${cardStackTop(colIndex, col, cardIndex)}px`,
               zIndex: cardIndex === col.length - 1 ? cardIndex + 20 : cardIndex + 1,
             }"
             @click="selectTableauCard(colIndex, cardIndex)"
@@ -1801,11 +1819,19 @@ function isHintTargetFoundation(suit: string): boolean {
 .game-area {
   flex: 1 1 auto;
   display: flex;
-  flex-direction: row;
   align-items: stretch;
   gap: 0.75rem;
   min-height: 0;
   overflow: hidden;
+}
+
+.game-area--rail {
+  flex-direction: row;
+}
+
+.game-area--standard {
+  flex-direction: column;
+  gap: 0.65rem;
 }
 
 .side-rail {
@@ -1819,6 +1845,17 @@ function isHintTargetFoundation(suit: string): boolean {
   z-index: 2;
 }
 
+.top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--card-gap);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  width: 100%;
+  z-index: 2;
+}
+
 .stock-waste {
   display: flex;
   flex-direction: row;
@@ -1827,15 +1864,14 @@ function isHintTargetFoundation(suit: string): boolean {
 }
 
 .waste--fan {
-  /* Draw-3 fan may extend past the rail into the tableau gutter */
-  width: calc(var(--card-width) + (var(--fan-count, 1) - 1) * min(18px, var(--card-offset)));
+  width: calc(var(--card-width) + (var(--fan-count, 1) - 1) * var(--card-offset));
   z-index: 3;
 }
 
 .waste-fan-card {
   position: absolute;
   top: 0;
-  left: calc(var(--fan-index, 0) * min(18px, var(--card-offset)));
+  left: calc(var(--fan-index, 0) * var(--card-offset));
   width: var(--card-width);
   height: var(--card-height);
   pointer-events: none;
@@ -1845,9 +1881,16 @@ function isHintTargetFoundation(suit: string): boolean {
   pointer-events: auto;
 }
 
-.foundations {
+.side-rail .foundations {
   display: grid;
   grid-template-columns: repeat(2, var(--card-width));
+  gap: var(--card-gap);
+  flex-shrink: 0;
+}
+
+.top-row .foundations {
+  display: flex;
+  flex-direction: row;
   gap: var(--card-gap);
   flex-shrink: 0;
 }
@@ -2127,9 +2170,11 @@ function isHintTargetFoundation(suit: string): boolean {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  /* Full height beside the side rail — long cascades stay readable */
   height: 100%;
   overflow: hidden;
+}
+
+.game-area--rail .tableau {
   padding-left: 0.15rem;
 }
 
@@ -2561,8 +2606,13 @@ function isHintTargetFoundation(suit: string): boolean {
     gap: 0.4rem;
   }
 
-  .foundations {
-    grid-template-columns: repeat(2, var(--card-width));
+  .top-row {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .top-row .foundations {
+    order: -1;
   }
 
   .stats-row {
@@ -2669,11 +2719,16 @@ function isHintTargetFoundation(suit: string): boolean {
     font-size: 0.75rem;
   }
 
-  .game-area {
+  .game-area--rail {
     flex-direction: row;
     gap: 0.4rem;
     flex: 1;
     min-height: 0;
+  }
+
+  .game-area--standard {
+    flex-direction: column;
+    gap: 0.3rem;
   }
 
   .side-rail {
@@ -2681,14 +2736,23 @@ function isHintTargetFoundation(suit: string): boolean {
     gap: 0.3rem;
   }
 
+  .top-row {
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+  }
+
   .stock-waste {
     flex-direction: row;
     gap: 0.25rem;
   }
 
-  .foundations {
+  .side-rail .foundations {
     grid-template-columns: repeat(2, var(--card-width));
     gap: 0.25rem;
+  }
+
+  .top-row .foundations {
+    gap: 0.2rem;
   }
 
   .tableau {
@@ -2762,7 +2826,8 @@ function isHintTargetFoundation(suit: string): boolean {
     gap: 0.15rem;
   }
 
-  .foundations {
+  .side-rail .foundations,
+  .top-row .foundations {
     gap: 0.15rem;
   }
 
