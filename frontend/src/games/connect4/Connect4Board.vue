@@ -41,6 +41,12 @@ const lastMoveCell = computed(() => {
   return `${move.row}-${move.col}`
 })
 
+const lastDropDistance = computed(() => {
+  const move = props.gameState.last_move
+  if (!move) return 1
+  return Math.max(1, move.row + 1)
+})
+
 const winningCells = computed(() => {
   const cells = props.gameState.winning_cells
   if (!cells) return new Set<string>()
@@ -124,27 +130,34 @@ function getPreviewRow(col: number): number | null {
   }
   return null
 }
+
+function colorLabel(color: 'red' | 'yellow' | undefined): string {
+  return color === 'yellow' ? 'Yellow' : 'Red'
+}
 </script>
 
 <template>
-  <div class="connect4-board">
+  <div class="connect4-board" :class="{ 'my-turn': isMyTurn }">
     <div class="connect4-shell">
       <div class="play-column">
         <div
           class="player-bar"
-          :class="{
-            active: isPlayerToMove(topPlayer?.color),
-            ai: topPlayer?.is_ai,
-          }"
+          :class="[
+            topPlayer?.color ?? 'yellow',
+            {
+              active: isPlayerToMove(topPlayer?.color),
+              ai: topPlayer?.is_ai,
+            },
+          ]"
         >
-          <span class="disc-badge" :class="topPlayer?.color ?? 'yellow'" aria-hidden="true">●</span>
+          <span class="disc-badge" :class="topPlayer?.color ?? 'yellow'" aria-hidden="true" />
           <div class="player-meta">
             <p class="player-name">
               {{ topPlayer?.nickname ?? 'Opponent' }}
               <span v-if="topPlayer?.is_ai" class="tag">AI</span>
               <span v-if="topPlayer?.id === playerId" class="tag you">You</span>
             </p>
-            <p class="player-side">{{ topPlayer?.color === 'red' ? 'Red' : 'Yellow' }}</p>
+            <p class="player-side">{{ colorLabel(topPlayer?.color) }}</p>
           </div>
           <span v-if="isPlayerToMove(topPlayer?.color)" class="turn-pill">
             {{ topPlayer?.is_ai ? 'Thinking' : 'To move' }}
@@ -152,76 +165,107 @@ function getPreviewRow(col: number): number | null {
         </div>
 
         <div class="board-stage">
+          <div class="board-glow" aria-hidden="true" />
           <div
             class="board"
             :class="{
               disabled: !isMyTurn || gameState.phase !== 'playing',
+              interactive: isMyTurn && gameState.phase === 'playing',
             }"
+            :style="{ '--drop-rows': lastDropDistance }"
           >
-            <div class="column-hints">
-              <button
-                v-for="col in gameState.cols"
-                :key="col - 1"
-                type="button"
-                class="col-hint"
-                :class="{
-                  hovered: hoveredCol === col - 1 && legalCols.has(col - 1),
-                  legal: legalCols.has(col - 1),
-                }"
-                @mouseenter="onColumnHover(col - 1)"
-                @mouseleave="onColumnHover(null)"
-                @click="onColumnClick(col - 1)"
-              >
-                <span
-                  v-if="hoveredCol === col - 1 && legalCols.has(col - 1)"
-                  class="preview-disc"
-                  :class="viewerColor"
-                >
-                  ●
-                </span>
-              </button>
-            </div>
-
-            <div class="grid">
-              <div v-for="row in gameState.rows" :key="row - 1" class="grid-row">
+            <div class="board-frame">
+              <div class="column-hints">
                 <button
                   v-for="col in gameState.cols"
-                  :key="`${row - 1}-${col - 1}`"
+                  :key="`hint-${col - 1}`"
                   type="button"
-                  class="cell"
+                  class="col-hint"
                   :class="{
-                    last: lastMoveCell === `${row - 1}-${col - 1}`,
-                    winning: winningCells.has(`${row - 1}-${col - 1}`),
-                    'preview-target': hoveredCol === col - 1 && getPreviewRow(col - 1) === row - 1 && legalCols.has(col - 1),
+                    hovered: hoveredCol === col - 1 && legalCols.has(col - 1),
+                    legal: legalCols.has(col - 1),
                   }"
+                  :aria-label="`Drop in column ${col}`"
+                  :disabled="!legalCols.has(col - 1)"
                   @mouseenter="onColumnHover(col - 1)"
                   @mouseleave="onColumnHover(null)"
+                  @focus="onColumnHover(col - 1)"
+                  @blur="onColumnHover(null)"
                   @click="onColumnClick(col - 1)"
                 >
-                  <span
-                    v-if="gameState.board[row - 1][col - 1]"
-                    class="disc"
-                    :class="[
-                      gameState.board[row - 1][col - 1],
-                      { 'drop-anim': lastMoveCell === `${row - 1}-${col - 1}` },
-                    ]"
-                  >
-                    ●
-                  </span>
-                  <span
-                    v-else-if="hoveredCol === col - 1 && getPreviewRow(col - 1) === row - 1 && legalCols.has(col - 1)"
-                    class="disc preview"
-                    :class="viewerColor"
-                  >
-                    ●
-                  </span>
+                  <span class="hint-arrow" :class="viewerColor" aria-hidden="true" />
                 </button>
               </div>
+
+              <div class="grid" role="grid" :aria-label="`Connect Four board, ${gameState.rows} by ${gameState.cols}`">
+                <div
+                  v-for="row in gameState.rows"
+                  :key="`row-${row - 1}`"
+                  class="grid-row"
+                  role="row"
+                >
+                  <button
+                    v-for="col in gameState.cols"
+                    :key="`${row - 1}-${col - 1}`"
+                    type="button"
+                    class="cell"
+                    role="gridcell"
+                    :class="{
+                      last: lastMoveCell === `${row - 1}-${col - 1}`,
+                      winning: winningCells.has(`${row - 1}-${col - 1}`),
+                      'preview-target':
+                        hoveredCol === col - 1 &&
+                        getPreviewRow(col - 1) === row - 1 &&
+                        legalCols.has(col - 1),
+                      occupied: Boolean(gameState.board[row - 1][col - 1]),
+                    }"
+                    :aria-label="
+                      gameState.board[row - 1][col - 1]
+                        ? `${gameState.board[row - 1][col - 1]} disc, row ${row}, column ${col}`
+                        : `Empty, row ${row}, column ${col}`
+                    "
+                    @mouseenter="onColumnHover(col - 1)"
+                    @mouseleave="onColumnHover(null)"
+                    @click="onColumnClick(col - 1)"
+                  >
+                    <span class="cell-hole" aria-hidden="true" />
+                    <span
+                      v-if="gameState.board[row - 1][col - 1]"
+                      class="disc"
+                      :class="[
+                        gameState.board[row - 1][col - 1],
+                        {
+                          'drop-anim': lastMoveCell === `${row - 1}-${col - 1}`,
+                          winning: winningCells.has(`${row - 1}-${col - 1}`),
+                        },
+                      ]"
+                    />
+                    <span
+                      v-else-if="
+                        hoveredCol === col - 1 &&
+                        getPreviewRow(col - 1) === row - 1 &&
+                        legalCols.has(col - 1)
+                      "
+                      class="disc preview"
+                      :class="viewerColor"
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="board-feet" aria-hidden="true">
+              <span />
+              <span />
             </div>
           </div>
 
           <div v-if="gameState.phase === 'game_over'" class="game-over-overlay">
             <div class="game-over-card">
+              <span
+                class="game-over-disc"
+                :class="gameState.players.find((p) => p.id === gameState.winner)?.color ?? 'red'"
+                aria-hidden="true"
+              />
               <p class="game-over-title">{{ statusText }}</p>
             </div>
           </div>
@@ -229,20 +273,23 @@ function getPreviewRow(col: number): number | null {
 
         <div
           class="player-bar"
-          :class="{
-            active: isPlayerToMove(bottomPlayer?.color),
-            ai: bottomPlayer?.is_ai,
-            me: bottomPlayer?.id === playerId,
-          }"
+          :class="[
+            bottomPlayer?.color ?? 'red',
+            {
+              active: isPlayerToMove(bottomPlayer?.color),
+              ai: bottomPlayer?.is_ai,
+              me: bottomPlayer?.id === playerId,
+            },
+          ]"
         >
-          <span class="disc-badge" :class="bottomPlayer?.color ?? 'red'" aria-hidden="true">●</span>
+          <span class="disc-badge" :class="bottomPlayer?.color ?? 'red'" aria-hidden="true" />
           <div class="player-meta">
             <p class="player-name">
               {{ bottomPlayer?.nickname ?? 'You' }}
               <span v-if="bottomPlayer?.is_ai" class="tag">AI</span>
               <span v-if="bottomPlayer?.id === playerId" class="tag you">You</span>
             </p>
-            <p class="player-side">{{ bottomPlayer?.color === 'red' ? 'Red' : 'Yellow' }}</p>
+            <p class="player-side">{{ colorLabel(bottomPlayer?.color) }}</p>
           </div>
           <span v-if="isPlayerToMove(bottomPlayer?.color)" class="turn-pill">To move</span>
         </div>
@@ -271,7 +318,7 @@ function getPreviewRow(col: number): number | null {
               :class="move.color"
             >
               <span class="move-num">{{ idx + 1 }}.</span>
-              <span class="move-disc" :class="move.color">●</span>
+              <span class="move-disc" :class="move.color" aria-hidden="true" />
               <span class="move-col">Col {{ move.col + 1 }}</span>
             </div>
           </div>
@@ -284,19 +331,38 @@ function getPreviewRow(col: number): number | null {
 
 <style scoped>
 .connect4-board {
-  --c4-red: #e53935;
-  --c4-red-glow: rgba(229, 57, 53, 0.4);
-  --c4-yellow: #fdd835;
-  --c4-yellow-glow: rgba(253, 216, 53, 0.4);
-  --c4-board: #1565c0;
-  --c4-board-dark: #0d47a1;
-  --c4-cell-bg: #0a1929;
+  --c4-red: #ef4444;
+  --c4-red-deep: #b91c1c;
+  --c4-red-shine: #fca5a5;
+  --c4-yellow: #fbbf24;
+  --c4-yellow-deep: #d97706;
+  --c4-yellow-shine: #fde68a;
+  --c4-board: #1d6fd4;
+  --c4-board-mid: #1557b0;
+  --c4-board-dark: #0d3f86;
+  --c4-board-edge: #0a2f66;
+  --c4-hole: #07111f;
+  --c4-hole-rim: rgba(255, 255, 255, 0.12);
   flex: 1;
   min-height: 0;
   width: 100%;
   display: flex;
   padding: 0.5rem 0.75rem 0.75rem;
   overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 55% at 40% 45%, rgba(29, 111, 212, 0.14), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 80% 80%, rgba(239, 68, 68, 0.06), transparent 50%),
+    radial-gradient(ellipse 40% 35% at 10% 85%, rgba(251, 191, 36, 0.05), transparent 50%);
+  animation: boardSceneIn 0.5s var(--ease-smooth) both;
+}
+
+@keyframes boardSceneIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .connect4-shell {
@@ -316,51 +382,94 @@ function getPreviewRow(col: number): number | null {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.5rem;
 }
 
 .player-bar {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  padding: 0.45rem 0.65rem;
-  border-radius: 10px;
+  gap: 0.7rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(21, 28, 44, 0.72);
+  background: rgba(21, 28, 44, 0.55);
+  backdrop-filter: blur(8px);
   flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
   transition:
-    border-color 0.2s,
-    box-shadow 0.2s;
+    border-color 0.25s var(--ease-smooth),
+    box-shadow 0.25s var(--ease-smooth),
+    background 0.25s;
+}
+
+.player-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--text-muted);
+  opacity: 0.35;
+  transition: opacity 0.25s, background 0.25s;
+}
+
+.player-bar.red::before {
+  background: var(--c4-red);
+}
+
+.player-bar.yellow::before {
+  background: var(--c4-yellow);
 }
 
 .player-bar.active {
-  border-color: rgba(21, 101, 192, 0.55);
-  box-shadow: 0 0 0 1px rgba(21, 101, 192, 0.18);
+  background: rgba(21, 28, 44, 0.85);
+}
+
+.player-bar.active.red {
+  border-color: rgba(239, 68, 68, 0.45);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.12), 0 8px 24px rgba(239, 68, 68, 0.08);
+}
+
+.player-bar.active.yellow {
+  border-color: rgba(251, 191, 36, 0.45);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12), 0 8px 24px rgba(251, 191, 36, 0.08);
+}
+
+.player-bar.active::before {
+  opacity: 1;
+  width: 4px;
 }
 
 .player-bar.me {
-  border-color: rgba(91, 156, 255, 0.4);
+  border-color: rgba(91, 156, 255, 0.35);
 }
 
 .disc-badge {
-  width: 2rem;
-  height: 2rem;
+  width: 1.85rem;
+  height: 1.85rem;
   border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 1.5rem;
   flex-shrink: 0;
-  line-height: 1;
+  position: relative;
 }
 
 .disc-badge.red {
-  color: var(--c4-red);
-  filter: drop-shadow(0 0 6px var(--c4-red-glow));
+  background:
+    radial-gradient(circle at 32% 28%, var(--c4-red-shine) 0%, var(--c4-red) 42%, var(--c4-red-deep) 100%);
+  box-shadow:
+    0 2px 6px rgba(185, 28, 28, 0.45),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.25),
+    inset 0 2px 3px rgba(255, 255, 255, 0.25);
 }
 
 .disc-badge.yellow {
-  color: var(--c4-yellow);
-  filter: drop-shadow(0 0 6px var(--c4-yellow-glow));
+  background:
+    radial-gradient(circle at 32% 28%, var(--c4-yellow-shine) 0%, var(--c4-yellow) 42%, var(--c4-yellow-deep) 100%);
+  box-shadow:
+    0 2px 6px rgba(217, 119, 6, 0.4),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.2),
+    inset 0 2px 3px rgba(255, 255, 255, 0.3);
 }
 
 .player-meta {
@@ -382,8 +491,8 @@ function getPreviewRow(col: number): number | null {
 
 .player-side {
   margin: 0;
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -392,8 +501,8 @@ function getPreviewRow(col: number): number | null {
   font-size: 0.62rem;
   padding: 0.08rem 0.32rem;
   border-radius: 4px;
-  background: rgba(21, 101, 192, 0.18);
-  color: var(--c4-board);
+  background: rgba(29, 111, 212, 0.18);
+  color: #7eb6ff;
   font-weight: 700;
 }
 
@@ -403,15 +512,36 @@ function getPreviewRow(col: number): number | null {
 }
 
 .turn-pill {
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  padding: 0.28rem 0.5rem;
-  border-radius: 999px;
-  background: rgba(21, 101, 192, 0.16);
-  color: var(--c4-board);
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(29, 111, 212, 0.16);
+  color: #8ec0ff;
   flex-shrink: 0;
+  animation: turnPulse 1.8s ease-in-out infinite;
+}
+
+.player-bar.red .turn-pill {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+}
+
+.player-bar.yellow .turn-pill {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fcd34d;
+}
+
+@keyframes turnPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 .board-stage {
@@ -423,25 +553,50 @@ function getPreviewRow(col: number): number | null {
   container-type: size;
 }
 
+.board-glow {
+  position: absolute;
+  width: min(90cqw, 90cqh);
+  height: min(90cqw, 90cqh);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(29, 111, 212, 0.22), transparent 68%);
+  filter: blur(20px);
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.4s;
+}
+
+.connect4-board.my-turn .board-glow {
+  opacity: 1.15;
+  background: radial-gradient(circle, rgba(29, 111, 212, 0.3), transparent 68%);
+}
+
 .board {
-  width: min(100cqw, calc(100cqh * 7 / 7));
+  --drop-rows: 1;
+  position: relative;
+  z-index: 1;
+  width: min(100cqw, calc(100cqh * 7 / 7.35));
   height: auto;
-  aspect-ratio: 7 / 7;
+  aspect-ratio: 7 / 7.35;
   container-type: size;
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--c4-board);
-  border: 4px solid var(--c4-board-dark);
-  box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.45),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  animation: boardSettle 0.55s var(--ease-bounce) both;
+}
+
+@keyframes boardSettle {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @supports not (width: 1cqw) {
   .board {
-    width: min(100%, calc(100dvh - 11.5rem));
+    width: min(100%, calc(100dvh - 12rem));
     height: auto;
     max-height: 100%;
   }
@@ -451,11 +606,48 @@ function getPreviewRow(col: number): number | null {
   cursor: default;
 }
 
+.board-frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px 18px 14px 14px;
+  overflow: hidden;
+  background:
+    linear-gradient(165deg, #2a7fe0 0%, var(--c4-board) 28%, var(--c4-board-mid) 72%, var(--c4-board-dark) 100%);
+  border: 3px solid var(--c4-board-edge);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.5),
+    0 4px 12px rgba(13, 63, 134, 0.4),
+    inset 0 2px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.25);
+  padding: 2.5% 2.5% 3%;
+}
+
+.board-feet {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 6% 0;
+  margin-top: -1px;
+  height: 4.5%;
+  min-height: 10px;
+}
+
+.board-feet span {
+  width: 14%;
+  height: 100%;
+  border-radius: 0 0 8px 8px;
+  background: linear-gradient(180deg, var(--c4-board-dark), var(--c4-board-edge));
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.35);
+}
+
 .column-hints {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  height: calc(100% / 7);
-  background: linear-gradient(to bottom, rgba(10, 25, 41, 0.8), transparent);
+  height: calc(100% / 7.2);
+  min-height: 28px;
+  margin-bottom: 1.5%;
+  gap: 1.5%;
 }
 
 .col-hint {
@@ -463,37 +655,86 @@ function getPreviewRow(col: number): number | null {
   align-items: center;
   justify-content: center;
   border: none;
-  background: transparent;
+  border-radius: 10px;
+  background: rgba(7, 17, 31, 0.25);
   cursor: pointer;
-  transition: background 0.15s;
+  transition:
+    background 0.18s var(--ease-smooth),
+    transform 0.18s var(--ease-smooth);
+  position: relative;
 }
 
-.col-hint.legal:hover {
-  background: rgba(255, 255, 255, 0.08);
+.col-hint.legal {
+  background: rgba(7, 17, 31, 0.35);
 }
 
-.col-hint:not(.legal) {
+.col-hint.legal:hover,
+.col-hint.legal:focus-visible,
+.col-hint.hovered {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.col-hint:not(.legal),
+.col-hint:disabled {
   cursor: default;
+  opacity: 0.45;
 }
 
-.preview-disc {
-  font-size: min(6cqw, 6cqh);
-  line-height: 1;
-  opacity: 0.6;
+.hint-arrow {
+  width: 0;
+  height: 0;
+  border-left: 0.35em solid transparent;
+  border-right: 0.35em solid transparent;
+  border-top: 0.5em solid rgba(255, 255, 255, 0.25);
+  font-size: min(5.5cqw, 5.5cqh);
+  transition:
+    border-top-color 0.18s,
+    transform 0.18s var(--ease-bounce),
+    opacity 0.18s;
+  opacity: 0.5;
 }
 
-.preview-disc.red {
-  color: var(--c4-red);
+.col-hint.legal .hint-arrow {
+  opacity: 0.85;
+  border-top-color: rgba(255, 255, 255, 0.55);
 }
 
-.preview-disc.yellow {
-  color: var(--c4-yellow);
+.col-hint.hovered .hint-arrow,
+.col-hint.legal:focus-visible .hint-arrow {
+  opacity: 1;
+  transform: translateY(2px);
+  animation: arrowBounce 0.7s var(--ease-bounce) infinite;
+}
+
+.col-hint.hovered .hint-arrow.red,
+.col-hint.legal:focus-visible .hint-arrow.red {
+  border-top-color: var(--c4-red);
+  filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.6));
+}
+
+.col-hint.hovered .hint-arrow.yellow,
+.col-hint.legal:focus-visible .hint-arrow.yellow {
+  border-top-color: var(--c4-yellow);
+  filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.6));
+}
+
+@keyframes arrowBounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
 }
 
 .grid {
   flex: 1;
   display: flex;
   flex-direction: column;
+  gap: 1.5%;
+  min-height: 0;
 }
 
 .grid-row {
@@ -501,6 +742,7 @@ function getPreviewRow(col: number): number | null {
   grid-template-columns: repeat(7, 1fr);
   flex: 1;
   min-height: 0;
+  gap: 1.5%;
 }
 
 .cell {
@@ -512,91 +754,162 @@ function getPreviewRow(col: number): number | null {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  background: var(--c4-board);
-  font-size: min(10cqw, 10cqh);
-  line-height: 1;
-  transition: filter 0.12s ease;
+  background: transparent;
+  aspect-ratio: 1;
+  min-height: 0;
 }
 
-.cell::before {
-  content: '';
-  position: absolute;
-  inset: 8%;
-  border-radius: 50%;
-  background: var(--c4-cell-bg);
-  box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.4);
+.board.interactive .cell {
+  cursor: pointer;
 }
 
-.cell:hover:not(:disabled) {
-  filter: brightness(1.05);
+.board.disabled .cell {
+  cursor: default;
 }
 
-.cell.last::after {
-  content: '';
+.cell-hole {
   position: absolute;
   inset: 4%;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 42%, #0c1a2e 0%, var(--c4-hole) 70%);
+  box-shadow:
+    inset 0 3px 6px rgba(0, 0, 0, 0.65),
+    inset 0 -1px 0 var(--c4-hole-rim),
+    0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: box-shadow 0.15s;
+}
+
+.cell.preview-target .cell-hole {
+  box-shadow:
+    inset 0 3px 6px rgba(0, 0, 0, 0.55),
+    inset 0 -1px 0 var(--c4-hole-rim),
+    0 0 0 2px rgba(255, 255, 255, 0.18),
+    0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.cell.last .cell-hole {
+  box-shadow:
+    inset 0 3px 6px rgba(0, 0, 0, 0.55),
+    0 0 0 2px rgba(255, 255, 255, 0.28),
+    0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.disc {
+  position: relative;
+  z-index: 1;
+  width: 86%;
+  height: 86%;
+  border-radius: 50%;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.disc.red {
+  background:
+    radial-gradient(circle at 32% 28%, var(--c4-red-shine) 0%, var(--c4-red) 38%, var(--c4-red-deep) 100%);
+  box-shadow:
+    0 3px 6px rgba(0, 0, 0, 0.4),
+    inset 0 -3px 5px rgba(0, 0, 0, 0.28),
+    inset 0 3px 4px rgba(255, 255, 255, 0.28);
+}
+
+.disc.yellow {
+  background:
+    radial-gradient(circle at 32% 28%, var(--c4-yellow-shine) 0%, var(--c4-yellow) 38%, var(--c4-yellow-deep) 100%);
+  box-shadow:
+    0 3px 6px rgba(0, 0, 0, 0.35),
+    inset 0 -3px 5px rgba(0, 0, 0, 0.22),
+    inset 0 3px 4px rgba(255, 255, 255, 0.35);
+}
+
+.disc.preview {
+  opacity: 0.42;
+  animation: previewPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes previewPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+}
+
+.disc.drop-anim {
+  animation: discDrop calc(0.18s + var(--drop-rows) * 0.06s) cubic-bezier(0.22, 0.9, 0.35, 1.15) both;
+}
+
+@keyframes discDrop {
+  0% {
+    transform: translateY(calc(-100% * var(--drop-rows) - 40%));
+    opacity: 0.85;
+  }
+  70% {
+    opacity: 1;
+  }
+  85% {
+    transform: translateY(3%);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+.disc.winning {
+  animation: winShine 1.1s ease-in-out infinite;
+}
+
+.disc.winning.drop-anim {
+  animation:
+    discDrop calc(0.18s + var(--drop-rows) * 0.06s) cubic-bezier(0.22, 0.9, 0.35, 1.15) both,
+    winShine 1.1s ease-in-out 0.4s infinite;
+}
+
+@keyframes winShine {
+  0%,
+  100% {
+    filter: brightness(1);
+    box-shadow:
+      0 3px 6px rgba(0, 0, 0, 0.4),
+      inset 0 -3px 5px rgba(0, 0, 0, 0.28),
+      inset 0 3px 4px rgba(255, 255, 255, 0.28),
+      0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% {
+    filter: brightness(1.18);
+    box-shadow:
+      0 3px 6px rgba(0, 0, 0, 0.4),
+      inset 0 -3px 5px rgba(0, 0, 0, 0.28),
+      inset 0 3px 4px rgba(255, 255, 255, 0.4),
+      0 0 14px 2px rgba(255, 255, 255, 0.45);
+  }
 }
 
 .cell.winning::after {
   content: '';
   position: absolute;
-  inset: 2%;
+  inset: -2%;
   border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.8);
-  animation: winPulse 1s ease-in-out infinite;
+  border: 2px solid rgba(255, 255, 255, 0.75);
   pointer-events: none;
+  z-index: 2;
+  animation: winRing 1.1s ease-in-out infinite;
 }
 
-@keyframes winPulse {
-  0%, 100% {
+@keyframes winRing {
+  0%,
+  100% {
     transform: scale(1);
-    opacity: 0.8;
+    opacity: 0.7;
   }
   50% {
-    transform: scale(1.05);
+    transform: scale(1.06);
     opacity: 1;
-  }
-}
-
-.cell.preview-target::before {
-  background: rgba(10, 25, 41, 0.7);
-}
-
-.disc {
-  z-index: 1;
-  user-select: none;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
-}
-
-.disc.red {
-  color: var(--c4-red);
-}
-
-.disc.yellow {
-  color: var(--c4-yellow);
-}
-
-.disc.preview {
-  opacity: 0.5;
-}
-
-.disc.drop-anim {
-  animation: discDrop 0.4s var(--ease-bounce);
-}
-
-@keyframes discDrop {
-  0% {
-    transform: translateY(-200%);
-    opacity: 0;
-  }
-  30% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateY(0);
   }
 }
 
@@ -606,29 +919,72 @@ function getPreviewRow(col: number): number | null {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 10, 16, 0.55);
-  backdrop-filter: blur(2px);
-  border-radius: 12px;
+  background: rgba(6, 10, 18, 0.5);
+  backdrop-filter: blur(3px);
+  border-radius: 16px;
   z-index: 5;
+  animation: overlayIn 0.35s var(--ease-smooth) both;
+}
+
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .game-over-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
-  padding: 1.25rem 1.5rem;
-  border-radius: 12px;
-  border: 1px solid rgba(21, 101, 192, 0.35);
-  background: rgba(21, 28, 44, 0.95);
-  box-shadow: var(--shadow);
+  gap: 0.85rem;
+  padding: 1.35rem 1.75rem;
+  border-radius: 16px;
+  border: 1px solid rgba(29, 111, 212, 0.4);
+  background: linear-gradient(165deg, rgba(30, 42, 68, 0.97), rgba(16, 24, 40, 0.98));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  max-width: 90%;
+  animation: cardPop 0.45s var(--ease-bounce) both;
+}
+
+@keyframes cardPop {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.game-over-disc {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+}
+
+.game-over-disc.red {
+  background:
+    radial-gradient(circle at 32% 28%, var(--c4-red-shine) 0%, var(--c4-red) 42%, var(--c4-red-deep) 100%);
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.45);
+}
+
+.game-over-disc.yellow {
+  background:
+    radial-gradient(circle at 32% 28%, var(--c4-yellow-shine) 0%, var(--c4-yellow) 42%, var(--c4-yellow-deep) 100%);
+  box-shadow: 0 4px 16px rgba(251, 191, 36, 0.45);
 }
 
 .game-over-title {
   margin: 0;
+  font-family: 'Outfit', 'DM Sans', system-ui, sans-serif;
   font-weight: 650;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   text-align: center;
+  line-height: 1.35;
 }
 
 .side-rail {
@@ -636,17 +992,18 @@ function getPreviewRow(col: number): number | null {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
-  padding: 0.75rem;
-  border-radius: 12px;
+  padding: 0.8rem;
+  border-radius: 14px;
   border: 1px solid var(--border);
-  background: rgba(21, 28, 44, 0.72);
+  background: rgba(21, 28, 44, 0.62);
+  backdrop-filter: blur(8px);
 }
 
 .status-chip {
   display: flex;
   align-items: flex-start;
   gap: 0.55rem;
-  padding: 0.65rem 0.7rem;
+  padding: 0.7rem 0.75rem;
   border-radius: 10px;
   background: rgba(10, 14, 23, 0.45);
   border: 1px solid var(--border);
@@ -676,11 +1033,12 @@ function getPreviewRow(col: number): number | null {
 .status-chip.mine .status-dot {
   background: var(--accent);
   box-shadow: 0 0 8px var(--accent-glow);
+  animation: turnPulse 1.5s ease-in-out infinite;
 }
 
 .status-chip.over {
-  border-color: rgba(21, 101, 192, 0.45);
-  background: rgba(21, 101, 192, 0.08);
+  border-color: rgba(29, 111, 212, 0.45);
+  background: rgba(29, 111, 212, 0.08);
 }
 
 .status-chip.over .status-dot {
@@ -728,6 +1086,7 @@ function getPreviewRow(col: number): number | null {
 .move-count {
   font-size: 0.72rem;
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .move-list {
@@ -743,10 +1102,22 @@ function getPreviewRow(col: number): number | null {
 .move-entry {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.28rem 0.35rem;
-  border-radius: 6px;
+  gap: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 7px;
   font-size: 0.8rem;
+  animation: moveIn 0.25s var(--ease-smooth) both;
+}
+
+@keyframes moveIn {
+  from {
+    opacity: 0;
+    transform: translateX(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .move-entry:nth-child(odd) {
@@ -757,19 +1128,22 @@ function getPreviewRow(col: number): number | null {
   width: 1.6rem;
   color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 .move-disc {
-  font-size: 0.9rem;
-  line-height: 1;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .move-disc.red {
-  color: var(--c4-red);
+  background: radial-gradient(circle at 35% 30%, var(--c4-red-shine), var(--c4-red) 55%, var(--c4-red-deep));
 }
 
 .move-disc.yellow {
-  color: var(--c4-yellow);
+  background: radial-gradient(circle at 35% 30%, var(--c4-yellow-shine), var(--c4-yellow) 55%, var(--c4-yellow-deep));
 }
 
 .move-col {
@@ -819,6 +1193,26 @@ function getPreviewRow(col: number): number | null {
 
   .player-bar {
     padding: 0.4rem 0.55rem;
+  }
+
+  .board-frame {
+    border-radius: 14px 14px 10px 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connect4-board,
+  .board,
+  .disc.drop-anim,
+  .disc.preview,
+  .disc.winning,
+  .turn-pill,
+  .hint-arrow,
+  .game-over-overlay,
+  .game-over-card,
+  .move-entry,
+  .cell.winning::after {
+    animation: none !important;
   }
 }
 </style>

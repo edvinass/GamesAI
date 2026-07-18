@@ -34,6 +34,7 @@ const suitSymbols: Record<string, string> = {
 }
 
 const suitOrder = ['hearts', 'diamonds', 'clubs', 'spades']
+const RANK_ORDER = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
 
 function getSuitSymbol(suit: string | null): string {
   return suit ? suitSymbols[suit] ?? '' : ''
@@ -41,6 +42,52 @@ function getSuitSymbol(suit: string | null): string {
 
 function isRed(suit: string | null): boolean {
   return suit === 'hearts' || suit === 'diamonds'
+}
+
+function rankValue(rank: string | null | undefined): number {
+  if (!rank) return -1
+  return RANK_ORDER.indexOf(rank) + 1
+}
+
+function canStackOnTableau(
+  card: { rank: string | null; suit: string | null },
+  target: { rank: string | null; suit: string | null },
+): boolean {
+  if (!card.rank || !card.suit || !target.rank || !target.suit) return false
+  if (isRed(card.suit) === isRed(target.suit)) return false
+  return rankValue(target.rank) === rankValue(card.rank) + 1
+}
+
+function getSelectedMovingCard(): { rank: string | null; suit: string | null } | null {
+  if (!selectedCard.value) return null
+  if (selectedCard.value.source === 'waste') {
+    return props.gameState.waste_top
+  }
+  if (selectedCard.value.source === 'tableau') {
+    const col = props.gameState.tableau[selectedCard.value.sourceIndex!]
+    return col?.[selectedCard.value.cardIndex ?? 0] ?? null
+  }
+  if (selectedCard.value.source === 'foundation') {
+    const suit = suitOrder[selectedCard.value.sourceIndex!]
+    return props.gameState.foundations[suit]?.top ?? null
+  }
+  return null
+}
+
+function canMoveSelectionToTableau(targetCol: number): boolean {
+  const moving = getSelectedMovingCard()
+  if (!moving || !selectedCard.value) return false
+  if (
+    selectedCard.value.source === 'tableau' &&
+    selectedCard.value.sourceIndex === targetCol
+  ) {
+    return false
+  }
+  const target = props.gameState.tableau[targetCol]
+  if (!target.length) return moving.rank === 'K'
+  const top = target[target.length - 1]
+  if (!top.face_up) return false
+  return canStackOnTableau(moving, top)
 }
 
 function drawCard() {
@@ -65,22 +112,31 @@ function selectWaste() {
 
 function selectTableauCard(colIndex: number, cardIndex: number) {
   const col = props.gameState.tableau[colIndex]
-  if (!col[cardIndex]?.face_up) return
+  const card = col[cardIndex]
+  if (!card) return
 
-  if (
-    selectedCard.value?.source === 'tableau' &&
-    selectedCard.value.sourceIndex === colIndex &&
-    selectedCard.value.cardIndex === cardIndex
-  ) {
-    tryMoveToFoundation('tableau', colIndex)
+  // With a selection active, any click on a column attempts a drop
+  // (including face-down peeks — drop always targets the column top).
+  if (selectedCard.value) {
+    if (
+      selectedCard.value.source === 'tableau' &&
+      selectedCard.value.sourceIndex === colIndex &&
+      selectedCard.value.cardIndex === cardIndex
+    ) {
+      // Re-click selected card: only foundation-auto for a single top card
+      if (cardIndex === col.length - 1) {
+        tryMoveToFoundation('tableau', colIndex)
+      } else {
+        clearSelection()
+      }
+      return
+    }
+    moveToTableau(colIndex)
     return
   }
 
-  if (selectedCard.value) {
-    moveToTableau(colIndex)
-  } else {
-    selectedCard.value = { source: 'tableau', sourceIndex: colIndex, cardIndex }
-  }
+  if (!card.face_up) return
+  selectedCard.value = { source: 'tableau', sourceIndex: colIndex, cardIndex }
 }
 
 function selectEmptyTableau(colIndex: number) {
@@ -114,6 +170,7 @@ function tryMoveSelectedToFoundation(_targetSuit: string) {
 
   if (selectedCard.value.source === 'waste') {
     emit('action', { type: 'move_to_foundation', source: 'waste' })
+    clearSelection()
   } else if (selectedCard.value.source === 'tableau') {
     const col = props.gameState.tableau[selectedCard.value.sourceIndex!]
     if (selectedCard.value.cardIndex === col.length - 1) {
@@ -122,13 +179,25 @@ function tryMoveSelectedToFoundation(_targetSuit: string) {
         source: 'tableau',
         source_index: selectedCard.value.sourceIndex,
       })
+      clearSelection()
     }
+  } else if (selectedCard.value.source === 'foundation') {
+    clearSelection()
   }
-  clearSelection()
 }
 
 function moveToTableau(targetCol: number) {
   if (!selectedCard.value) return
+  if (!canMoveSelectionToTableau(targetCol)) {
+    // Keep selection on illegal drops so the player can try another target
+    if (
+      selectedCard.value.source === 'tableau' &&
+      selectedCard.value.sourceIndex === targetCol
+    ) {
+      clearSelection()
+    }
+    return
+  }
 
   emit('action', {
     type: 'move_to_tableau',
@@ -185,6 +254,14 @@ const cardsInFoundations = computed(() => {
   }
   return total
 })
+
+const wasteFan = computed(() => {
+  const fan = props.gameState.waste_fan
+  if (fan?.length) return fan
+  return props.gameState.waste_top ? [props.gameState.waste_top] : []
+})
+
+const hasSelection = computed(() => selectedCard.value !== null)
 </script>
 
 <template>
@@ -251,20 +328,33 @@ const cardsInFoundations = computed(() => {
 
           <div
             class="card-slot waste"
-            :class="{ selected: isCardSelected('waste'), 'waste--has-card': gameState.waste_top }"
+            :class="{
+              selected: isCardSelected('waste'),
+              'waste--has-card': wasteFan.length > 0,
+              'waste--fan': wasteFan.length > 1,
+            }"
+            :style="wasteFan.length > 1 ? { '--fan-count': wasteFan.length } : undefined"
             @click="selectWaste"
           >
-            <div v-if="gameState.waste_top" class="playing-card" :class="{ red: isRed(gameState.waste_top.suit) }">
-              <span class="corner corner--tl">
-                <span class="corner__rank">{{ gameState.waste_top.rank }}</span>
-                <span class="corner__suit">{{ getSuitSymbol(gameState.waste_top.suit) }}</span>
-              </span>
-              <span class="suit suit--center">{{ getSuitSymbol(gameState.waste_top.suit) }}</span>
-              <span class="corner corner--br">
-                <span class="corner__rank">{{ gameState.waste_top.rank }}</span>
-                <span class="corner__suit">{{ getSuitSymbol(gameState.waste_top.suit) }}</span>
-              </span>
-            </div>
+            <template v-if="wasteFan.length">
+              <div
+                v-for="(card, fanIndex) in wasteFan"
+                :key="`waste-${fanIndex}-${card.rank}-${card.suit}`"
+                class="playing-card waste-fan-card"
+                :class="{ red: isRed(card.suit), 'waste-fan-card--top': fanIndex === wasteFan.length - 1 }"
+                :style="{ '--fan-index': fanIndex }"
+              >
+                <span class="corner corner--tl">
+                  <span class="corner__rank">{{ card.rank }}</span>
+                  <span class="corner__suit">{{ getSuitSymbol(card.suit) }}</span>
+                </span>
+                <span class="suit suit--center">{{ getSuitSymbol(card.suit) }}</span>
+                <span class="corner corner--br">
+                  <span class="corner__rank">{{ card.rank }}</span>
+                  <span class="corner__suit">{{ getSuitSymbol(card.suit) }}</span>
+                </span>
+              </div>
+            </template>
             <div v-else class="empty-slot empty-slot--waste">
               <span class="empty-label">Waste</span>
             </div>
@@ -304,11 +394,19 @@ const cardsInFoundations = computed(() => {
       </div>
 
       <div class="tableau">
-        <div v-for="(col, colIndex) in gameState.tableau" :key="colIndex" class="tableau-column">
+        <div
+          v-for="(col, colIndex) in gameState.tableau"
+          :key="colIndex"
+          class="tableau-column"
+          :class="{
+            'tableau-column--drop-ok': hasSelection && canMoveSelectionToTableau(colIndex),
+            'tableau-column--has-selection': hasSelection,
+          }"
+        >
           <div
             v-if="col.length === 0"
             class="card-slot empty-column"
-            :class="{ 'drop-target': selectedCard !== null }"
+            :class="{ 'drop-target': hasSelection && canMoveSelectionToTableau(colIndex) }"
             @click="selectEmptyTableau(colIndex)"
           >
             <div class="empty-slot empty-slot--tableau">
@@ -322,6 +420,7 @@ const cardsInFoundations = computed(() => {
             :class="{
               selected: isInSelectedStack(colIndex, cardIndex),
               'face-down': !card.face_up,
+              'tableau-card--top': cardIndex === col.length - 1,
             }"
             :style="{ '--card-index': cardIndex, zIndex: cardIndex + 1 }"
             @click="selectTableauCard(colIndex, cardIndex)"
@@ -379,11 +478,11 @@ const cardsInFoundations = computed(() => {
     <aside class="controls-hint">
       <div class="hint-item">
         <span class="hint-key">Click</span>
-        <span class="hint-desc">Select a card</span>
+        <span class="hint-desc">Select a card or pile</span>
       </div>
       <div class="hint-item">
-        <span class="hint-key">Double-click</span>
-        <span class="hint-desc">Send to foundation</span>
+        <span class="hint-key">Click again</span>
+        <span class="hint-desc">Drop on a column, or send top card to foundation</span>
       </div>
     </aside>
   </div>
@@ -552,6 +651,23 @@ const cardsInFoundations = computed(() => {
 .stock-waste {
   display: flex;
   gap: var(--card-gap);
+}
+
+.waste--fan {
+  width: calc(var(--card-width) + (var(--fan-count, 1) - 1) * var(--card-offset));
+}
+
+.waste-fan-card {
+  position: absolute;
+  top: 0;
+  left: calc(var(--fan-index, 0) * var(--card-offset));
+  width: var(--card-width);
+  height: var(--card-height);
+  pointer-events: none;
+}
+
+.waste-fan-card--top {
+  pointer-events: auto;
 }
 
 .foundations {
@@ -855,23 +971,43 @@ const cardsInFoundations = computed(() => {
   background: rgba(255, 215, 0, 0.12);
 }
 
+.tableau-column--drop-ok .tableau-card--top .playing-card {
+  box-shadow:
+    0 0 0 2px rgba(255, 215, 0, 0.55),
+    0 6px 18px rgba(255, 215, 0, 0.2);
+}
+
 .tableau-card {
   position: absolute;
   left: 0;
   top: calc(var(--card-index, 0) * var(--card-offset));
   width: var(--card-width);
-  height: var(--card-height);
+  /* Buried cards only expose a peek hit-target so pile bases stay clickable */
+  height: var(--card-offset);
+  overflow: hidden;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.25s ease;
 }
 
-.tableau-card:hover:not(.face-down) {
-  transform: translateY(-4px);
-  z-index: 100 !important;
+.tableau-card .playing-card {
+  height: var(--card-height);
+}
+
+.tableau-card--top {
+  height: var(--card-height);
+  overflow: visible;
+}
+
+.tableau-card:hover:not(.face-down):not(.selected) {
+  transform: translateY(-3px);
 }
 
 .tableau-card.face-down {
   cursor: default;
+}
+
+.tableau-column--has-selection .tableau-card.face-down {
+  cursor: pointer;
 }
 
 .tableau-card.face-down:hover {
@@ -879,14 +1015,17 @@ const cardsInFoundations = computed(() => {
 }
 
 .tableau-card.selected {
-  transform: translateY(-10px);
-  z-index: 100 !important;
+  transform: translateY(-8px);
 }
 
 .tableau-card.selected .playing-card {
   box-shadow:
     0 0 0 3px #ffd700,
     0 8px 30px rgba(255, 215, 0, 0.4);
+}
+
+.tableau-card.selected.tableau-card--top {
+  z-index: 50;
 }
 
 .winner-overlay {

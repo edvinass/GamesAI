@@ -56,6 +56,18 @@ def can_stack_on_tableau(card: Card, target: Card) -> bool:
     return rank_value(target["rank"]) == rank_value(card["rank"]) + 1
 
 
+def is_valid_tableau_run(cards: list[Card]) -> bool:
+    """Return True if cards form a face-up descending alternating-color build."""
+    if not cards:
+        return False
+    if any(not card["face_up"] for card in cards):
+        return False
+    for i in range(len(cards) - 1):
+        if not can_stack_on_tableau(cards[i + 1], cards[i]):
+            return False
+    return True
+
+
 def can_stack_on_foundation(card: Card, foundation: list[Card]) -> bool:
     """
     Check if card can be placed on foundation pile.

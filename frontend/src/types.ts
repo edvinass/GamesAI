@@ -676,6 +676,7 @@ export interface SolitaireGameState {
   foundations: Record<string, SolitaireFoundation>
   stock_count: number
   waste_top: SolitaireCard | null
+  waste_fan?: SolitaireCard[]
   waste_count: number
   moves: number
   players: Player[]

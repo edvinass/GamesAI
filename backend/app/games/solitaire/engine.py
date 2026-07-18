@@ -3,14 +3,12 @@ from typing import Any
 
 from app.games.base import GamePlugin
 from app.games.solitaire.cards import (
-    RANKS,
     SUITS,
     Card,
     can_stack_on_foundation,
     can_stack_on_tableau,
-    cards_to_list,
     create_deck,
-    rank_value,
+    is_valid_tableau_run,
     shuffle_deck,
 )
 
@@ -107,6 +105,11 @@ class SolitaireEngine(GamePlugin):
         elif action_type == "move_to_foundation":
             source = action.get("source")
             source_index = action.get("source_index")
+            if source_index is not None and not isinstance(source_index, str):
+                try:
+                    source_index = int(source_index)
+                except (TypeError, ValueError):
+                    return state, events
             state, moved = self._move_to_foundation(state, source, source_index)
             if moved:
                 state["moves"] += 1
@@ -122,6 +125,13 @@ class SolitaireEngine(GamePlugin):
             source_index = action.get("source_index")
             card_index = action.get("card_index", 0)
             target_col = action.get("target_col")
+            try:
+                if source_index is not None and not isinstance(source_index, str):
+                    source_index = int(source_index)
+                card_index = int(card_index)
+                target_col = int(target_col)
+            except (TypeError, ValueError):
+                return state, events
             state, moved = self._move_to_tableau(
                 state, source, source_index, card_index, target_col
             )
@@ -251,6 +261,8 @@ class SolitaireEngine(GamePlugin):
             if not col[card_index]["face_up"]:
                 return state, False
             cards_to_move = col[card_index:]
+            if not is_valid_tableau_run(cards_to_move):
+                return state, False
             source_pile = col
             remove_count = len(cards_to_move)
         elif source == "foundation":
@@ -276,6 +288,8 @@ class SolitaireEngine(GamePlugin):
                 return state, False
         else:
             top_card = target[-1]
+            if not top_card["face_up"]:
+                return state, False
             if not can_stack_on_tableau(first_card, top_card):
                 return state, False
 
@@ -284,9 +298,8 @@ class SolitaireEngine(GamePlugin):
 
         target.extend(cards_to_move)
 
-        if source == "tableau" and source_pile:
-            if source_pile and not source_pile[-1]["face_up"]:
-                source_pile[-1]["face_up"] = True
+        if source == "tableau" and source_pile and not source_pile[-1]["face_up"]:
+            source_pile[-1]["face_up"] = True
 
         return state, True
 
@@ -353,11 +366,19 @@ class SolitaireEngine(GamePlugin):
                 ]
             )
 
-        waste_top = None
         waste_count = len(state["waste"])
+        waste_top = None
         if state["waste"]:
             top = state["waste"][-1]
             waste_top = {"rank": top["rank"], "suit": top["suit"], "face_up": True}
+
+        # Fan the most recent draw so Draw-3 mode shows the visible waste cards.
+        draw_count = int(state["settings"].get("draw_count", 1) or 1)
+        fan_size = min(draw_count, waste_count) if waste_count else 0
+        waste_fan = [
+            {"rank": c["rank"], "suit": c["suit"], "face_up": True}
+            for c in state["waste"][-fan_size:]
+        ]
 
         foundations_public = {}
         for suit, pile in state["foundations"].items():
@@ -376,6 +397,7 @@ class SolitaireEngine(GamePlugin):
             "foundations": foundations_public,
             "stock_count": len(state["stock"]),
             "waste_top": waste_top,
+            "waste_fan": waste_fan,
             "waste_count": waste_count,
             "moves": state["moves"],
             "players": state["players"],

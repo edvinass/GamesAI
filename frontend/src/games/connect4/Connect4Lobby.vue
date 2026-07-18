@@ -22,18 +22,16 @@ const emit = defineEmits<{
 
 type GameMode = 'multiplayer' | 'solo_practice'
 
-const gameModes: { id: GameMode; label: string; description: string; glyph: string }[] = [
+const gameModes: { id: GameMode; label: string; description: string }[] = [
   {
     id: 'multiplayer',
     label: 'Match',
     description: 'You vs a friend or AI seat',
-    glyph: '🔴',
   },
   {
     id: 'solo_practice',
     label: 'Vs AI',
     description: 'You play Red against the bot',
-    glyph: '🤖',
   },
 ]
 
@@ -120,12 +118,18 @@ function seatInitial(nickname: string): string {
           :key="mode.id"
           type="button"
           class="mode-option"
-          :class="{ active: gameMode === mode.id }"
+          :class="[mode.id, { active: gameMode === mode.id }]"
           role="radio"
           :aria-checked="gameMode === mode.id"
           @click="gameMode = mode.id"
         >
-          <span class="mode-glyph" aria-hidden="true">{{ mode.glyph }}</span>
+          <span class="mode-glyph" :class="mode.id" aria-hidden="true">
+            <span v-if="mode.id === 'multiplayer'" class="mode-discs">
+              <i class="mini-disc red" />
+              <i class="mini-disc yellow" />
+            </span>
+            <span v-else class="mode-ai-mark">AI</span>
+          </span>
           <span class="mode-copy">
             <span class="mode-label">{{ mode.label }}</span>
             <span class="mode-desc">{{ mode.description }}</span>
@@ -157,7 +161,13 @@ function seatInitial(nickname: string): string {
     </section>
 
     <section v-else class="mode-summary card">
-      <span class="mode-glyph" aria-hidden="true">{{ activeMode.glyph }}</span>
+      <span class="mode-glyph" :class="activeMode.id" aria-hidden="true">
+        <span v-if="activeMode.id === 'multiplayer'" class="mode-discs">
+          <i class="mini-disc red" />
+          <i class="mini-disc yellow" />
+        </span>
+        <span v-else class="mode-ai-mark">AI</span>
+      </span>
       <div>
         <p class="mode-summary-label">{{ activeMode.label }}</p>
         <p class="mode-summary-desc">{{ activeMode.description }}</p>
@@ -176,12 +186,24 @@ function seatInitial(nickname: string): string {
 
       <div class="board-stage">
         <div class="mini-board" aria-hidden="true">
-          <div v-for="i in 42" :key="i" class="mini-cell" />
-          <div class="board-pieces">
-            <span class="sample-piece red p1">●</span>
-            <span class="sample-piece yellow p2">●</span>
-            <span class="sample-piece red p3">●</span>
-            <span class="sample-piece yellow p4">●</span>
+          <div class="mini-frame">
+            <div v-for="i in 42" :key="i" class="mini-cell">
+              <span
+                v-if="i === 39 || i === 32"
+                class="sample-disc red"
+                :class="i === 32 ? 'stack' : ''"
+              />
+              <span
+                v-else-if="i === 40 || i === 33"
+                class="sample-disc yellow"
+                :class="i === 33 ? 'stack' : ''"
+              />
+              <span v-else-if="i === 42" class="sample-disc yellow" />
+            </div>
+          </div>
+          <div class="mini-feet">
+            <span />
+            <span />
           </div>
         </div>
 
@@ -200,7 +222,7 @@ function seatInitial(nickname: string): string {
             }"
           >
             <div class="seat-color" :class="seat.color">
-              <span class="seat-disc" aria-hidden="true">●</span>
+              <span class="seat-disc" aria-hidden="true" />
             </div>
             <div class="seat-body">
               <p class="seat-side">{{ seat.label }}</p>
@@ -273,10 +295,15 @@ function seatInitial(nickname: string): string {
 
 <style scoped>
 .connect4-lobby {
-  --c4-red: #e53935;
-  --c4-yellow: #fdd835;
-  --c4-board: #1565c0;
-  --c4-glow: rgba(21, 101, 192, 0.22);
+  --c4-red: #ef4444;
+  --c4-red-deep: #b91c1c;
+  --c4-red-shine: #fca5a5;
+  --c4-yellow: #fbbf24;
+  --c4-yellow-deep: #d97706;
+  --c4-yellow-shine: #fde68a;
+  --c4-board: #1d6fd4;
+  --c4-board-dark: #0d3f86;
+  --c4-glow: rgba(29, 111, 212, 0.22);
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -318,8 +345,8 @@ function seatInitial(nickname: string): string {
 .mode-option {
   display: flex;
   align-items: flex-start;
-  gap: 0.7rem;
-  padding: 0.9rem 0.95rem;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--surface-hover);
@@ -334,20 +361,57 @@ function seatInitial(nickname: string): string {
 }
 
 .mode-option:hover {
-  border-color: rgba(21, 101, 192, 0.45);
+  border-color: rgba(29, 111, 212, 0.45);
   transform: translateY(-1px);
 }
 
 .mode-option.active {
   border-color: var(--c4-board);
-  background: linear-gradient(145deg, rgba(21, 101, 192, 0.16), rgba(21, 101, 192, 0.08));
-  box-shadow: 0 0 0 1px rgba(21, 101, 192, 0.18);
+  background: linear-gradient(145deg, rgba(29, 111, 212, 0.18), rgba(29, 111, 212, 0.08));
+  box-shadow: 0 0 0 1px rgba(29, 111, 212, 0.18);
 }
 
 .mode-glyph {
-  font-size: 1.55rem;
-  line-height: 1;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
+  background: rgba(10, 14, 23, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mode-discs {
+  display: flex;
+  align-items: center;
+  margin-left: 0.15rem;
+}
+
+.mini-disc {
+  display: block;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+}
+
+.mini-disc.red {
+  background: radial-gradient(circle at 32% 28%, var(--c4-red-shine), var(--c4-red) 45%, var(--c4-red-deep));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  z-index: 1;
+}
+
+.mini-disc.yellow {
+  background: radial-gradient(circle at 32% 28%, var(--c4-yellow-shine), var(--c4-yellow) 45%, var(--c4-yellow-deep));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  margin-left: -0.35rem;
+}
+
+.mode-ai-mark {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #8ec0ff;
 }
 
 .mode-copy {
@@ -411,14 +475,14 @@ function seatInitial(nickname: string): string {
 }
 
 .difficulty-chip:hover {
-  border-color: rgba(21, 101, 192, 0.4);
+  border-color: rgba(29, 111, 212, 0.4);
   transform: translateY(-1px);
 }
 
 .difficulty-chip.active {
   border-color: var(--c4-board);
-  background: rgba(21, 101, 192, 0.12);
-  box-shadow: inset 0 -2px 0 rgba(21, 101, 192, 0.45);
+  background: rgba(29, 111, 212, 0.12);
+  box-shadow: inset 0 -2px 0 rgba(29, 111, 212, 0.45);
 }
 
 .diff-label {
@@ -451,7 +515,7 @@ function seatInitial(nickname: string): string {
 }
 
 .mode-summary-diff {
-  color: var(--c4-board);
+  color: #7eb6ff;
 }
 
 .matchup-card {
@@ -469,7 +533,7 @@ function seatInitial(nickname: string): string {
   inset: 0;
   background:
     radial-gradient(ellipse 70% 50% at 15% 20%, var(--c4-glow), transparent 60%),
-    radial-gradient(ellipse 50% 40% at 90% 80%, rgba(91, 156, 255, 0.08), transparent 55%);
+    radial-gradient(ellipse 50% 40% at 90% 80%, rgba(251, 191, 36, 0.06), transparent 55%);
   pointer-events: none;
 }
 
@@ -489,102 +553,107 @@ function seatInitial(nickname: string): string {
 
 .board-stage {
   display: grid;
-  grid-template-columns: minmax(110px, 140px) minmax(0, 1fr);
-  gap: 1rem;
+  grid-template-columns: minmax(120px, 150px) minmax(0, 1fr);
+  gap: 1.1rem;
   align-items: center;
   position: relative;
 }
 
 .mini-board {
   position: relative;
+  animation: boardPulse 4.5s ease-in-out infinite;
+}
+
+.mini-frame {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   aspect-ratio: 7/6;
-  border-radius: 10px;
+  border-radius: 12px 12px 8px 8px;
   overflow: hidden;
-  background: var(--c4-board);
-  border: 2px solid rgba(21, 101, 192, 0.55);
+  gap: 2px;
+  padding: 6px;
+  background:
+    linear-gradient(165deg, #2a7fe0 0%, var(--c4-board) 35%, var(--c4-board-dark) 100%);
+  border: 2px solid #0a2f66;
   box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.4),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  animation: boardPulse 4.5s ease-in-out infinite;
+    0 12px 28px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.2);
+}
+
+.mini-feet {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 10% 0;
+  height: 8px;
+}
+
+.mini-feet span {
+  width: 16%;
+  height: 100%;
+  border-radius: 0 0 5px 5px;
+  background: linear-gradient(180deg, var(--c4-board-dark), #0a2f66);
 }
 
 @keyframes boardPulse {
   0%,
   100% {
-    box-shadow:
-      0 10px 28px rgba(0, 0, 0, 0.4),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.35));
   }
   50% {
-    box-shadow:
-      0 12px 32px rgba(0, 0, 0, 0.45),
-      0 0 22px var(--c4-glow),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    filter: drop-shadow(0 12px 26px rgba(29, 111, 212, 0.35));
   }
 }
 
 .mini-cell {
   aspect-ratio: 1;
-  background: radial-gradient(circle at center, rgba(10, 30, 60, 0.9) 40%, transparent 42%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, #0c1a2e 0%, #07111f 70%);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  position: relative;
 }
 
-.board-pieces {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+.sample-disc {
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  animation: pieceDrop 0.55s var(--ease-bounce) backwards;
 }
 
-.sample-piece {
-  position: absolute;
-  font-size: clamp(0.7rem, 2vw, 0.95rem);
-  line-height: 1;
-  animation: pieceDrop 0.6s var(--ease-bounce) backwards;
+.sample-disc.red {
+  background: radial-gradient(circle at 32% 28%, var(--c4-red-shine), var(--c4-red) 42%, var(--c4-red-deep));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  animation-delay: 0.15s;
 }
 
-.sample-piece.red {
-  color: var(--c4-red);
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35));
+.sample-disc.yellow {
+  background: radial-gradient(circle at 32% 28%, var(--c4-yellow-shine), var(--c4-yellow) 42%, var(--c4-yellow-deep));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  animation-delay: 0.3s;
 }
 
-.sample-piece.yellow {
-  color: var(--c4-yellow);
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35));
+.sample-disc.stack {
+  animation-delay: 0.45s;
 }
 
-.sample-piece.p1 {
-  bottom: 12%;
-  left: 20%;
-  animation-delay: 0.2s;
+.sample-disc.yellow.stack {
+  animation-delay: 0.55s;
 }
 
-.sample-piece.p2 {
-  bottom: 12%;
-  left: 34%;
-  animation-delay: 0.4s;
-}
-
-.sample-piece.p3 {
-  bottom: 28%;
-  left: 34%;
-  animation-delay: 0.6s;
-}
-
-.sample-piece.p4 {
-  bottom: 12%;
-  right: 20%;
-  animation-delay: 0.8s;
+.mini-cell:nth-child(42) .sample-disc {
+  animation-delay: 0.7s;
 }
 
 @keyframes pieceDrop {
   0% {
     opacity: 0;
-    transform: translateY(-20px);
+    transform: translateY(-10px) scale(0.85);
   }
   100% {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -603,14 +672,38 @@ function seatInitial(nickname: string): string {
   border-radius: 12px;
   border: 1px solid var(--border);
   background: rgba(10, 14, 23, 0.45);
+  position: relative;
+  overflow: hidden;
   transition:
     border-color 0.2s,
     background 0.2s,
     transform 0.2s var(--ease-smooth);
 }
 
+.seat-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  opacity: 0.5;
+}
+
+.seat-card.red::before {
+  background: var(--c4-red);
+}
+
+.seat-card.yellow::before {
+  background: var(--c4-yellow);
+}
+
 .seat-card.filled {
   background: rgba(21, 28, 44, 0.85);
+}
+
+.seat-card.filled::before {
+  opacity: 1;
 }
 
 .seat-card.me {
@@ -619,7 +712,7 @@ function seatInitial(nickname: string): string {
 }
 
 .seat-card.ai {
-  border-color: rgba(21, 101, 192, 0.35);
+  border-color: rgba(29, 111, 212, 0.35);
 }
 
 .seat-card.empty {
@@ -630,26 +723,28 @@ function seatInitial(nickname: string): string {
 .seat-color {
   width: 42px;
   height: 42px;
-  border-radius: 10px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .seat-color.red {
-  background: linear-gradient(145deg, var(--c4-red), #c62828);
+  background: radial-gradient(circle at 32% 28%, var(--c4-red-shine), var(--c4-red) 45%, var(--c4-red-deep));
+  box-shadow: 0 3px 8px rgba(185, 28, 28, 0.35);
 }
 
 .seat-color.yellow {
-  background: linear-gradient(145deg, var(--c4-yellow), #f9a825);
+  background: radial-gradient(circle at 32% 28%, var(--c4-yellow-shine), var(--c4-yellow) 45%, var(--c4-yellow-deep));
+  box-shadow: 0 3px 8px rgba(217, 119, 6, 0.3);
 }
 
 .seat-disc {
-  font-size: 1.5rem;
-  line-height: 1;
-  color: rgba(255, 255, 255, 0.9);
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.2), inset 0 2px 3px rgba(255, 255, 255, 0.25);
 }
 
 .seat-body {
@@ -699,7 +794,7 @@ function seatInitial(nickname: string): string {
 .seat-pending-sub {
   margin: 0.1rem 0 0;
   font-size: 0.78rem;
-  color: var(--c4-board);
+  color: #7eb6ff;
 }
 
 .seat-badges {
@@ -723,8 +818,8 @@ function seatInitial(nickname: string): string {
 }
 
 .ai-badge {
-  background: rgba(21, 101, 192, 0.18);
-  color: var(--c4-board);
+  background: rgba(29, 111, 212, 0.18);
+  color: #7eb6ff;
 }
 
 .host-badge {
@@ -758,7 +853,7 @@ function seatInitial(nickname: string): string {
 }
 
 .solo-blurb strong {
-  color: var(--c4-board);
+  color: #7eb6ff;
   font-weight: 650;
 }
 
@@ -808,8 +903,16 @@ function seatInitial(nickname: string): string {
   }
 
   .mini-board {
-    width: min(160px, 42vw);
+    width: min(170px, 46vw);
     margin: 0 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connect4-lobby,
+  .mini-board,
+  .sample-disc {
+    animation: none !important;
   }
 }
 </style>
