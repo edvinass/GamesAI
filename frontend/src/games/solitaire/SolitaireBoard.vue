@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, SolitaireCard, SolitaireGameState } from '@/types'
 import {
   disposeSounds,
@@ -36,13 +36,45 @@ const lastSoundActionKey = ref('')
 const coachMessage = ref('')
 let coachMessageTimer: ReturnType<typeof setTimeout> | null = null
 
+const AUTOPLAY_FLIGHT_MS = 900
+const ANIMATABLE_ACTIONS = new Set([
+  'move_to_tableau',
+  'move_to_foundation',
+  'draw',
+  'reset_stock',
+])
+
+type FlightAnim = {
+  cards: SolitaireCard[]
+  x: number
+  y: number
+  offsetX: number
+  offsetY: number
+  source: CardRef
+  dimStock?: boolean
+}
+
+/** Freeze the pre-move board while a Watch-mode card flies to its target. */
+function cloneBoard(state: SolitaireGameState): SolitaireGameState {
+  return JSON.parse(JSON.stringify(state)) as SolitaireGameState
+}
+
+const frozenBoard = ref<SolitaireGameState | null>(null)
+const flight = ref<FlightAnim | null>(null)
+const prevBoard = ref<SolitaireGameState>(cloneBoard(props.gameState))
+const lastAutoplayAnimKey = ref('')
+let flightRaf = 0
+
+const board = computed(() => frozenBoard.value ?? props.gameState)
+
 watch(() => props.gameState.moves, () => {
   lastMoveTime.value = Date.now()
 })
 
 const isFinished = computed(() => props.gameState.phase === 'finished')
 const isAutoplay = computed(() => Boolean(props.gameState.autoplay))
-const hint = computed(() => props.gameState.hint ?? null)
+const hint = computed(() => board.value.hint ?? null)
+const isFlightAnimating = computed(() => flight.value !== null)
 
 function toggleSound() {
   const next = !soundMuted.value
@@ -103,7 +135,236 @@ const suppressClick = ref(false)
 const dragOverTableau = ref<number | null>(null)
 const dragOverFoundation = ref<string | null>(null)
 
-const isDragging = computed(() => Boolean(dragState.value?.active))
+const isDragging = computed(() => Boolean(dragState.value?.active || flight.value))
+
+function stopFlightRaf() {
+  if (flightRaf) {
+    cancelAnimationFrame(flightRaf)
+    flightRaf = 0
+  }
+}
+
+function cancelFlight() {
+  stopFlightRaf()
+  flight.value = null
+  frozenBoard.value = null
+}
+
+function queryBoardEl(selector: string): HTMLElement | null {
+  return document.querySelector(`.solitaire-board ${selector}`)
+}
+
+function rectCenter(rect: DOMRect): { x: number; y: number } {
+  return { x: rect.left + rect.width * 0.4, y: rect.top + Math.min(28, rect.height * 0.25) }
+}
+
+function sourceRectForAction(
+  action: Record<string, unknown>,
+  state: SolitaireGameState,
+): DOMRect | null {
+  const type = String(action.type)
+  if (type === 'draw' || type === 'reset_stock') {
+    return queryBoardEl('[data-slot="stock"]')?.getBoundingClientRect() ?? null
+  }
+  const source = action.source
+  if (source === 'waste') {
+    return queryBoardEl('[data-slot="waste"]')?.getBoundingClientRect() ?? null
+  }
+  if (source === 'foundation') {
+    const idx = Number(action.source_index)
+    const suit = suitOrder[idx]
+    if (!suit) return null
+    return (
+      queryBoardEl(`[data-drop="foundation"][data-suit="${suit}"]`)?.getBoundingClientRect() ??
+      null
+    )
+  }
+  if (source === 'tableau') {
+    const col = Number(action.source_index)
+    let cardIndex = Number(action.card_index ?? 0)
+    if (type === 'move_to_foundation') {
+      cardIndex = Math.max(0, (state.tableau[col]?.length ?? 1) - 1)
+    }
+    return (
+      queryBoardEl(
+        `[data-slot="tableau-card"][data-col="${col}"][data-card="${cardIndex}"]`,
+      )?.getBoundingClientRect() ?? null
+    )
+  }
+  return null
+}
+
+function targetRectForAction(action: Record<string, unknown>): DOMRect | null {
+  const type = String(action.type)
+  if (type === 'draw' || type === 'reset_stock') {
+    return queryBoardEl('[data-slot="waste"]')?.getBoundingClientRect() ?? null
+  }
+  if (type === 'move_to_foundation') {
+    // Suit inferred later via cards; prefer data-hint from moving card suit on next board
+    return null
+  }
+  if (type === 'move_to_tableau') {
+    const col = Number(action.target_col)
+    const top = queryBoardEl(
+      `[data-slot="tableau-card"][data-col="${col}"].tableau-card--top`,
+    )
+    if (top) return top.getBoundingClientRect()
+    return queryBoardEl(`[data-drop="tableau"][data-col="${col}"]`)?.getBoundingClientRect() ?? null
+  }
+  return null
+}
+
+function cardsForAutoplayAction(
+  prev: SolitaireGameState,
+  next: SolitaireGameState,
+  action: Record<string, unknown>,
+): SolitaireCard[] {
+  const type = String(action.type)
+  if (type === 'draw') {
+    // Face-down ghost; rank/suit unused while face_up is false
+    return [{ rank: next.waste_top?.rank ?? 'A', suit: next.waste_top?.suit ?? 'spades', face_up: false }]
+  }
+  if (type === 'reset_stock') {
+    return prev.waste_top
+      ? [{ ...prev.waste_top, face_up: false }]
+      : [{ rank: 'A', suit: 'spades', face_up: false }]
+  }
+  if (action.source === 'waste' && prev.waste_top) {
+    return [{ ...prev.waste_top, face_up: true }]
+  }
+  if (action.source === 'foundation') {
+    const idx = Number(action.source_index)
+    const suit = suitOrder[idx]
+    const top = suit ? prev.foundations[suit]?.top : null
+    return top ? [{ ...top, face_up: true }] : []
+  }
+  if (action.source === 'tableau') {
+    const col = Number(action.source_index)
+    const pile = prev.tableau[col] ?? []
+    if (type === 'move_to_foundation') {
+      const top = pile[pile.length - 1]
+      return top ? [{ ...top, face_up: true }] : []
+    }
+    const cardIndex = Number(action.card_index ?? 0)
+    return pile.slice(cardIndex).filter((c) => c.face_up)
+  }
+  return []
+}
+
+function sourceRefFromAction(action: Record<string, unknown>): CardRef {
+  const source = String(action.source ?? 'waste') as CardRef['source']
+  if (source === 'waste') return { source: 'waste' }
+  if (source === 'foundation') {
+    return { source: 'foundation', sourceIndex: Number(action.source_index ?? 0) }
+  }
+  return {
+    source: 'tableau',
+    sourceIndex: Number(action.source_index ?? 0),
+    cardIndex: Number(action.card_index ?? 0),
+  }
+}
+
+function animateFlight(
+  from: DOMRect,
+  to: DOMRect,
+  cards: SolitaireCard[],
+  source: CardRef,
+  dimStock = false,
+): Promise<void> {
+  stopFlightRaf()
+  const offsetX = Math.min(Math.max(from.width * 0.35, 8), 40)
+  const offsetY = 18
+  const start = rectCenter(from)
+  const end = {
+    x: to.left + Math.min(to.width * 0.4, 40),
+    y: to.top + Math.min(28, to.height * 0.2),
+  }
+
+  flight.value = {
+    cards,
+    x: start.x,
+    y: start.y,
+    offsetX,
+    offsetY,
+    source,
+    dimStock,
+  }
+
+  return new Promise((resolve) => {
+    const t0 = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - t0) / AUTOPLAY_FLIGHT_MS)
+      const eased = 1 - (1 - t) ** 3
+      const cur = flight.value
+      if (cur) {
+        flight.value = {
+          ...cur,
+          x: start.x + (end.x - start.x) * eased,
+          y: start.y + (end.y - start.y) * eased,
+        }
+      }
+      if (t < 1) {
+        flightRaf = requestAnimationFrame(tick)
+      } else {
+        flightRaf = 0
+        flight.value = null
+        resolve()
+      }
+    }
+    flightRaf = requestAnimationFrame(tick)
+  })
+}
+
+async function runAutoplayFlight(
+  prev: SolitaireGameState,
+  next: SolitaireGameState,
+  action: Record<string, unknown>,
+) {
+  const type = String(action.type)
+  const cards = cardsForAutoplayAction(prev, next, action)
+  if (!cards.length) return
+
+  frozenBoard.value = cloneBoard(prev)
+  await nextTick()
+
+  let from = sourceRectForAction(action, prev)
+  let to = targetRectForAction(action)
+
+  if (type === 'move_to_foundation') {
+    const suit = cards[0]?.suit
+    if (suit) {
+      to =
+        queryBoardEl(`[data-drop="foundation"][data-suit="${suit}"]`)?.getBoundingClientRect() ??
+        to
+    }
+  }
+
+  const isStockMove = type === 'draw' || type === 'reset_stock'
+  const flightCards = isStockMove
+    ? cards.map((c) => ({
+        ...c,
+        // Show a face-down card leaving the stock for draw/recycle
+        face_up: false,
+      }))
+    : cards
+
+  if (!from || !to) {
+    frozenBoard.value = null
+    return
+  }
+
+  const reason = action.reason
+  if (typeof reason === 'string' && reason) {
+    showCoachMessage(reason, 2200)
+  }
+
+  playSfx(playPickup)
+  const source = isStockMove ? { source: 'waste' as const } : sourceRefFromAction(action)
+
+  await animateFlight(from, to, flightCards, source, isStockMove)
+  playSfx(() => playActionSound(type))
+  frozenBoard.value = null
+}
 
 const suitSymbols: Record<string, string> = {
   hearts: '♥',
@@ -582,10 +843,24 @@ function onFoundationPointerDown(event: PointerEvent, suit: string) {
 }
 
 function isDragSourceCard(colIndex: number, cardIndex: number): boolean {
-  const drag = dragState.value
-  if (!drag?.active || drag.source.source !== 'tableau') return false
-  if (drag.source.sourceIndex !== colIndex) return false
-  return cardIndex >= (drag.source.cardIndex ?? 0)
+  const active = dragState.value?.active ? dragState.value : flight.value
+  if (!active || active.source.source !== 'tableau') return false
+  if (active.source.sourceIndex !== colIndex) return false
+  return cardIndex >= (active.source.cardIndex ?? 0)
+}
+
+function isFlightSourceWaste(): boolean {
+  return Boolean(flight.value && flight.value.source.source === 'waste' && !flight.value.dimStock)
+}
+
+function isFlightSourceStock(): boolean {
+  return Boolean(flight.value?.dimStock)
+}
+
+function isFlightSourceFoundation(suit: string): boolean {
+  const f = flight.value
+  if (!f || f.source.source !== 'foundation') return false
+  return suitOrder[f.source.sourceIndex ?? -1] === suit
 }
 
 function autoComplete() {
@@ -642,7 +917,54 @@ watch(
     if (action.type === 'hint' && props.gameState.hint?.reason) {
       showCoachMessage(props.gameState.hint.reason, 6000)
     }
+    // Autoplay move sounds play at the end of the flight animation
+    if (action.via === 'autoplay' && ANIMATABLE_ACTIONS.has(String(action.type))) return
     playSfx(() => playActionSound(String(action.type)))
+  },
+)
+
+watch(
+  () =>
+    [
+      props.gameState.moves,
+      props.gameState.stock_count,
+      props.gameState.waste_count,
+      props.gameState.phase,
+      props.gameState.last_action?.type ?? '',
+      props.gameState.last_action?.via ?? '',
+      props.gameState.last_action?.target_col ?? '',
+      props.gameState.last_action?.source_index ?? '',
+      props.gameState.last_action?.card_index ?? '',
+    ] as const,
+  async () => {
+    const next = props.gameState
+    const action = next.last_action
+    if (!action?.type) {
+      prevBoard.value = cloneBoard(next)
+      return
+    }
+
+    const animKey = `${action.type}:${action.via}:${next.moves}:${next.stock_count}:${next.waste_count}:${action.source ?? ''}:${action.source_index ?? ''}:${action.card_index ?? ''}:${action.target_col ?? ''}`
+    if (animKey === lastAutoplayAnimKey.value) return
+
+    const prev = prevBoard.value
+    const shouldAnimate =
+      action.via === 'autoplay' && ANIMATABLE_ACTIONS.has(String(action.type)) && !isFlightAnimating.value
+
+    lastAutoplayAnimKey.value = animKey
+
+    if (shouldAnimate) {
+      try {
+        await runAutoplayFlight(prev, next, action)
+      } catch {
+        cancelFlight()
+      }
+      prevBoard.value = cloneBoard(next)
+      return
+    }
+
+    cancelFlight()
+    prevBoard.value = cloneBoard(next)
   },
 )
 
@@ -663,6 +985,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (coachMessageTimer) clearTimeout(coachMessageTimer)
+  cancelFlight()
   if (dragState.value) {
     releaseDragCapture(dragState.value)
   }
@@ -687,17 +1010,22 @@ function isInSelectedStack(colIndex: number, cardIndex: number): boolean {
 }
 
 const dragGhostStyle = computed(() => {
-  const drag = dragState.value
-  if (!drag?.active) return undefined
+  const drag = dragState.value?.active ? dragState.value : flight.value
+  if (!drag) return undefined
   return {
     left: `${drag.x - drag.offsetX}px`,
     top: `${drag.y - drag.offsetY}px`,
   }
 })
 
+const ghostCards = computed(() => {
+  if (dragState.value?.active) return dragState.value.cards
+  return flight.value?.cards ?? []
+})
+
 const foundationProgress = computed(() => {
   let total = 0
-  for (const foundation of Object.values(props.gameState.foundations)) {
+  for (const foundation of Object.values(board.value.foundations)) {
     total += foundation.count
   }
   return Math.round((total / 52) * 100)
@@ -707,16 +1035,16 @@ const progressBarWidth = computed(() => `${foundationProgress.value}%`)
 
 const cardsInFoundations = computed(() => {
   let total = 0
-  for (const foundation of Object.values(props.gameState.foundations)) {
+  for (const foundation of Object.values(board.value.foundations)) {
     total += foundation.count
   }
   return total
 })
 
 const wasteFan = computed(() => {
-  const fan = props.gameState.waste_fan
+  const fan = board.value.waste_fan
   if (fan?.length) return fan
-  return props.gameState.waste_top ? [props.gameState.waste_top] : []
+  return board.value.waste_top ? [board.value.waste_top] : []
 })
 
 const hasSelection = computed(() => selectedCard.value !== null)
@@ -753,7 +1081,7 @@ function isHintSourceTableau(colIndex: number, cardIndex: number): boolean {
   if (h.source_index !== colIndex) return false
   const from = h.card_index ?? 0
   if (h.type === 'move_to_foundation') {
-    return cardIndex === props.gameState.tableau[colIndex].length - 1
+    return cardIndex === board.value.tableau[colIndex].length - 1
   }
   return cardIndex >= from
 }
@@ -767,10 +1095,10 @@ function isHintTargetFoundation(suit: string): boolean {
   const h = hint.value
   if (!h || h.type !== 'move_to_foundation') return false
   if (h.source === 'waste') {
-    return props.gameState.waste_top?.suit === suit
+    return board.value.waste_top?.suit === suit
   }
   if (h.source === 'tableau' && h.source_index != null) {
-    const col = props.gameState.tableau[h.source_index]
+    const col = board.value.tableau[h.source_index]
     const top = col?.[col.length - 1]
     return top?.suit === suit
   }
@@ -779,12 +1107,19 @@ function isHintTargetFoundation(suit: string): boolean {
 </script>
 
 <template>
-  <div class="solitaire-board" :class="{ 'solitaire-board--dragging': isDragging }" @click.self="clearSelection">
+  <div
+    class="solitaire-board"
+    :class="{
+      'solitaire-board--dragging': isDragging,
+      'solitaire-board--autoplay': isAutoplay || isFlightAnimating,
+    }"
+    @click.self="clearSelection"
+  >
     <div class="status-bar">
       <div class="stats-row">
         <div class="stat-item">
           <span class="stat-icon">🎯</span>
-          <span class="stat-value">{{ gameState.moves }}</span>
+          <span class="stat-value">{{ board.moves }}</span>
           <span class="stat-label">moves</span>
         </div>
         <div class="stat-item stat-item--progress">
@@ -827,7 +1162,7 @@ function isHintTargetFoundation(suit: string): boolean {
           {{ isAutoplay ? 'Stop' : 'Watch' }}
         </button>
         <button
-          v-if="gameState.can_auto_complete && !isFinished"
+          v-if="board.can_auto_complete && !isFinished"
           type="button"
           class="btn-action btn-action--auto"
           @click="autoComplete"
@@ -849,20 +1184,22 @@ function isHintTargetFoundation(suit: string): boolean {
         <div class="stock-waste">
           <div
             class="card-slot stock"
+            data-slot="stock"
             :class="{ 
-              'stock--empty': gameState.stock_count === 0 && gameState.waste_count === 0,
-              'stock--can-recycle': gameState.stock_count === 0 && gameState.waste_count > 0,
+              'stock--empty': board.stock_count === 0 && board.waste_count === 0,
+              'stock--can-recycle': board.stock_count === 0 && board.waste_count > 0,
               'hint-source': isHintSourceStock(),
+              'drag-source': isFlightSourceStock(),
             }"
             @click="drawCard"
           >
-            <div v-if="gameState.stock_count > 0" class="playing-card playing-card--back">
+            <div v-if="board.stock_count > 0" class="playing-card playing-card--back">
               <div class="card-back">
                 <div class="card-back__pattern"></div>
               </div>
-              <span class="stock-badge">{{ gameState.stock_count }}</span>
+              <span class="stock-badge">{{ board.stock_count }}</span>
             </div>
-            <div v-else-if="gameState.waste_count > 0" class="recycle-slot">
+            <div v-else-if="board.waste_count > 0" class="recycle-slot">
               <span class="recycle-icon">↺</span>
               <span class="recycle-label">Reset</span>
             </div>
@@ -873,11 +1210,12 @@ function isHintTargetFoundation(suit: string): boolean {
 
           <div
             class="card-slot waste"
+            data-slot="waste"
             :class="{
               selected: isCardSelected('waste'),
               'waste--has-card': wasteFan.length > 0,
               'waste--fan': wasteFan.length > 1,
-              'drag-source': isDragging && dragState?.source.source === 'waste',
+              'drag-source': (isDragging && dragState?.source.source === 'waste') || isFlightSourceWaste(),
               'hint-source': isHintSourceWaste(),
             }"
             :style="wasteFan.length > 1 ? { '--fan-count': wasteFan.length } : undefined"
@@ -917,11 +1255,11 @@ function isHintTargetFoundation(suit: string): boolean {
             class="card-slot foundation"
             :class="{
               selected: isCardSelected('foundation', suitOrder.indexOf(suit)),
-              complete: gameState.foundations[suit].count === 13,
-              'foundation--has-card': gameState.foundations[suit].count > 0,
+              complete: board.foundations[suit].count === 13,
+              'foundation--has-card': board.foundations[suit].count > 0,
               'drop-target': isDropHighlightFoundation(suit) || isHintTargetFoundation(suit),
               'drag-over': dragOverFoundation === suit && isDropHighlightFoundation(suit),
-              'drag-source': isDragging && dragState?.source.source === 'foundation' && suitOrder[dragState.source.sourceIndex!] === suit,
+              'drag-source': (isDragging && dragState?.source.source === 'foundation' && suitOrder[dragState.source.sourceIndex!] === suit) || isFlightSourceFoundation(suit),
               'hint-source': isHintSourceFoundation(suit),
               'hint-target': isHintTargetFoundation(suit),
             }"
@@ -930,17 +1268,17 @@ function isHintTargetFoundation(suit: string): boolean {
             @click="selectFoundation(suit)"
             @pointerdown="onFoundationPointerDown($event, suit)"
           >
-            <div v-if="gameState.foundations[suit].top" class="playing-card" :class="{ red: isRed(suit) }">
+            <div v-if="board.foundations[suit].top" class="playing-card" :class="{ red: isRed(suit) }">
               <span class="corner corner--tl">
-                <span class="corner__rank">{{ gameState.foundations[suit].top?.rank }}</span>
+                <span class="corner__rank">{{ board.foundations[suit].top?.rank }}</span>
                 <span class="corner__suit">{{ getSuitSymbol(suit) }}</span>
               </span>
               <span class="suit suit--center">{{ getSuitSymbol(suit) }}</span>
               <span class="corner corner--br">
-                <span class="corner__rank">{{ gameState.foundations[suit].top?.rank }}</span>
+                <span class="corner__rank">{{ board.foundations[suit].top?.rank }}</span>
                 <span class="corner__suit">{{ getSuitSymbol(suit) }}</span>
               </span>
-              <span class="foundation-badge">{{ gameState.foundations[suit].count }}</span>
+              <span class="foundation-badge">{{ board.foundations[suit].count }}</span>
             </div>
             <div v-else class="empty-slot foundation-empty">
               <span class="foundation-suit" :class="{ red: isRed(suit) }">{{ getSuitSymbol(suit) }}</span>
@@ -952,7 +1290,7 @@ function isHintTargetFoundation(suit: string): boolean {
 
       <div class="tableau">
         <div
-          v-for="(col, colIndex) in gameState.tableau"
+          v-for="(col, colIndex) in board.tableau"
           :key="colIndex"
           class="tableau-column"
           :class="{
@@ -989,6 +1327,9 @@ function isHintTargetFoundation(suit: string): boolean {
               'drag-source': isDragSourceCard(colIndex, cardIndex),
               'hint-source': isHintSourceTableau(colIndex, cardIndex),
             }"
+            :data-slot="'tableau-card'"
+            :data-col="colIndex"
+            :data-card="cardIndex"
             :style="{
               '--card-index': cardIndex,
               zIndex: cardIndex === col.length - 1 ? cardIndex + 20 : cardIndex + 1,
@@ -1035,7 +1376,7 @@ function isHintTargetFoundation(suit: string): boolean {
             <h2 class="winner-title">You Won!</h2>
             <div class="winner-stats">
               <div class="winner-stat">
-                <span class="winner-stat-value">{{ gameState.moves }}</span>
+                <span class="winner-stat-value">{{ board.moves }}</span>
                 <span class="winner-stat-label">moves</span>
               </div>
             </div>
@@ -1063,28 +1404,39 @@ function isHintTargetFoundation(suit: string): boolean {
     </aside>
 
     <div
-      v-if="dragState?.active"
+      v-if="ghostCards.length && dragGhostStyle"
       class="solitaire-drag-ghost"
+      :class="{ 'solitaire-drag-ghost--flight': isFlightAnimating }"
       :style="dragGhostStyle"
       aria-hidden="true"
     >
-      <div
-        v-for="(card, index) in dragState.cards"
-        :key="`ghost-${index}-${card.rank}-${card.suit}`"
-        class="playing-card drag-ghost-card"
-        :class="{ red: isRed(card.suit) }"
-        :style="{ '--ghost-index': index }"
-      >
-        <span class="corner corner--tl">
-          <span class="corner__rank">{{ card.rank }}</span>
-          <span class="corner__suit">{{ getSuitSymbol(card.suit) }}</span>
-        </span>
-        <span class="suit suit--center">{{ getSuitSymbol(card.suit) }}</span>
-        <span class="corner corner--br">
-          <span class="corner__rank">{{ card.rank }}</span>
-          <span class="corner__suit">{{ getSuitSymbol(card.suit) }}</span>
-        </span>
-      </div>
+      <template v-for="(card, index) in ghostCards" :key="`ghost-${index}-${card.rank}-${card.suit}`">
+        <div
+          v-if="card.face_up"
+          class="playing-card drag-ghost-card"
+          :class="{ red: isRed(card.suit) }"
+          :style="{ '--ghost-index': index }"
+        >
+          <span class="corner corner--tl">
+            <span class="corner__rank">{{ card.rank }}</span>
+            <span class="corner__suit">{{ getSuitSymbol(card.suit) }}</span>
+          </span>
+          <span class="suit suit--center">{{ getSuitSymbol(card.suit) }}</span>
+          <span class="corner corner--br">
+            <span class="corner__rank">{{ card.rank }}</span>
+            <span class="corner__suit">{{ getSuitSymbol(card.suit) }}</span>
+          </span>
+        </div>
+        <div
+          v-else
+          class="playing-card playing-card--back drag-ghost-card"
+          :style="{ '--ghost-index': index }"
+        >
+          <div class="card-back">
+            <div class="card-back__pattern"></div>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -1114,6 +1466,14 @@ function isHintTargetFoundation(suit: string): boolean {
   cursor: grabbing;
   user-select: none;
   touch-action: none;
+}
+
+.solitaire-board--autoplay .game-area {
+  pointer-events: none;
+}
+
+.solitaire-board--autoplay .status-bar {
+  pointer-events: auto;
 }
 
 .status-bar {
@@ -1709,6 +2069,12 @@ function isHintTargetFoundation(suit: string): boolean {
   height: var(--card-height);
   pointer-events: none;
   filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.45));
+}
+
+.solitaire-drag-ghost--flight {
+  z-index: 1200;
+  transform: scale(1.04);
+  filter: drop-shadow(0 16px 28px rgba(0, 0, 0, 0.55));
 }
 
 .drag-ghost-card {

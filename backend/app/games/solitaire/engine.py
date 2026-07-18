@@ -181,6 +181,7 @@ class SolitaireEngine(GamePlugin):
                     "type": "move_to_tableau",
                     "source": source,
                     "source_index": source_index,
+                    "card_index": card_index,
                     "target_col": target_col,
                 }
                 events.append({"type": "card_to_tableau"})
@@ -204,7 +205,8 @@ class SolitaireEngine(GamePlugin):
         return state, events
 
     def tick_interval_ms(self) -> int | None:
-        return 750
+        # Slow enough for Watch-mode flight animations to read clearly
+        return 2000
 
     def tick(self, state: dict) -> tuple[dict, list[dict]]:
         state.setdefault("autoplay", False)
@@ -223,8 +225,14 @@ class SolitaireEngine(GamePlugin):
 
         players = state.get("players") or []
         player = players[0] if players else {"id": "player", "name": "Player"}
-        # Apply as a normal move (clears hint, updates last_action)
-        return self.apply_action(state, chosen, player)
+        state, events = self.apply_action(state, chosen, player)
+        if state.get("last_action"):
+            state["last_action"] = {
+                **state["last_action"],
+                "reason": reason,
+                "via": "autoplay",
+            }
+        return state, events
 
     def _draw_from_stock(self, state: dict) -> dict:
         draw_count = state["settings"]["draw_count"]
