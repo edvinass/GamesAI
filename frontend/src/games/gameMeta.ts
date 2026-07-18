@@ -72,6 +72,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '🔴',
     lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
   },
+  solitaire: {
+    name: 'Solitaire',
+    description: 'Classic Klondike — stack cards and clear the tableau.',
+    emoji: '🃏',
+    lobbyHint: 'Solo card game — just you. Start when ready.',
+  },
 }
 
 export interface GameListItem {

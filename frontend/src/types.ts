@@ -659,7 +659,35 @@ export interface Connect4GameState {
   viewer_color: 'red' | 'yellow' | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState
+export interface SolitaireCard {
+  rank: string | null
+  suit: string | null
+  face_up: boolean
+}
+
+export interface SolitaireFoundation {
+  top: { rank: string; suit: string } | null
+  count: number
+}
+
+export interface SolitaireGameState {
+  phase: 'playing' | 'finished'
+  tableau: SolitaireCard[][]
+  foundations: Record<string, SolitaireFoundation>
+  stock_count: number
+  waste_top: SolitaireCard | null
+  waste_count: number
+  moves: number
+  players: Player[]
+  settings: Record<string, unknown>
+  winner: string | null
+  win_reason: string | null
+  last_action: Record<string, unknown> | null
+  viewer_id: string | null
+  can_auto_complete: boolean
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | SolitaireGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -703,6 +731,10 @@ export function isRoboRallyState(state: GameState): state is RoboRallyGameState 
 
 export function isConnect4State(state: GameState): state is Connect4GameState {
   return 'red_player_id' in state && 'yellow_player_id' in state && 'cols' in state
+}
+
+export function isSolitaireState(state: GameState): state is SolitaireGameState {
+  return 'tableau' in state && 'foundations' in state && 'stock_count' in state
 }
 
 export interface WsMessage {

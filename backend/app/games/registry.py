@@ -7,6 +7,7 @@ from app.games.gravity_master.engine import GravityMasterEngine
 from app.games.roborally.engine import RoboRallyEngine
 from app.games.snake.engine import SnakeEngine
 from app.games.poker.engine import PokerEngine
+from app.games.solitaire.engine import SolitaireEngine
 from app.games.spyfall.engine import SpyfallEngine
 from app.games.tetris.engine import TetrisEngine
 
@@ -24,6 +25,7 @@ _REGISTRY: dict[str, GamePlugin] = {
     "go": GoEngine(),
     "roborally": RoboRallyEngine(),
     "connect4": Connect4Engine(),
+    "solitaire": SolitaireEngine(),
 }
 
 
@@ -46,6 +48,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "go": {"name": "Go", "description": "9×9 Go — surround territory and beat the AI"},
     "roborally": {"name": "RoboRally", "description": "Program your robot through checkpoints on a factory floor"},
     "connect4": {"name": "Connect Four", "description": "Drop discs to connect four in a row — play a friend or AI"},
+    "solitaire": {"name": "Solitaire", "description": "Classic Klondike — stack cards and clear the tableau"},
 }
 
 
