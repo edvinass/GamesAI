@@ -670,6 +670,15 @@ export interface SolitaireFoundation {
   count: number
 }
 
+export interface SolitaireHint {
+  type: string
+  source?: string
+  source_index?: number | null
+  card_index?: number
+  target_col?: number
+  reason?: string
+}
+
 export interface SolitaireGameState {
   phase: 'playing' | 'finished'
   tableau: SolitaireCard[][]
@@ -686,6 +695,8 @@ export interface SolitaireGameState {
   last_action: Record<string, unknown> | null
   viewer_id: string | null
   can_auto_complete: boolean
+  autoplay?: boolean
+  hint?: SolitaireHint | null
 }
 
 export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | SolitaireGameState

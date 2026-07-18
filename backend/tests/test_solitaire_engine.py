@@ -244,3 +244,122 @@ def test_noop_draw_and_reset_do_not_emit():
 
     state, events = eng.apply_action(state, {"type": "reset_stock"}, PLAYERS[0])
     assert events == []
+
+
+def test_hint_suggests_foundation_ace():
+    eng, state = _engine_state(
+        waste=[{"rank": "A", "suit": "hearts", "face_up": True}],
+    )
+
+    state, events = eng.apply_action(state, {"type": "hint"}, PLAYERS[0])
+
+    assert any(e["type"] == "hint_shown" for e in events)
+    assert state["hint"]["type"] == "move_to_foundation"
+    assert state["hint"]["source"] == "waste"
+    assert "Ace" in state["hint"]["reason"] or "foundation" in state["hint"]["reason"].lower()
+    assert state["moves"] == 0
+    assert len(state["waste"]) == 1
+
+
+def test_hint_cleared_on_manual_move():
+    eng, state = _engine_state(
+        waste=[{"rank": "A", "suit": "clubs", "face_up": True}],
+    )
+    state, _ = eng.apply_action(state, {"type": "hint"}, PLAYERS[0])
+    assert state["hint"] is not None
+
+    state, _ = eng.apply_action(
+        state,
+        {"type": "move_to_foundation", "source": "waste"},
+        PLAYERS[0],
+    )
+    assert state["hint"] is None
+    assert state["moves"] == 1
+
+
+def test_autoplay_tick_applies_move():
+    eng, state = _engine_state(
+        waste=[{"rank": "A", "suit": "spades", "face_up": True}],
+        autoplay=True,
+    )
+
+    state, events = eng.tick(state)
+
+    assert state["moves"] == 1
+    assert len(state["foundations"]["spades"]) == 1
+    assert any(e["type"] == "card_to_foundation" for e in events)
+    assert state["autoplay"] is True
+
+
+def test_autoplay_tick_noop_when_disabled():
+    eng, state = _engine_state(
+        waste=[{"rank": "A", "suit": "spades", "face_up": True}],
+        autoplay=False,
+    )
+    state, events = eng.tick(state)
+    assert events == []
+    assert state["moves"] == 0
+    assert len(state["waste"]) == 1
+
+
+def test_autoplay_stuck_disables_watch():
+    eng, state = _engine_state(
+        stock=[],
+        waste=[],
+        tableau=[
+            [{"rank": "5", "suit": "hearts", "face_up": True}],
+            [{"rank": "9", "suit": "clubs", "face_up": True}],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ],
+        autoplay=True,
+    )
+
+    state, events = eng.tick(state)
+
+    assert state["autoplay"] is False
+    assert any(e["type"] == "autoplay_stuck" for e in events)
+    assert state["hint"]["type"] == "none"
+
+
+def test_set_autoplay_and_public_fields():
+    eng, state = _engine_state()
+    state, events = eng.apply_action(
+        state, {"type": "set_autoplay", "enabled": True}, PLAYERS[0]
+    )
+    assert state["autoplay"] is True
+    assert state["hint"] is None
+    assert any(e["type"] == "autoplay_changed" for e in events)
+
+    public = eng.get_public_state(state, PLAYERS[0])
+    assert public["autoplay"] is True
+    assert public["hint"] is None
+
+
+def test_choose_action_exposes_face_down():
+    from app.games.solitaire.ai import choose_action
+
+    eng, state = _engine_state(
+        tableau=[
+            [{"rank": "8", "suit": "spades", "face_up": True}],
+            [
+                {"rank": "3", "suit": "hearts", "face_up": False},
+                {"rank": "7", "suit": "diamonds", "face_up": True},
+            ],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ]
+    )
+
+    action, reason = choose_action(state)
+    assert action is not None
+    assert action["type"] == "move_to_tableau"
+    assert action["source_index"] == 1
+    assert action["target_col"] == 0
+    assert "Expose" in reason

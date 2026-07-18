@@ -26,11 +26,16 @@ export const solitaireRules: GameRules = {
       heading: 'Winning',
       body: 'Move all 52 cards to the four foundation piles to win. The game tracks your move count — try to win in as few moves as possible!',
     },
+    {
+      heading: 'Learn mode',
+      body: 'Use Hint to highlight a good next move with a short reason. Use Watch to let the AI play step-by-step so you can learn by watching. You can stop Watch anytime and take over.',
+    },
   ],
   tips: [
     'Always move Aces and Twos to foundations immediately.',
     'Try to expose face-down cards in the tableau as early as possible.',
     'Keep foundation piles roughly even to avoid blocking useful cards.',
     'Empty columns are valuable — save them for Kings that help expose hidden cards.',
+    'Stuck? Press Hint for a suggestion, or Watch to see how the AI would play.',
   ],
 }

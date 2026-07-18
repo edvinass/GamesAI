@@ -33,12 +33,16 @@ const lastMoveTime = ref(Date.now())
 const soundMuted = ref(isSoundMuted())
 const suppressSounds = ref(true)
 const lastSoundActionKey = ref('')
+const coachMessage = ref('')
+let coachMessageTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(() => props.gameState.moves, () => {
   lastMoveTime.value = Date.now()
 })
 
 const isFinished = computed(() => props.gameState.phase === 'finished')
+const isAutoplay = computed(() => Boolean(props.gameState.autoplay))
+const hint = computed(() => props.gameState.hint ?? null)
 
 function toggleSound() {
   const next = !soundMuted.value
@@ -54,6 +58,27 @@ function playSfx(fn: () => void) {
 
 function ensureAudio() {
   void unlockAudio()
+}
+
+function showCoachMessage(text: string, ms = 4000) {
+  coachMessage.value = text
+  if (coachMessageTimer) clearTimeout(coachMessageTimer)
+  coachMessageTimer = setTimeout(() => {
+    coachMessage.value = ''
+    coachMessageTimer = null
+  }, ms)
+}
+
+function requestHint() {
+  if (isFinished.value) return
+  ensureAudio()
+  emit('action', { type: 'hint' })
+}
+
+function toggleAutoplay() {
+  if (isFinished.value) return
+  ensureAudio()
+  emit('action', { type: 'set_autoplay', enabled: !isAutoplay.value })
 }
 
 const DRAG_THRESHOLD = 8
@@ -609,6 +634,14 @@ watch(
     if (key === lastSoundActionKey.value) return
     lastSoundActionKey.value = key
     if (suppressSounds.value) return
+    if (action.type === 'autoplay_stuck') {
+      const reason = props.gameState.hint?.reason || 'No useful moves left'
+      showCoachMessage(reason)
+      return
+    }
+    if (action.type === 'hint' && props.gameState.hint?.reason) {
+      showCoachMessage(props.gameState.hint.reason, 6000)
+    }
     playSfx(() => playActionSound(String(action.type)))
   },
 )
@@ -629,6 +662,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (coachMessageTimer) clearTimeout(coachMessageTimer)
   if (dragState.value) {
     releaseDragCapture(dragState.value)
   }
@@ -686,6 +720,62 @@ const wasteFan = computed(() => {
 })
 
 const hasSelection = computed(() => selectedCard.value !== null)
+
+const hintReason = computed(() => {
+  if (coachMessage.value) return coachMessage.value
+  const h = hint.value
+  if (h?.reason && h.type !== 'none') return h.reason
+  return ''
+})
+
+function isHintSourceWaste(): boolean {
+  const h = hint.value
+  if (!h) return false
+  return h.type === 'move_to_foundation' || h.type === 'move_to_tableau'
+    ? h.source === 'waste'
+    : false
+}
+
+function isHintSourceStock(): boolean {
+  const h = hint.value
+  return h?.type === 'draw' || h?.type === 'reset_stock'
+}
+
+function isHintSourceFoundation(suit: string): boolean {
+  const h = hint.value
+  if (!h || h.source !== 'foundation' || h.type !== 'move_to_tableau') return false
+  return suitOrder[h.source_index ?? -1] === suit
+}
+
+function isHintSourceTableau(colIndex: number, cardIndex: number): boolean {
+  const h = hint.value
+  if (!h || h.source !== 'tableau') return false
+  if (h.source_index !== colIndex) return false
+  const from = h.card_index ?? 0
+  if (h.type === 'move_to_foundation') {
+    return cardIndex === props.gameState.tableau[colIndex].length - 1
+  }
+  return cardIndex >= from
+}
+
+function isHintTargetTableau(colIndex: number): boolean {
+  const h = hint.value
+  return h?.type === 'move_to_tableau' && h.target_col === colIndex
+}
+
+function isHintTargetFoundation(suit: string): boolean {
+  const h = hint.value
+  if (!h || h.type !== 'move_to_foundation') return false
+  if (h.source === 'waste') {
+    return props.gameState.waste_top?.suit === suit
+  }
+  if (h.source === 'tableau' && h.source_index != null) {
+    const col = props.gameState.tableau[h.source_index]
+    const top = col?.[col.length - 1]
+    return top?.suit === suit
+  }
+  return false
+}
 </script>
 
 <template>
@@ -718,6 +808,25 @@ const hasSelection = computed(() => selectedCard.value !== null)
           {{ soundMuted ? '🔇' : '🔊' }}
         </button>
         <button
+          v-if="!isFinished"
+          type="button"
+          class="btn-action btn-action--hint"
+          @click="requestHint"
+        >
+          <span class="btn-icon">💡</span>
+          Hint
+        </button>
+        <button
+          v-if="!isFinished"
+          type="button"
+          class="btn-action btn-action--watch"
+          :class="{ 'btn-action--watch-on': isAutoplay }"
+          @click="toggleAutoplay"
+        >
+          <span class="btn-icon">{{ isAutoplay ? '⏸' : '▶' }}</span>
+          {{ isAutoplay ? 'Stop' : 'Watch' }}
+        </button>
+        <button
           v-if="gameState.can_auto_complete && !isFinished"
           type="button"
           class="btn-action btn-action--auto"
@@ -733,6 +842,8 @@ const hasSelection = computed(() => selectedCard.value !== null)
       </div>
     </div>
 
+    <p v-if="hintReason" class="coach-banner" role="status">{{ hintReason }}</p>
+
     <div class="game-area">
       <div class="top-row">
         <div class="stock-waste">
@@ -740,7 +851,8 @@ const hasSelection = computed(() => selectedCard.value !== null)
             class="card-slot stock"
             :class="{ 
               'stock--empty': gameState.stock_count === 0 && gameState.waste_count === 0,
-              'stock--can-recycle': gameState.stock_count === 0 && gameState.waste_count > 0
+              'stock--can-recycle': gameState.stock_count === 0 && gameState.waste_count > 0,
+              'hint-source': isHintSourceStock(),
             }"
             @click="drawCard"
           >
@@ -766,6 +878,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
               'waste--has-card': wasteFan.length > 0,
               'waste--fan': wasteFan.length > 1,
               'drag-source': isDragging && dragState?.source.source === 'waste',
+              'hint-source': isHintSourceWaste(),
             }"
             :style="wasteFan.length > 1 ? { '--fan-count': wasteFan.length } : undefined"
             @click="selectWaste"
@@ -806,9 +919,11 @@ const hasSelection = computed(() => selectedCard.value !== null)
               selected: isCardSelected('foundation', suitOrder.indexOf(suit)),
               complete: gameState.foundations[suit].count === 13,
               'foundation--has-card': gameState.foundations[suit].count > 0,
-              'drop-target': isDropHighlightFoundation(suit),
+              'drop-target': isDropHighlightFoundation(suit) || isHintTargetFoundation(suit),
               'drag-over': dragOverFoundation === suit && isDropHighlightFoundation(suit),
               'drag-source': isDragging && dragState?.source.source === 'foundation' && suitOrder[dragState.source.sourceIndex!] === suit,
+              'hint-source': isHintSourceFoundation(suit),
+              'hint-target': isHintTargetFoundation(suit),
             }"
             :data-drop="'foundation'"
             :data-suit="suit"
@@ -841,9 +956,10 @@ const hasSelection = computed(() => selectedCard.value !== null)
           :key="colIndex"
           class="tableau-column"
           :class="{
-            'tableau-column--drop-ok': isDropHighlightTableau(colIndex),
+            'tableau-column--drop-ok': isDropHighlightTableau(colIndex) || isHintTargetTableau(colIndex),
             'tableau-column--has-selection': hasSelection || isDragging,
             'tableau-column--drag-over': dragOverTableau === colIndex && isDropHighlightTableau(colIndex),
+            'tableau-column--hint-target': isHintTargetTableau(colIndex),
           }"
           :data-drop="'tableau'"
           :data-col="colIndex"
@@ -852,7 +968,10 @@ const hasSelection = computed(() => selectedCard.value !== null)
           <div
             v-if="col.length === 0"
             class="card-slot empty-column"
-            :class="{ 'drop-target': isDropHighlightTableau(colIndex) }"
+            :class="{
+              'drop-target': isDropHighlightTableau(colIndex) || isHintTargetTableau(colIndex),
+              'hint-target': isHintTargetTableau(colIndex),
+            }"
             @click="selectEmptyTableau(colIndex)"
           >
             <div class="empty-slot empty-slot--tableau">
@@ -868,6 +987,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
               'face-down': !card.face_up,
               'tableau-card--top': cardIndex === col.length - 1,
               'drag-source': isDragSourceCard(colIndex, cardIndex),
+              'hint-source': isHintSourceTableau(colIndex, cardIndex),
             }"
             :style="{
               '--card-index': cardIndex,
@@ -933,12 +1053,12 @@ const hasSelection = computed(() => selectedCard.value !== null)
         <span class="hint-desc">Move cards or piles onto a valid target</span>
       </div>
       <div class="hint-item">
-        <span class="hint-key">Click</span>
-        <span class="hint-desc">Select, then click a target</span>
+        <span class="hint-key">Hint</span>
+        <span class="hint-desc">Highlight a good next move</span>
       </div>
       <div class="hint-item">
-        <span class="hint-key">Double-click</span>
-        <span class="hint-desc">Send a top card to its foundation</span>
+        <span class="hint-key">Watch</span>
+        <span class="hint-desc">Let the AI play so you can learn</span>
       </div>
     </aside>
 
@@ -1131,6 +1251,35 @@ const hasSelection = computed(() => selectedCard.value !== null)
   box-shadow: 0 4px 12px rgba(61, 214, 140, 0.2);
 }
 
+.btn-action--hint {
+  background: rgba(255, 215, 0, 0.1);
+  border-color: rgba(255, 215, 0, 0.35);
+  color: #ffe08a;
+}
+
+.btn-action--hint:hover {
+  background: rgba(255, 215, 0, 0.18);
+  transform: translateY(-1px);
+}
+
+.btn-action--watch {
+  background: rgba(91, 156, 255, 0.1);
+  border-color: rgba(91, 156, 255, 0.35);
+  color: #9ec1ff;
+}
+
+.btn-action--watch:hover {
+  background: rgba(91, 156, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.btn-action--watch-on {
+  background: rgba(91, 156, 255, 0.28);
+  border-color: rgba(91, 156, 255, 0.55);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(91, 156, 255, 0.25);
+}
+
 .btn-action--new {
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.12);
@@ -1141,6 +1290,18 @@ const hasSelection = computed(() => selectedCard.value !== null)
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
   transform: translateY(-1px);
+}
+
+.coach-banner {
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 215, 0, 0.28);
+  background: rgba(255, 215, 0, 0.08);
+  color: #ffe08a;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
 }
 
 .game-area {
@@ -1513,6 +1674,32 @@ const hasSelection = computed(() => selectedCard.value !== null)
 .waste.drag-source,
 .foundation.drag-source {
   opacity: 0.4;
+}
+
+.hint-source .playing-card,
+.tableau-card.hint-source .playing-card,
+.stock.hint-source .playing-card,
+.stock.hint-source .recycle-slot,
+.waste.hint-source .playing-card,
+.foundation.hint-source .playing-card {
+  box-shadow:
+    0 0 0 3px #5b9cff,
+    0 6px 20px rgba(91, 156, 255, 0.35);
+}
+
+.stock.hint-source .recycle-slot,
+.stock.hint-source .empty-slot,
+.foundation.hint-target .empty-slot,
+.empty-column.hint-target .empty-slot {
+  border-color: rgba(91, 156, 255, 0.7);
+  background: rgba(91, 156, 255, 0.14);
+}
+
+.foundation.hint-target .playing-card,
+.tableau-column--hint-target .tableau-card--top .playing-card {
+  box-shadow:
+    0 0 0 3px rgba(91, 156, 255, 0.85),
+    0 6px 18px rgba(91, 156, 255, 0.3);
 }
 
 .solitaire-drag-ghost {

@@ -245,7 +245,11 @@ async def process_message(room_id: uuid.UUID, player_id: str, data: dict) -> Non
                 await broadcast_room_state(room, events)
                 if room.game_type == "poker":
                     schedule_poker_reactions(room_id, room, state, events, player_id, data)
-                if room.game_type not in ("snake", "duel", "tetris"):
+                # Tick games (incl. solitaire Watch): keep / restart the loop while playing.
+                # Turn-based AI seats still use process_ai_turns.
+                if room.status.value == "playing" and get_game(room.game_type).tick_interval_ms():
+                    schedule_game_updates(room_id, room.game_type)
+                elif room.game_type not in ("snake", "duel", "tetris"):
                     schedule_ai_turn(room_id)
 
         except ValueError as e:

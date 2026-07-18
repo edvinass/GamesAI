@@ -78,6 +78,8 @@ class SolitaireEngine(GamePlugin):
             "winner": None,
             "win_reason": None,
             "last_action": None,
+            "autoplay": False,
+            "hint": None,
         }
 
     def apply_action(
@@ -85,6 +87,8 @@ class SolitaireEngine(GamePlugin):
     ) -> tuple[dict, list[dict]]:
         action_type = action.get("type")
         events: list[dict] = []
+        state.setdefault("autoplay", False)
+        state.setdefault("hint", None)
 
         # Allow restarting after a win; all other actions require an active game.
         if action_type == "new_game":
@@ -96,16 +100,39 @@ class SolitaireEngine(GamePlugin):
         if state["phase"] != "playing":
             return state, events
 
+        if action_type == "hint":
+            from app.games.solitaire.ai import choose_action
+
+            chosen, reason = choose_action(state)
+            if chosen:
+                state["hint"] = {**chosen, "reason": reason}
+            else:
+                state["hint"] = {"type": "none", "reason": reason}
+            state["last_action"] = {"type": "hint"}
+            events.append({"type": "hint_shown"})
+            return state, events
+
+        if action_type == "set_autoplay":
+            enabled = bool(action.get("enabled"))
+            state["autoplay"] = enabled
+            if enabled:
+                state["hint"] = None
+            state["last_action"] = {"type": "set_autoplay", "enabled": enabled}
+            events.append({"type": "autoplay_changed", "enabled": enabled})
+            return state, events
+
         if action_type == "draw":
             before = len(state["stock"])
             state = self._draw_from_stock(state)
             if len(state["stock"]) != before:
+                state["hint"] = None
                 state["last_action"] = {"type": "draw"}
                 events.append({"type": "cards_drawn"})
 
         elif action_type == "reset_stock":
             if not state["stock"] and state["waste"]:
                 state = self._reset_stock(state)
+                state["hint"] = None
                 state["last_action"] = {"type": "reset_stock"}
                 events.append({"type": "stock_reset"})
 
@@ -119,6 +146,7 @@ class SolitaireEngine(GamePlugin):
                     return state, events
             state, moved = self._move_to_foundation(state, source, source_index)
             if moved:
+                state["hint"] = None
                 state["moves"] += 1
                 state["last_action"] = {
                     "type": "move_to_foundation",
@@ -147,6 +175,7 @@ class SolitaireEngine(GamePlugin):
                 state, source, source_index, card_index, target_col
             )
             if moved:
+                state["hint"] = None
                 state["moves"] += 1
                 state["last_action"] = {
                     "type": "move_to_tableau",
@@ -159,16 +188,43 @@ class SolitaireEngine(GamePlugin):
         elif action_type == "auto_complete":
             state, completed = self._auto_complete(state)
             if completed:
+                state["hint"] = None
+                state["autoplay"] = False
                 state["last_action"] = {"type": "auto_complete"}
                 events.append({"type": "auto_completed"})
 
         if self._check_win(state):
             state["phase"] = "finished"
+            state["autoplay"] = False
+            state["hint"] = None
             state["winner"] = player["id"]
             state["win_reason"] = "all_cards_to_foundation"
             events.append({"type": "game_won", "player_id": player["id"]})
 
         return state, events
+
+    def tick_interval_ms(self) -> int | None:
+        return 750
+
+    def tick(self, state: dict) -> tuple[dict, list[dict]]:
+        state.setdefault("autoplay", False)
+        state.setdefault("hint", None)
+        if state.get("phase") != "playing" or not state.get("autoplay"):
+            return state, []
+
+        from app.games.solitaire.ai import choose_action
+
+        chosen, reason = choose_action(state)
+        if not chosen:
+            state["autoplay"] = False
+            state["hint"] = {"type": "none", "reason": reason}
+            state["last_action"] = {"type": "autoplay_stuck"}
+            return state, [{"type": "autoplay_stuck", "reason": reason}]
+
+        players = state.get("players") or []
+        player = players[0] if players else {"id": "player", "name": "Player"}
+        # Apply as a normal move (clears hint, updates last_action)
+        return self.apply_action(state, chosen, player)
 
     def _draw_from_stock(self, state: dict) -> dict:
         draw_count = state["settings"]["draw_count"]
@@ -423,6 +479,8 @@ class SolitaireEngine(GamePlugin):
             "last_action": state.get("last_action"),
             "viewer_id": viewer_player["id"] if viewer_player else None,
             "can_auto_complete": self._can_auto_complete(state),
+            "autoplay": bool(state.get("autoplay")),
+            "hint": state.get("hint"),
         }
 
     def check_winner(self, state: dict) -> str | None:
