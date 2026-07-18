@@ -14,13 +14,14 @@ import PokerBoard from '@/games/poker/PokerBoard.vue'
 import ChessBoard from '@/games/chess/ChessBoard.vue'
 import GoBoard from '@/games/go/GoBoard.vue'
 import RoboRallyBoard from '@/games/roborally/RoboRallyBoard.vue'
+import SolitaireBoard from '@/games/solitaire/SolitaireBoard.vue'
 import { useGoClientSolo } from '@/composables/useGoClientSolo'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
 import { pokerReactionSet } from '@/games/poker/reactions'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState, GoGameState, RoboRallyGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState, isRoboRallyState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState, GoGameState, RoboRallyGameState, SolitaireGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState, isRoboRallyState, isSolitaireState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,6 +51,7 @@ const gameTitle = computed(() => {
   if (type === 'chess') return 'Chess'
   if (type === 'go') return 'Go'
   if (type === 'roborally') return 'RoboRally'
+  if (type === 'solitaire') return 'Solitaire'
   return type ?? 'Game'
 })
 
@@ -95,6 +97,10 @@ const roborallyState = computed(() =>
   gameState.value && isRoboRallyState(gameState.value) ? gameState.value as RoboRallyGameState : null,
 )
 
+const solitaireState = computed(() =>
+  gameState.value && isSolitaireState(gameState.value) ? gameState.value as SolitaireGameState : null,
+)
+
 const playerId = computed(() => playerStore.playerId)
 
 const isPoker = computed(() => room.value?.game_type === 'poker')
@@ -102,7 +108,7 @@ const isPoker = computed(() => room.value?.game_type === 'poker')
 const isRoboRally = computed(() => room.value?.game_type === 'roborally')
 
 const isFullscreenGame = computed(() =>
-  Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value || roborallyState.value),
+  Boolean(snakeState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value || roborallyState.value || solitaireState.value),
 )
 
 const loadingMessage = computed(() => {
@@ -293,6 +299,14 @@ function backToLobby() {
     <RoboRallyBoard
       v-else-if="roborallyState && room"
       :game-state="roborallyState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <SolitaireBoard
+      v-else-if="solitaireState && room"
+      :game-state="solitaireState"
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"
