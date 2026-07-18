@@ -1864,20 +1864,24 @@ function isHintTargetFoundation(suit: string): boolean {
 }
 
 .waste--fan {
-  width: calc(var(--card-width) + (var(--fan-count, 1) - 1) * var(--card-offset));
+  /* Reserve horizontal room for the draw-3 fan (peek per buried card) */
+  --waste-fan-peek: clamp(22px, calc(var(--card-width) * 0.32), 36px);
+  width: calc(var(--card-width) + (var(--fan-count, 1) - 1) * var(--waste-fan-peek));
   z-index: 3;
 }
 
-.waste-fan-card {
+/* Must beat `.playing-card { position: relative }` or cards stack + shift = diagonal */
+.playing-card.waste-fan-card {
   position: absolute;
   top: 0;
-  left: calc(var(--fan-index, 0) * var(--card-offset));
+  left: calc(var(--fan-index, 0) * var(--waste-fan-peek, 28px));
   width: var(--card-width);
   height: var(--card-height);
   pointer-events: none;
+  z-index: calc(var(--fan-index, 0) + 1);
 }
 
-.waste-fan-card--top {
+.playing-card.waste-fan-card--top {
   pointer-events: auto;
 }
 
