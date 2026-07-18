@@ -711,22 +711,29 @@ class RoomService:
             "is_connected": player.is_connected,
         }
 
+    def _allows_finished_action(self, room: Room, action: dict) -> bool:
+        """Actions that may run after the room has already finished."""
+        action_type = action.get("type")
+        if room.game_type == "duel" and action_type == "request_rematch":
+            return True
+        if room.game_type == "solitaire" and action_type == "new_game":
+            return True
+        return False
+
     async def apply_game_action(
         self, room_id: uuid.UUID, player_id: uuid.UUID, action: dict, *, allow_ai: bool = False
     ) -> tuple[Room, dict, list[dict]]:
         room = await self._load_room(room_id)
         if not room:
             raise ValueError("Room not found")
-        is_duel_rematch = (
-            room.game_type == "duel"
-            and action.get("type") == "request_rematch"
-            and room.status == RoomStatus.FINISHED
+        allows_finished = (
+            room.status == RoomStatus.FINISHED and self._allows_finished_action(room, action)
         )
-        if not is_duel_rematch and (room.status != RoomStatus.PLAYING or not room.game_state):
+        if not allows_finished and (room.status != RoomStatus.PLAYING or not room.game_state):
             raise ValueError("Game not in progress")
 
         game = get_game(room.game_type)
-        if game.tick_interval_ms() and not is_duel_rematch:
+        if game.tick_interval_ms() and not allows_finished:
             lock = _get_ai_lock(str(room_id))
             async with lock:
                 return await self._apply_game_action_unlocked(
@@ -742,12 +749,10 @@ class RoomService:
         room = await self._load_room(room_id)
         if not room:
             raise ValueError("Room not found")
-        is_duel_rematch = (
-            room.game_type == "duel"
-            and action.get("type") == "request_rematch"
-            and room.status == RoomStatus.FINISHED
+        allows_finished = (
+            room.status == RoomStatus.FINISHED and self._allows_finished_action(room, action)
         )
-        if not is_duel_rematch and (room.status != RoomStatus.PLAYING or not room.game_state):
+        if not allows_finished and (room.status != RoomStatus.PLAYING or not room.game_state):
             raise ValueError("Game not in progress")
         if not room.game_state:
             raise ValueError("Game not in progress")
@@ -765,8 +770,14 @@ class RoomService:
         )
         room.game_state.state = state
         room.game_state.version += 1
-        if state.get("winner"):
+        if state.get("winner") or state.get("phase") == "finished":
             room.status = RoomStatus.FINISHED
+        elif (
+            room.game_type == "solitaire"
+            and action.get("type") == "new_game"
+            and state.get("phase") == "playing"
+        ):
+            room.status = RoomStatus.PLAYING
 
         await self.db.commit()
         await self.db.refresh(room, ["players", "game_state"])

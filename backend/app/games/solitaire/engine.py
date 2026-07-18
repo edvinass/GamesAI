@@ -1,6 +1,3 @@
-import random
-from typing import Any
-
 from app.games.base import GamePlugin
 from app.games.solitaire.cards import (
     SUITS,
@@ -89,18 +86,28 @@ class SolitaireEngine(GamePlugin):
         action_type = action.get("type")
         events: list[dict] = []
 
+        # Allow restarting after a win; all other actions require an active game.
+        if action_type == "new_game":
+            state = self._new_game(state["players"], state["settings"])
+            state["last_action"] = {"type": "new_game"}
+            events.append({"type": "game_restarted"})
+            return state, events
+
         if state["phase"] != "playing":
             return state, events
 
         if action_type == "draw":
+            before = len(state["stock"])
             state = self._draw_from_stock(state)
-            state["last_action"] = {"type": "draw"}
-            events.append({"type": "cards_drawn"})
+            if len(state["stock"]) != before:
+                state["last_action"] = {"type": "draw"}
+                events.append({"type": "cards_drawn"})
 
         elif action_type == "reset_stock":
-            state = self._reset_stock(state)
-            state["last_action"] = {"type": "reset_stock"}
-            events.append({"type": "stock_reset"})
+            if not state["stock"] and state["waste"]:
+                state = self._reset_stock(state)
+                state["last_action"] = {"type": "reset_stock"}
+                events.append({"type": "stock_reset"})
 
         elif action_type == "move_to_foundation":
             source = action.get("source")
@@ -154,11 +161,6 @@ class SolitaireEngine(GamePlugin):
             if completed:
                 state["last_action"] = {"type": "auto_complete"}
                 events.append({"type": "auto_completed"})
-
-        elif action_type == "new_game":
-            state = self._new_game(state["players"], state["settings"])
-            state["last_action"] = {"type": "new_game"}
-            events.append({"type": "game_restarted"})
 
         if self._check_win(state):
             state["phase"] = "finished"
@@ -348,13 +350,23 @@ class SolitaireEngine(GamePlugin):
         return True
 
     def _can_auto_complete(self, state: dict) -> bool:
+        """Offer auto-complete only when remaining play is face-up foundation moves."""
+        if state.get("phase") != "playing":
+            return False
         if state["stock"] or state["waste"]:
             return False
         for col in state["tableau"]:
             for card in col:
                 if not card["face_up"]:
                     return False
-        return True
+        # Don't show the button when nothing can actually move yet.
+        for col in state["tableau"]:
+            if not col:
+                continue
+            card = col[-1]
+            if can_stack_on_foundation(card, state["foundations"][card["suit"]]):
+                return True
+        return False
 
     def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
         tableau_public = []

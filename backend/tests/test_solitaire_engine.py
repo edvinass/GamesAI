@@ -161,3 +161,86 @@ def test_waste_fan_in_public_state_draw_three():
     public = eng.get_public_state(state, PLAYERS[0])
     assert public["waste_top"]["rank"] == "J"
     assert [c["rank"] for c in public["waste_fan"]] == ["5", "9", "J"]
+
+
+def test_new_game_works_after_win():
+    eng, state = _engine_state()
+    ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+    for suit in ("hearts", "diamonds", "clubs", "spades"):
+        state["foundations"][suit] = [
+            {"rank": r, "suit": suit, "face_up": True} for r in ranks
+        ]
+    state["phase"] = "finished"
+    state["winner"] = PLAYERS[0]["id"]
+    state["moves"] = 99
+
+    state, events = eng.apply_action(state, {"type": "new_game"}, PLAYERS[0])
+
+    assert state["phase"] == "playing"
+    assert state["winner"] is None
+    assert state["moves"] == 0
+    assert sum(len(col) for col in state["tableau"]) == 28
+    assert any(e["type"] == "game_restarted" for e in events)
+
+
+def test_can_auto_complete_requires_movable_card():
+    eng, state = _engine_state(
+        tableau=[
+            [
+                {"rank": "K", "suit": "hearts", "face_up": True},
+                {"rank": "Q", "suit": "spades", "face_up": True},
+            ],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ]
+    )
+    public = eng.get_public_state(state, PLAYERS[0])
+    assert public["can_auto_complete"] is False
+
+    state["tableau"] = [[{"rank": "A", "suit": "hearts", "face_up": True}], [], [], [], [], [], []]
+    public = eng.get_public_state(state, PLAYERS[0])
+    assert public["can_auto_complete"] is True
+
+
+def test_waste_to_tableau_and_foundation():
+    eng, state = _engine_state(
+        waste=[{"rank": "5", "suit": "diamonds", "face_up": True}],
+        tableau=[[{"rank": "2", "suit": "clubs", "face_up": True}], [], [], [], [], [], []],
+    )
+
+    state, _ = eng.apply_action(
+        state,
+        {
+            "type": "move_to_tableau",
+            "source": "waste",
+            "source_index": None,
+            "card_index": 0,
+            "target_col": 0,
+        },
+        PLAYERS[0],
+    )
+    assert state["moves"] == 0
+    assert len(state["waste"]) == 1
+
+    state["waste"] = [{"rank": "A", "suit": "diamonds", "face_up": True}]
+    state, events = eng.apply_action(
+        state,
+        {"type": "move_to_foundation", "source": "waste"},
+        PLAYERS[0],
+    )
+    assert state["moves"] == 1
+    assert len(state["foundations"]["diamonds"]) == 1
+    assert any(e["type"] == "card_to_foundation" for e in events)
+
+
+def test_noop_draw_and_reset_do_not_emit():
+    eng, state = _engine_state(stock=[], waste=[])
+    state, events = eng.apply_action(state, {"type": "draw"}, PLAYERS[0])
+    assert events == []
+
+    state, events = eng.apply_action(state, {"type": "reset_stock"}, PLAYERS[0])
+    assert events == []

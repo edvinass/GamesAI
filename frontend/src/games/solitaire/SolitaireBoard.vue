@@ -74,6 +74,19 @@ function getSelectedMovingCard(): { rank: string | null; suit: string | null } |
   return null
 }
 
+function canStackOnFoundation(
+  card: { rank: string | null; suit: string | null },
+  suit: string,
+): boolean {
+  if (!card.rank || !card.suit || card.suit !== suit) return false
+  const foundation = props.gameState.foundations[suit]
+  if (!foundation) return false
+  if (foundation.count === 0) return card.rank === 'A'
+  const top = foundation.top
+  if (!top) return false
+  return rankValue(card.rank) === rankValue(top.rank) + 1
+}
+
 function canMoveSelectionToTableau(targetCol: number): boolean {
   const moving = getSelectedMovingCard()
   if (!moving || !selectedCard.value) return false
@@ -90,7 +103,24 @@ function canMoveSelectionToTableau(targetCol: number): boolean {
   return canStackOnTableau(moving, top)
 }
 
+function canMoveSelectionToFoundation(): boolean {
+  if (!selectedCard.value) return false
+  if (selectedCard.value.source === 'waste') {
+    const card = props.gameState.waste_top
+    return Boolean(card?.suit && canStackOnFoundation(card, card.suit))
+  }
+  if (selectedCard.value.source === 'tableau') {
+    const col = props.gameState.tableau[selectedCard.value.sourceIndex!]
+    if (!col?.length) return false
+    if (selectedCard.value.cardIndex !== col.length - 1) return false
+    const card = col[col.length - 1]
+    return Boolean(card.suit && canStackOnFoundation(card, card.suit))
+  }
+  return false
+}
+
 function drawCard() {
+  if (isFinished.value) return
   if (props.gameState.stock_count > 0) {
     emit('action', { type: 'draw' })
   } else if (props.gameState.waste_count > 0) {
@@ -100,10 +130,10 @@ function drawCard() {
 }
 
 function selectWaste() {
-  if (!props.gameState.waste_top) return
+  if (isFinished.value || !props.gameState.waste_top) return
 
   if (selectedCard.value?.source === 'waste') {
-    tryMoveToFoundation('waste')
+    clearSelection()
     return
   }
 
@@ -111,27 +141,35 @@ function selectWaste() {
 }
 
 function selectTableauCard(colIndex: number, cardIndex: number) {
+  if (isFinished.value) return
   const col = props.gameState.tableau[colIndex]
   const card = col[cardIndex]
   if (!card) return
 
-  // With a selection active, any click on a column attempts a drop
-  // (including face-down peeks — drop always targets the column top).
   if (selectedCard.value) {
-    if (
+    const sameCard =
       selectedCard.value.source === 'tableau' &&
       selectedCard.value.sourceIndex === colIndex &&
       selectedCard.value.cardIndex === cardIndex
-    ) {
-      // Re-click selected card: only foundation-auto for a single top card
-      if (cardIndex === col.length - 1) {
-        tryMoveToFoundation('tableau', colIndex)
-      } else {
-        clearSelection()
-      }
+
+    if (sameCard) {
+      // Second single-click toggles off; use double-click for foundation
+      clearSelection()
       return
     }
-    moveToTableau(colIndex)
+
+    if (canMoveSelectionToTableau(colIndex)) {
+      moveToTableau(colIndex)
+      return
+    }
+
+    // Illegal drop on a face-up card: treat as a new selection instead
+    if (card.face_up) {
+      selectedCard.value = { source: 'tableau', sourceIndex: colIndex, cardIndex }
+      return
+    }
+
+    // Face-down peek in another column — keep current selection
     return
   }
 
@@ -140,23 +178,47 @@ function selectTableauCard(colIndex: number, cardIndex: number) {
 }
 
 function selectEmptyTableau(colIndex: number) {
+  if (isFinished.value) return
   if (selectedCard.value) {
     moveToTableau(colIndex)
   }
 }
 
 function selectFoundation(suit: string) {
+  if (isFinished.value) return
   const foundation = props.gameState.foundations[suit]
 
   if (selectedCard.value) {
-    tryMoveSelectedToFoundation(suit)
-  } else if (foundation.count > 0) {
+    if (selectedCard.value.source === 'foundation') {
+      clearSelection()
+      return
+    }
+    sendSelectedToFoundation()
+    return
+  }
+
+  if (foundation.count > 0) {
     const suitIndex = suitOrder.indexOf(suit)
     selectedCard.value = { source: 'foundation', sourceIndex: suitIndex }
   }
 }
 
-function tryMoveToFoundation(source: 'waste' | 'tableau', sourceIndex?: number) {
+function sendToFoundation(source: 'waste' | 'tableau', sourceIndex?: number) {
+  if (source === 'waste') {
+    const card = props.gameState.waste_top
+    if (!card?.suit || !canStackOnFoundation(card, card.suit)) {
+      clearSelection()
+      return
+    }
+  } else if (source === 'tableau' && sourceIndex !== undefined) {
+    const col = props.gameState.tableau[sourceIndex]
+    const card = col?.[col.length - 1]
+    if (!card?.suit || !canStackOnFoundation(card, card.suit)) {
+      clearSelection()
+      return
+    }
+  }
+
   emit('action', {
     type: 'move_to_foundation',
     source,
@@ -165,31 +227,27 @@ function tryMoveToFoundation(source: 'waste' | 'tableau', sourceIndex?: number) 
   clearSelection()
 }
 
-function tryMoveSelectedToFoundation(_targetSuit: string) {
+function sendSelectedToFoundation() {
   if (!selectedCard.value) return
 
   if (selectedCard.value.source === 'waste') {
-    emit('action', { type: 'move_to_foundation', source: 'waste' })
-    clearSelection()
-  } else if (selectedCard.value.source === 'tableau') {
-    const col = props.gameState.tableau[selectedCard.value.sourceIndex!]
-    if (selectedCard.value.cardIndex === col.length - 1) {
-      emit('action', {
-        type: 'move_to_foundation',
-        source: 'tableau',
-        source_index: selectedCard.value.sourceIndex,
-      })
-      clearSelection()
-    }
-  } else if (selectedCard.value.source === 'foundation') {
-    clearSelection()
+    sendToFoundation('waste')
+    return
   }
+  if (selectedCard.value.source === 'tableau') {
+    const colIndex = selectedCard.value.sourceIndex!
+    const col = props.gameState.tableau[colIndex]
+    if (selectedCard.value.cardIndex === col.length - 1) {
+      sendToFoundation('tableau', colIndex)
+    }
+    return
+  }
+  clearSelection()
 }
 
 function moveToTableau(targetCol: number) {
-  if (!selectedCard.value) return
+  if (!selectedCard.value || isFinished.value) return
 
-  // Same-column click just clears selection (engine would reject anyway)
   if (
     selectedCard.value.source === 'tableau' &&
     selectedCard.value.sourceIndex === targetCol
@@ -197,6 +255,8 @@ function moveToTableau(targetCol: number) {
     clearSelection()
     return
   }
+
+  if (!canMoveSelectionToTableau(targetCol)) return
 
   emit('action', {
     type: 'move_to_tableau',
@@ -206,6 +266,20 @@ function moveToTableau(targetCol: number) {
     target_col: targetCol,
   })
   clearSelection()
+}
+
+function onTableauDoubleClick(colIndex: number, cardIndex: number) {
+  if (isFinished.value) return
+  const col = props.gameState.tableau[colIndex]
+  if (cardIndex !== col.length - 1 || !col[cardIndex]?.face_up) return
+  selectedCard.value = { source: 'tableau', sourceIndex: colIndex, cardIndex }
+  sendToFoundation('tableau', colIndex)
+}
+
+function onWasteDoubleClick() {
+  if (isFinished.value || !props.gameState.waste_top) return
+  selectedCard.value = { source: 'waste' }
+  sendToFoundation('waste')
 }
 
 function autoComplete() {
@@ -220,6 +294,20 @@ function newGame() {
 function clearSelection() {
   selectedCard.value = null
 }
+
+watch(
+  () =>
+    [
+      props.gameState.moves,
+      props.gameState.phase,
+      props.gameState.stock_count,
+      props.gameState.waste_count,
+      props.gameState.last_action?.type ?? '',
+    ] as const,
+  () => {
+    clearSelection()
+  },
+)
 
 function isCardSelected(source: string, sourceIndex?: number, cardIndex?: number): boolean {
   if (!selectedCard.value) return false
@@ -334,6 +422,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
             }"
             :style="wasteFan.length > 1 ? { '--fan-count': wasteFan.length } : undefined"
             @click="selectWaste"
+            @dblclick.stop="onWasteDoubleClick"
           >
             <template v-if="wasteFan.length">
               <div
@@ -369,6 +458,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
               selected: isCardSelected('foundation', suitOrder.indexOf(suit)),
               complete: gameState.foundations[suit].count === 13,
               'foundation--has-card': gameState.foundations[suit].count > 0,
+              'drop-target': hasSelection && canMoveSelectionToFoundation() && getSelectedMovingCard()?.suit === suit,
             }"
             @click="selectFoundation(suit)"
           >
@@ -422,8 +512,12 @@ const hasSelection = computed(() => selectedCard.value !== null)
               'face-down': !card.face_up,
               'tableau-card--top': cardIndex === col.length - 1,
             }"
-            :style="{ '--card-index': cardIndex, zIndex: cardIndex + 1 }"
+            :style="{
+              '--card-index': cardIndex,
+              zIndex: cardIndex === col.length - 1 ? cardIndex + 20 : cardIndex + 1,
+            }"
             @click="selectTableauCard(colIndex, cardIndex)"
+            @dblclick.stop="onTableauDoubleClick(colIndex, cardIndex)"
           >
             <div v-if="card.face_up" class="playing-card" :class="{ red: isRed(card.suit) }">
               <span class="corner corner--tl">
@@ -478,11 +572,11 @@ const hasSelection = computed(() => selectedCard.value !== null)
     <aside class="controls-hint">
       <div class="hint-item">
         <span class="hint-key">Click</span>
-        <span class="hint-desc">Select a card or pile</span>
+        <span class="hint-desc">Select a card or pile, then click a target</span>
       </div>
       <div class="hint-item">
-        <span class="hint-key">Click again</span>
-        <span class="hint-desc">Drop on a column, or send top card to foundation</span>
+        <span class="hint-key">Double-click</span>
+        <span class="hint-desc">Send a top card to its foundation</span>
       </div>
     </aside>
   </div>
@@ -971,10 +1065,17 @@ const hasSelection = computed(() => selectedCard.value !== null)
   background: rgba(255, 215, 0, 0.12);
 }
 
-.tableau-column--drop-ok .tableau-card--top .playing-card {
+.tableau-column--drop-ok .tableau-card--top .playing-card,
+.foundation.drop-target .playing-card,
+.foundation.drop-target .empty-slot {
   box-shadow:
     0 0 0 2px rgba(255, 215, 0, 0.55),
     0 6px 18px rgba(255, 215, 0, 0.2);
+}
+
+.foundation.drop-target .empty-slot {
+  border-color: rgba(255, 215, 0, 0.6);
+  background: rgba(255, 215, 0, 0.12);
 }
 
 .tableau-card {
@@ -987,11 +1088,14 @@ const hasSelection = computed(() => selectedCard.value !== null)
   transition: transform 0.2s ease, box-shadow 0.25s ease;
 }
 
-/* Buried cards: only the exposed peek captures clicks so pile bases stay selectable */
+/*
+  Buried cards only expose a peek for hit-testing. The peek box itself is the
+  click target (children are non-interactive) so full-size faces can't steal
+  clicks from the top card.
+*/
 .tableau-card:not(.tableau-card--top) {
   height: var(--card-offset);
   overflow: hidden;
-  pointer-events: auto;
 }
 
 .tableau-card:not(.tableau-card--top) .playing-card {
@@ -1002,8 +1106,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
 .tableau-card--top {
   height: var(--card-height);
   overflow: visible;
-  /* Keep above buried peeks for reliable drop/select hits */
-  z-index: 20 !important;
+  z-index: 10;
 }
 
 .tableau-card:hover:not(.face-down):not(.selected) {
@@ -1030,14 +1133,6 @@ const hasSelection = computed(() => selectedCard.value !== null)
   box-shadow:
     0 0 0 3px #ffd700,
     0 8px 30px rgba(255, 215, 0, 0.4);
-}
-
-.tableau-card.selected:not(.tableau-card--top) {
-  z-index: 30 !important;
-}
-
-.tableau-card.selected.tableau-card--top {
-  z-index: 40 !important;
 }
 
 .winner-overlay {
