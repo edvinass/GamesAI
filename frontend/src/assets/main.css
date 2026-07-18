@@ -31,6 +31,11 @@
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+html,
+body {
+  touch-action: manipulation;
+}
+
 body {
   font-family: 'DM Sans', system-ui, sans-serif;
   background: var(--bg);

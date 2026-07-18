@@ -1,6 +1,15 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import type { Room, SolitaireGameState } from '@/types'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import type { Room, SolitaireCard, SolitaireGameState } from '@/types'
+import {
+  disposeSounds,
+  isSoundMuted,
+  playActionSound,
+  playPickup,
+  playWin,
+  setSoundMuted,
+  unlockAudio,
+} from './sounds'
 
 const props = defineProps<{
   gameState: SolitaireGameState
@@ -12,19 +21,64 @@ const emit = defineEmits<{
   action: [data: Record<string, unknown>]
 }>()
 
-const selectedCard = ref<{
+type CardRef = {
   source: 'waste' | 'tableau' | 'foundation'
   sourceIndex?: number
   cardIndex?: number
-} | null>(null)
+}
+
+const selectedCard = ref<CardRef | null>(null)
 
 const lastMoveTime = ref(Date.now())
+const soundMuted = ref(isSoundMuted())
+const suppressSounds = ref(true)
+const lastSoundActionKey = ref('')
 
 watch(() => props.gameState.moves, () => {
   lastMoveTime.value = Date.now()
 })
 
 const isFinished = computed(() => props.gameState.phase === 'finished')
+
+function toggleSound() {
+  const next = !soundMuted.value
+  setSoundMuted(next)
+  soundMuted.value = next
+  if (!next) void unlockAudio()
+}
+
+function playSfx(fn: () => void) {
+  if (suppressSounds.value || soundMuted.value) return
+  fn()
+}
+
+function ensureAudio() {
+  void unlockAudio()
+}
+
+const DRAG_THRESHOLD = 8
+
+type DragState = {
+  source: CardRef
+  cards: SolitaireCard[]
+  startX: number
+  startY: number
+  x: number
+  y: number
+  offsetX: number
+  offsetY: number
+  active: boolean
+  pointerId: number
+  captureEl: HTMLElement | null
+}
+
+const dragState = ref<DragState | null>(null)
+
+const suppressClick = ref(false)
+const dragOverTableau = ref<number | null>(null)
+const dragOverFoundation = ref<string | null>(null)
+
+const isDragging = computed(() => Boolean(dragState.value?.active))
 
 const suitSymbols: Record<string, string> = {
   hearts: '♥',
@@ -58,20 +112,64 @@ function canStackOnTableau(
   return rankValue(target.rank) === rankValue(card.rank) + 1
 }
 
-function getSelectedMovingCard(): { rank: string | null; suit: string | null } | null {
-  if (!selectedCard.value) return null
-  if (selectedCard.value.source === 'waste') {
+function getMovingCardFrom(ref: CardRef | null): { rank: string | null; suit: string | null } | null {
+  if (!ref) return null
+  if (ref.source === 'waste') {
     return props.gameState.waste_top
   }
-  if (selectedCard.value.source === 'tableau') {
-    const col = props.gameState.tableau[selectedCard.value.sourceIndex!]
-    return col?.[selectedCard.value.cardIndex ?? 0] ?? null
+  if (ref.source === 'tableau') {
+    const col = props.gameState.tableau[ref.sourceIndex!]
+    return col?.[ref.cardIndex ?? 0] ?? null
   }
-  if (selectedCard.value.source === 'foundation') {
-    const suit = suitOrder[selectedCard.value.sourceIndex!]
+  if (ref.source === 'foundation') {
+    const suit = suitOrder[ref.sourceIndex!]
     return props.gameState.foundations[suit]?.top ?? null
   }
   return null
+}
+
+function getSelectedMovingCard(): { rank: string | null; suit: string | null } | null {
+  return getMovingCardFrom(selectedCard.value)
+}
+
+function getDragCards(source: CardRef): SolitaireCard[] {
+  if (source.source === 'waste') {
+    return props.gameState.waste_top ? [props.gameState.waste_top] : []
+  }
+  if (source.source === 'foundation') {
+    const suit = suitOrder[source.sourceIndex!]
+    const top = props.gameState.foundations[suit]?.top
+    return top ? [{ ...top, face_up: true }] : []
+  }
+  const col = props.gameState.tableau[source.sourceIndex!]
+  if (!col) return []
+  return col.slice(source.cardIndex ?? 0)
+}
+
+function canMoveRefToTableau(ref: CardRef, targetCol: number): boolean {
+  const moving = getMovingCardFrom(ref)
+  if (!moving) return false
+  if (ref.source === 'tableau' && ref.sourceIndex === targetCol) return false
+  const target = props.gameState.tableau[targetCol]
+  if (!target.length) return moving.rank === 'K'
+  const top = target[target.length - 1]
+  if (!top.face_up) return false
+  return canStackOnTableau(moving, top)
+}
+
+function canMoveRefToFoundation(ref: CardRef): boolean {
+  if (ref.source === 'waste') {
+    const card = props.gameState.waste_top
+    return Boolean(card?.suit && canStackOnFoundation(card, card.suit))
+  }
+  if (ref.source === 'tableau') {
+    const col = props.gameState.tableau[ref.sourceIndex!]
+    if (!col?.length) return false
+    if (ref.cardIndex !== col.length - 1) return false
+    const card = col[col.length - 1]
+    return Boolean(card.suit && canStackOnFoundation(card, card.suit))
+  }
+  return false
 }
 
 function canStackOnFoundation(
@@ -88,39 +186,33 @@ function canStackOnFoundation(
 }
 
 function canMoveSelectionToTableau(targetCol: number): boolean {
-  const moving = getSelectedMovingCard()
-  if (!moving || !selectedCard.value) return false
-  if (
-    selectedCard.value.source === 'tableau' &&
-    selectedCard.value.sourceIndex === targetCol
-  ) {
-    return false
-  }
-  const target = props.gameState.tableau[targetCol]
-  if (!target.length) return moving.rank === 'K'
-  const top = target[target.length - 1]
-  if (!top.face_up) return false
-  return canStackOnTableau(moving, top)
+  if (!selectedCard.value) return false
+  return canMoveRefToTableau(selectedCard.value, targetCol)
 }
 
 function canMoveSelectionToFoundation(): boolean {
   if (!selectedCard.value) return false
-  if (selectedCard.value.source === 'waste') {
-    const card = props.gameState.waste_top
-    return Boolean(card?.suit && canStackOnFoundation(card, card.suit))
-  }
-  if (selectedCard.value.source === 'tableau') {
-    const col = props.gameState.tableau[selectedCard.value.sourceIndex!]
-    if (!col?.length) return false
-    if (selectedCard.value.cardIndex !== col.length - 1) return false
-    const card = col[col.length - 1]
-    return Boolean(card.suit && canStackOnFoundation(card, card.suit))
-  }
-  return false
+  return canMoveRefToFoundation(selectedCard.value)
+}
+
+function activeMoveRef(): CardRef | null {
+  return dragState.value?.active ? dragState.value.source : selectedCard.value
+}
+
+function isDropHighlightTableau(colIndex: number): boolean {
+  const ref = activeMoveRef()
+  return Boolean(ref && canMoveRefToTableau(ref, colIndex))
+}
+
+function isDropHighlightFoundation(suit: string): boolean {
+  const ref = activeMoveRef()
+  if (!ref || !canMoveRefToFoundation(ref)) return false
+  return getMovingCardFrom(ref)?.suit === suit
 }
 
 function drawCard() {
   if (isFinished.value) return
+  ensureAudio()
   if (props.gameState.stock_count > 0) {
     emit('action', { type: 'draw' })
   } else if (props.gameState.waste_count > 0) {
@@ -130,7 +222,7 @@ function drawCard() {
 }
 
 function selectWaste() {
-  if (isFinished.value || !props.gameState.waste_top) return
+  if (suppressClick.value || isFinished.value || !props.gameState.waste_top) return
 
   if (selectedCard.value?.source === 'waste') {
     clearSelection()
@@ -141,7 +233,7 @@ function selectWaste() {
 }
 
 function selectTableauCard(colIndex: number, cardIndex: number) {
-  if (isFinished.value) return
+  if (suppressClick.value || isFinished.value) return
   const col = props.gameState.tableau[colIndex]
   const card = col[cardIndex]
   if (!card) return
@@ -178,14 +270,14 @@ function selectTableauCard(colIndex: number, cardIndex: number) {
 }
 
 function selectEmptyTableau(colIndex: number) {
-  if (isFinished.value) return
+  if (suppressClick.value || isFinished.value) return
   if (selectedCard.value) {
     moveToTableau(colIndex)
   }
 }
 
 function selectFoundation(suit: string) {
-  if (isFinished.value) return
+  if (suppressClick.value || isFinished.value) return
   const foundation = props.gameState.foundations[suit]
 
   if (selectedCard.value) {
@@ -245,31 +337,42 @@ function sendSelectedToFoundation() {
   clearSelection()
 }
 
-function moveToTableau(targetCol: number) {
-  if (!selectedCard.value || isFinished.value) return
-
-  if (
-    selectedCard.value.source === 'tableau' &&
-    selectedCard.value.sourceIndex === targetCol
-  ) {
-    clearSelection()
-    return
-  }
-
-  if (!canMoveSelectionToTableau(targetCol)) return
+function moveRefToTableau(ref: CardRef, targetCol: number): boolean {
+  if (isFinished.value) return false
+  if (ref.source === 'tableau' && ref.sourceIndex === targetCol) return false
+  if (!canMoveRefToTableau(ref, targetCol)) return false
 
   emit('action', {
     type: 'move_to_tableau',
-    source: selectedCard.value.source,
-    source_index: selectedCard.value.sourceIndex ?? null,
-    card_index: selectedCard.value.cardIndex ?? 0,
+    source: ref.source,
+    source_index: ref.sourceIndex ?? null,
+    card_index: ref.cardIndex ?? 0,
     target_col: targetCol,
   })
   clearSelection()
+  return true
+}
+
+function moveToTableau(targetCol: number) {
+  if (!selectedCard.value) return
+  moveRefToTableau(selectedCard.value, targetCol)
+}
+
+function moveRefToFoundation(ref: CardRef): boolean {
+  if (!canMoveRefToFoundation(ref)) return false
+  if (ref.source === 'waste') {
+    sendToFoundation('waste')
+    return true
+  }
+  if (ref.source === 'tableau') {
+    sendToFoundation('tableau', ref.sourceIndex)
+    return true
+  }
+  return false
 }
 
 function onTableauDoubleClick(colIndex: number, cardIndex: number) {
-  if (isFinished.value) return
+  if (suppressClick.value || isFinished.value) return
   const col = props.gameState.tableau[colIndex]
   if (cardIndex !== col.length - 1 || !col[cardIndex]?.face_up) return
   selectedCard.value = { source: 'tableau', sourceIndex: colIndex, cardIndex }
@@ -277,16 +380,196 @@ function onTableauDoubleClick(colIndex: number, cardIndex: number) {
 }
 
 function onWasteDoubleClick() {
-  if (isFinished.value || !props.gameState.waste_top) return
+  if (suppressClick.value || isFinished.value || !props.gameState.waste_top) return
   selectedCard.value = { source: 'waste' }
   sendToFoundation('waste')
 }
 
+function endDragListeners() {
+  window.removeEventListener('pointermove', onDragPointerMove)
+  window.removeEventListener('pointerup', onDragPointerUp)
+  window.removeEventListener('pointercancel', onDragPointerUp)
+}
+
+function releaseDragCapture(drag: DragState) {
+  const el = drag.captureEl
+  if (!el?.hasPointerCapture?.(drag.pointerId)) return
+  try {
+    el.releasePointerCapture(drag.pointerId)
+  } catch {
+    // ignore release failures
+  }
+}
+
+function findDropTarget(clientX: number, clientY: number): HTMLElement | null {
+  const stack = document.elementsFromPoint(clientX, clientY)
+  for (const node of stack) {
+    if (!(node instanceof HTMLElement)) continue
+    if (node.closest('.solitaire-drag-ghost')) continue
+    const drop = node.closest('[data-drop]') as HTMLElement | null
+    if (drop) return drop
+  }
+  return null
+}
+
+function updateDragHover(clientX: number, clientY: number) {
+  const drop = findDropTarget(clientX, clientY)
+  if (!drop || !dragState.value) {
+    dragOverTableau.value = null
+    dragOverFoundation.value = null
+    return
+  }
+  const kind = drop.dataset.drop
+  if (kind === 'tableau') {
+    const col = Number(drop.dataset.col)
+    dragOverTableau.value = Number.isFinite(col) ? col : null
+    dragOverFoundation.value = null
+  } else if (kind === 'foundation') {
+    dragOverFoundation.value = drop.dataset.suit ?? null
+    dragOverTableau.value = null
+  } else {
+    dragOverTableau.value = null
+    dragOverFoundation.value = null
+  }
+}
+
+function patchDrag(patch: Partial<DragState>) {
+  const current = dragState.value
+  if (!current) return
+  dragState.value = { ...current, ...patch }
+}
+
+function onDragPointerMove(event: PointerEvent) {
+  const drag = dragState.value
+  if (!drag || event.pointerId !== drag.pointerId) return
+
+  const dx = event.clientX - drag.startX
+  const dy = event.clientY - drag.startY
+  let active = drag.active
+  if (!active && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
+    active = true
+    selectedCard.value = { ...drag.source }
+    suppressClick.value = true
+    playSfx(playPickup)
+  }
+  if (!active) return
+
+  event.preventDefault()
+  patchDrag({ active: true, x: event.clientX, y: event.clientY })
+  updateDragHover(event.clientX, event.clientY)
+}
+
+function onDragPointerUp(event: PointerEvent) {
+  const drag = dragState.value
+  if (!drag || event.pointerId !== drag.pointerId) return
+
+  endDragListeners()
+  releaseDragCapture(drag)
+
+  if (drag.active) {
+    updateDragHover(event.clientX, event.clientY)
+    const ref = drag.source
+    let dropped = false
+
+    if (dragOverTableau.value !== null) {
+      dropped = moveRefToTableau(ref, dragOverTableau.value)
+    } else if (dragOverFoundation.value) {
+      const moving = getMovingCardFrom(ref)
+      if (moving?.suit === dragOverFoundation.value) {
+        dropped = moveRefToFoundation(ref)
+      }
+    }
+
+    if (!dropped) {
+      clearSelection()
+    }
+
+    // Ignore the click that follows a drag gesture
+    window.setTimeout(() => {
+      suppressClick.value = false
+    }, 0)
+  }
+
+  dragState.value = null
+  dragOverTableau.value = null
+  dragOverFoundation.value = null
+}
+
+function startDrag(event: PointerEvent, source: CardRef) {
+  if (isFinished.value || event.button !== 0) return
+  const cards = getDragCards(source)
+  if (!cards.length || cards.some((c) => !c.face_up)) return
+
+  ensureAudio()
+
+  // Cancel any in-progress gesture before starting a new one
+  if (dragState.value) {
+    endDragListeners()
+    releaseDragCapture(dragState.value)
+    dragState.value = null
+  }
+
+  const target = event.currentTarget as HTMLElement | null
+  const rect = target?.getBoundingClientRect()
+  // Buried peeks are short; keep the grab offset near the top of a full card
+  const offsetX = rect ? Math.min(Math.max(event.clientX - rect.left, 8), Math.max(rect.width - 8, 8)) : 20
+  const offsetY = rect ? Math.min(Math.max(event.clientY - rect.top, 8), 28) : 20
+
+  dragState.value = {
+    source: { ...source },
+    cards,
+    startX: event.clientX,
+    startY: event.clientY,
+    x: event.clientX,
+    y: event.clientY,
+    offsetX,
+    offsetY,
+    active: false,
+    pointerId: event.pointerId,
+    captureEl: target,
+  }
+
+  try {
+    target?.setPointerCapture(event.pointerId)
+  } catch {
+    // ignore capture failures
+  }
+
+  window.addEventListener('pointermove', onDragPointerMove, { passive: false })
+  window.addEventListener('pointerup', onDragPointerUp)
+  window.addEventListener('pointercancel', onDragPointerUp)
+}
+
+function onWastePointerDown(event: PointerEvent) {
+  if (!props.gameState.waste_top) return
+  startDrag(event, { source: 'waste' })
+}
+
+function onTableauPointerDown(event: PointerEvent, colIndex: number, cardIndex: number) {
+  const card = props.gameState.tableau[colIndex]?.[cardIndex]
+  if (!card?.face_up) return
+  startDrag(event, { source: 'tableau', sourceIndex: colIndex, cardIndex })
+}
+
+function onFoundationPointerDown(event: PointerEvent, suit: string) {
+  if (props.gameState.foundations[suit].count <= 0) return
+  startDrag(event, { source: 'foundation', sourceIndex: suitOrder.indexOf(suit) })
+}
+
+function isDragSourceCard(colIndex: number, cardIndex: number): boolean {
+  const drag = dragState.value
+  if (!drag?.active || drag.source.source !== 'tableau') return false
+  if (drag.source.sourceIndex !== colIndex) return false
+  return cardIndex >= (drag.source.cardIndex ?? 0)
+}
+
 function autoComplete() {
+  ensureAudio()
   emit('action', { type: 'auto_complete' })
 }
 
 function newGame() {
+  ensureAudio()
   emit('action', { type: 'new_game' })
   clearSelection()
 }
@@ -305,9 +588,53 @@ watch(
       props.gameState.last_action?.type ?? '',
     ] as const,
   () => {
+    // Don't yank cards out from under an active drag (state sync mid-gesture)
+    if (dragState.value?.active) return
     clearSelection()
+    if (dragState.value) {
+      endDragListeners()
+      releaseDragCapture(dragState.value)
+      dragState.value = null
+    }
+    dragOverTableau.value = null
+    dragOverFoundation.value = null
   },
 )
+
+watch(
+  () => props.gameState.last_action,
+  (action) => {
+    if (!action?.type) return
+    const key = `${action.type}:${props.gameState.moves}:${props.gameState.stock_count}:${props.gameState.waste_count}:${props.gameState.phase}`
+    if (key === lastSoundActionKey.value) return
+    lastSoundActionKey.value = key
+    if (suppressSounds.value) return
+    playSfx(() => playActionSound(String(action.type)))
+  },
+)
+
+watch(
+  () => props.gameState.phase,
+  (phase, prev) => {
+    if (!prev || phase === prev) return
+    if (phase === 'finished') playSfx(playWin)
+  },
+)
+
+onMounted(() => {
+  // Skip sounds from the initial state snapshot / reconnect
+  requestAnimationFrame(() => {
+    suppressSounds.value = false
+  })
+})
+
+onUnmounted(() => {
+  if (dragState.value) {
+    releaseDragCapture(dragState.value)
+  }
+  endDragListeners()
+  disposeSounds()
+})
 
 function isCardSelected(source: string, sourceIndex?: number, cardIndex?: number): boolean {
   if (!selectedCard.value) return false
@@ -318,11 +645,21 @@ function isCardSelected(source: string, sourceIndex?: number, cardIndex?: number
 }
 
 function isInSelectedStack(colIndex: number, cardIndex: number): boolean {
+  if (isDragSourceCard(colIndex, cardIndex)) return true
   if (!selectedCard.value) return false
   if (selectedCard.value.source !== 'tableau') return false
   if (selectedCard.value.sourceIndex !== colIndex) return false
   return cardIndex >= (selectedCard.value.cardIndex ?? 0)
 }
+
+const dragGhostStyle = computed(() => {
+  const drag = dragState.value
+  if (!drag?.active) return undefined
+  return {
+    left: `${drag.x - drag.offsetX}px`,
+    top: `${drag.y - drag.offsetY}px`,
+  }
+})
 
 const foundationProgress = computed(() => {
   let total = 0
@@ -352,7 +689,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
 </script>
 
 <template>
-  <div class="solitaire-board" @click.self="clearSelection">
+  <div class="solitaire-board" :class="{ 'solitaire-board--dragging': isDragging }" @click.self="clearSelection">
     <div class="status-bar">
       <div class="stats-row">
         <div class="stat-item">
@@ -371,6 +708,15 @@ const hasSelection = computed(() => selectedCard.value !== null)
         </div>
       </div>
       <div class="status-bar__right">
+        <button
+          type="button"
+          class="sound-toggle"
+          :aria-label="soundMuted ? 'Unmute sound' : 'Mute sound'"
+          :title="soundMuted ? 'Unmute' : 'Mute'"
+          @click="toggleSound"
+        >
+          {{ soundMuted ? '🔇' : '🔊' }}
+        </button>
         <button
           v-if="gameState.can_auto_complete && !isFinished"
           type="button"
@@ -419,10 +765,12 @@ const hasSelection = computed(() => selectedCard.value !== null)
               selected: isCardSelected('waste'),
               'waste--has-card': wasteFan.length > 0,
               'waste--fan': wasteFan.length > 1,
+              'drag-source': isDragging && dragState?.source.source === 'waste',
             }"
             :style="wasteFan.length > 1 ? { '--fan-count': wasteFan.length } : undefined"
             @click="selectWaste"
             @dblclick.stop="onWasteDoubleClick"
+            @pointerdown="onWastePointerDown"
           >
             <template v-if="wasteFan.length">
               <div
@@ -458,9 +806,14 @@ const hasSelection = computed(() => selectedCard.value !== null)
               selected: isCardSelected('foundation', suitOrder.indexOf(suit)),
               complete: gameState.foundations[suit].count === 13,
               'foundation--has-card': gameState.foundations[suit].count > 0,
-              'drop-target': hasSelection && canMoveSelectionToFoundation() && getSelectedMovingCard()?.suit === suit,
+              'drop-target': isDropHighlightFoundation(suit),
+              'drag-over': dragOverFoundation === suit && isDropHighlightFoundation(suit),
+              'drag-source': isDragging && dragState?.source.source === 'foundation' && suitOrder[dragState.source.sourceIndex!] === suit,
             }"
+            :data-drop="'foundation'"
+            :data-suit="suit"
             @click="selectFoundation(suit)"
+            @pointerdown="onFoundationPointerDown($event, suit)"
           >
             <div v-if="gameState.foundations[suit].top" class="playing-card" :class="{ red: isRed(suit) }">
               <span class="corner corner--tl">
@@ -488,15 +841,18 @@ const hasSelection = computed(() => selectedCard.value !== null)
           :key="colIndex"
           class="tableau-column"
           :class="{
-            'tableau-column--drop-ok': hasSelection && canMoveSelectionToTableau(colIndex),
-            'tableau-column--has-selection': hasSelection,
+            'tableau-column--drop-ok': isDropHighlightTableau(colIndex),
+            'tableau-column--has-selection': hasSelection || isDragging,
+            'tableau-column--drag-over': dragOverTableau === colIndex && isDropHighlightTableau(colIndex),
           }"
+          :data-drop="'tableau'"
+          :data-col="colIndex"
           @click.self="hasSelection && moveToTableau(colIndex)"
         >
           <div
             v-if="col.length === 0"
             class="card-slot empty-column"
-            :class="{ 'drop-target': hasSelection && canMoveSelectionToTableau(colIndex) }"
+            :class="{ 'drop-target': isDropHighlightTableau(colIndex) }"
             @click="selectEmptyTableau(colIndex)"
           >
             <div class="empty-slot empty-slot--tableau">
@@ -511,6 +867,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
               selected: isInSelectedStack(colIndex, cardIndex),
               'face-down': !card.face_up,
               'tableau-card--top': cardIndex === col.length - 1,
+              'drag-source': isDragSourceCard(colIndex, cardIndex),
             }"
             :style="{
               '--card-index': cardIndex,
@@ -518,6 +875,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
             }"
             @click="selectTableauCard(colIndex, cardIndex)"
             @dblclick.stop="onTableauDoubleClick(colIndex, cardIndex)"
+            @pointerdown="onTableauPointerDown($event, colIndex, cardIndex)"
           >
             <div v-if="card.face_up" class="playing-card" :class="{ red: isRed(card.suit) }">
               <span class="corner corner--tl">
@@ -571,14 +929,43 @@ const hasSelection = computed(() => selectedCard.value !== null)
 
     <aside class="controls-hint">
       <div class="hint-item">
+        <span class="hint-key">Drag</span>
+        <span class="hint-desc">Move cards or piles onto a valid target</span>
+      </div>
+      <div class="hint-item">
         <span class="hint-key">Click</span>
-        <span class="hint-desc">Select a card or pile, then click a target</span>
+        <span class="hint-desc">Select, then click a target</span>
       </div>
       <div class="hint-item">
         <span class="hint-key">Double-click</span>
         <span class="hint-desc">Send a top card to its foundation</span>
       </div>
     </aside>
+
+    <div
+      v-if="dragState?.active"
+      class="solitaire-drag-ghost"
+      :style="dragGhostStyle"
+      aria-hidden="true"
+    >
+      <div
+        v-for="(card, index) in dragState.cards"
+        :key="`ghost-${index}-${card.rank}-${card.suit}`"
+        class="playing-card drag-ghost-card"
+        :class="{ red: isRed(card.suit) }"
+        :style="{ '--ghost-index': index }"
+      >
+        <span class="corner corner--tl">
+          <span class="corner__rank">{{ card.rank }}</span>
+          <span class="corner__suit">{{ getSuitSymbol(card.suit) }}</span>
+        </span>
+        <span class="suit suit--center">{{ getSuitSymbol(card.suit) }}</span>
+        <span class="corner corner--br">
+          <span class="corner__rank">{{ card.rank }}</span>
+          <span class="corner__suit">{{ getSuitSymbol(card.suit) }}</span>
+        </span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -600,6 +987,13 @@ const hasSelection = computed(() => selectedCard.value !== null)
   background:
     radial-gradient(ellipse 100% 60% at 50% -10%, rgba(34, 139, 34, 0.1) 0%, transparent 50%),
     radial-gradient(ellipse 80% 40% at 50% 110%, rgba(139, 69, 19, 0.08) 0%, transparent 45%);
+  touch-action: manipulation;
+}
+
+.solitaire-board--dragging {
+  cursor: grabbing;
+  user-select: none;
+  touch-action: none;
 }
 
 .status-bar {
@@ -683,6 +1077,29 @@ const hasSelection = computed(() => selectedCard.value !== null)
   display: flex;
   align-items: center;
   gap: 0.6rem;
+}
+
+.sound-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.sound-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
 }
 
 .btn-action {
@@ -955,8 +1372,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.9) inset,
     0 -1px 0 rgba(0, 0, 0, 0.05) inset,
-    0 3px 6px rgba(0, 0, 0, 0.12),
-    0 8px 20px rgba(0, 0, 0, 0.18);
+    0 2px 4px rgba(0, 0, 0, 0.18);
   transition: transform 0.15s ease, box-shadow 0.2s ease;
 }
 
@@ -969,8 +1385,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.08) inset,
-    0 3px 6px rgba(0, 0, 0, 0.2),
-    0 8px 20px rgba(0, 0, 0, 0.3);
+    0 2px 4px rgba(0, 0, 0, 0.25);
 }
 
 .card-back {
@@ -1042,6 +1457,7 @@ const hasSelection = computed(() => selectedCard.value !== null)
   display: flex;
   gap: var(--card-gap);
   justify-content: center;
+  align-items: stretch;
   flex: 1;
   min-height: calc(var(--card-height) + var(--card-offset) * 12);
 }
@@ -1050,6 +1466,8 @@ const hasSelection = computed(() => selectedCard.value !== null)
   position: relative;
   width: var(--card-width);
   min-height: var(--card-height);
+  /* Stretch so empty space below short piles is still a drop target */
+  align-self: stretch;
 }
 
 .empty-column {
@@ -1073,9 +1491,64 @@ const hasSelection = computed(() => selectedCard.value !== null)
     0 6px 18px rgba(255, 215, 0, 0.2);
 }
 
+.tableau-column--drag-over .tableau-card--top .playing-card,
+.foundation.drag-over .playing-card,
+.foundation.drag-over .empty-slot,
+.tableau-column--drag-over .empty-column .empty-slot {
+  box-shadow:
+    0 0 0 3px #ffd700,
+    0 8px 24px rgba(255, 215, 0, 0.35);
+  border-color: rgba(255, 215, 0, 0.75);
+}
+
 .foundation.drop-target .empty-slot {
   border-color: rgba(255, 215, 0, 0.6);
   background: rgba(255, 215, 0, 0.12);
+}
+
+.drag-source {
+  opacity: 0.35;
+}
+
+.waste.drag-source,
+.foundation.drag-source {
+  opacity: 0.4;
+}
+
+.solitaire-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  width: var(--card-width);
+  height: var(--card-height);
+  pointer-events: none;
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.45));
+}
+
+.drag-ghost-card {
+  position: absolute;
+  left: 0;
+  top: calc(var(--ghost-index, 0) * var(--card-offset));
+  width: var(--card-width);
+  height: var(--card-height);
+}
+
+.waste,
+.foundation,
+.tableau-card:not(.face-down) {
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.solitaire-board--dragging .waste,
+.solitaire-board--dragging .foundation,
+.solitaire-board--dragging .tableau-card {
+  cursor: grabbing;
+}
+
+.solitaire-board--dragging .playing-card {
+  transition: none;
 }
 
 .tableau-card {
@@ -1084,18 +1557,25 @@ const hasSelection = computed(() => selectedCard.value !== null)
   top: calc(var(--card-index, 0) * var(--card-offset));
   width: var(--card-width);
   height: var(--card-height);
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.25s ease;
+  cursor: grab;
+  z-index: 1;
+  background: transparent;
+  /* Soft shadow only — hard drop shadows read as black bars between peeks */
+  transition: transform 0.2s ease, box-shadow 0.25s ease, opacity 0.15s ease;
+}
+
+.solitaire-board--dragging .tableau-card {
+  transition: none;
 }
 
 /*
-  Buried cards only expose a peek for hit-testing. The peek box itself is the
-  click target (children are non-interactive) so full-size faces can't steal
-  clicks from the top card.
+  Buried cards keep a short peek hit-box, but overflow is visible so the full
+  rounded card paints under the next one (avoids black corner gaps).
 */
 .tableau-card:not(.tableau-card--top) {
   height: var(--card-offset);
-  overflow: hidden;
+  overflow: visible;
+  background: transparent;
 }
 
 .tableau-card:not(.tableau-card--top) .playing-card {

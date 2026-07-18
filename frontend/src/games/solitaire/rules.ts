@@ -16,7 +16,7 @@ export const solitaireRules: GameRules = {
     },
     {
       heading: 'Tableau',
-      body: 'Seven columns of cards. Stack cards in alternating colors (red on black, black on red) in descending order (King down to Ace). Move sequences of face-up cards together. Empty columns can only be filled with a King.',
+      body: 'Seven columns of cards. Stack cards in alternating colors (red on black, black on red) in descending order (King down to Ace). Drag face-up cards or piles onto a valid target (or click to select, then click a target). Empty columns can only be filled with a King.',
     },
     {
       heading: 'Stock & Waste',
