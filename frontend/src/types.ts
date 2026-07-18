@@ -623,6 +623,73 @@ export interface RoboRallyGameState {
   total_checkpoints: number
 }
 
+export interface BattleshipShipDef {
+  id: string
+  name: string
+  length: number
+}
+
+export interface BattleshipShip {
+  id: string
+  name: string
+  length: number
+  cells: Array<[number, number]> | null
+  hits: number
+  sunk: boolean
+  placed: boolean
+}
+
+export interface BattleshipPlayerState {
+  id: string
+  nickname: string
+  is_ai: boolean
+  ready: boolean
+}
+
+export interface BattleshipShot {
+  row: number
+  col: number
+  result: 'hit' | 'miss' | 'sunk'
+  player_id: string
+  target_player_id: string
+  ship_id: string | null
+  sunk_ship: { id: string; name: string; cells: Array<[number, number]> } | null
+}
+
+export interface BattleshipCell {
+  row: number
+  col: number
+  state: 'empty' | 'ship' | 'hit' | 'miss'
+  ship_id?: string
+}
+
+export interface BattleshipFleetPublic {
+  ready: boolean
+  ships: BattleshipShip[]
+  shots: Record<string, 'hit' | 'miss'>
+  ships_remaining: number
+}
+
+export interface BattleshipGameState {
+  phase: 'placing' | 'playing' | 'game_over'
+  size: number
+  ship_defs: BattleshipShipDef[]
+  players: BattleshipPlayerState[]
+  player_order: string[]
+  fleets: Record<string, BattleshipFleetPublic>
+  boards: Record<string, { grid: BattleshipCell[][] }>
+  current_actor_id: string | null
+  shot_history: BattleshipShot[]
+  last_shot: BattleshipShot | null
+  winner: string | null
+  win_reason: string | null
+  legal_shots: Array<{ row: number; col: number }>
+  settings: Record<string, unknown>
+  host_id?: string
+  viewer_id: string | null
+  opponent_id: string | null
+}
+
 export interface Connect4PlayerState {
   id: string
   nickname: string
@@ -699,7 +766,7 @@ export interface SolitaireGameState {
   hint?: SolitaireHint | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | SolitaireGameState
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -743,6 +810,10 @@ export function isRoboRallyState(state: GameState): state is RoboRallyGameState 
 
 export function isConnect4State(state: GameState): state is Connect4GameState {
   return 'red_player_id' in state && 'yellow_player_id' in state && 'cols' in state
+}
+
+export function isBattleshipState(state: GameState): state is BattleshipGameState {
+  return 'fleets' in state && 'boards' in state && 'ship_defs' in state && 'legal_shots' in state
 }
 
 export function isSolitaireState(state: GameState): state is SolitaireGameState {

@@ -10,6 +10,7 @@ import { solitaireRules } from './solitaire/rules'
 import { spyfallRules } from './spyfall/rules'
 import { tetrisRules } from './tetris/rules'
 import { connect4Rules } from './connect4/rules'
+import { battleshipRules } from './battleship/rules'
 
 const rulesByGameType: Record<string, GameRules> = {
   codenames: codenamesRules,
@@ -23,6 +24,7 @@ const rulesByGameType: Record<string, GameRules> = {
   go: goRules,
   roborally: roborallyRules,
   connect4: connect4Rules,
+  battleship: battleshipRules,
   solitaire: solitaireRules,
 }
 

@@ -1,3 +1,4 @@
+from app.games.battleship.engine import BattleshipEngine
 from app.games.chess.engine import ChessEngine
 from app.games.codenames.engine import CodenamesEngine
 from app.games.connect4.engine import Connect4Engine
@@ -25,6 +26,7 @@ _REGISTRY: dict[str, GamePlugin] = {
     "go": GoEngine(),
     "roborally": RoboRallyEngine(),
     "connect4": Connect4Engine(),
+    "battleship": BattleshipEngine(),
     "solitaire": SolitaireEngine(),
 }
 
@@ -48,6 +50,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "go": {"name": "Go", "description": "9×9 Go — surround territory and beat the AI"},
     "roborally": {"name": "RoboRally", "description": "Program your robot through checkpoints on a factory floor"},
     "connect4": {"name": "Connect Four", "description": "Drop discs to connect four in a row — play a friend or AI"},
+    "battleship": {"name": "Battleship", "description": "Place your fleet and sink the enemy — play a friend or AI"},
     "solitaire": {"name": "Solitaire", "description": "Classic Klondike — stack cards and clear the tableau"},
 }
 

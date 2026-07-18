@@ -72,6 +72,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '🔴',
     lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
   },
+  battleship: {
+    name: 'Battleship',
+    description: 'Place your fleet and sink the enemy — play a friend or AI.',
+    emoji: '🚢',
+    lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
+  },
   solitaire: {
     name: 'Solitaire',
     description: 'Classic Klondike — stack cards and clear the tableau.',

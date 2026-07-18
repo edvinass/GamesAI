@@ -18,6 +18,7 @@ import ChessLobby from '@/games/chess/ChessLobby.vue'
 import GoLobby from '@/games/go/GoLobby.vue'
 import RoboRallyLobby from '@/games/roborally/RoboRallyLobby.vue'
 import Connect4Lobby from '@/games/connect4/Connect4Lobby.vue'
+import BattleshipLobby from '@/games/battleship/BattleshipLobby.vue'
 import SolitaireLobby from '@/games/solitaire/SolitaireLobby.vue'
 import { validateLobby as validateCodenamesLobby, teamOperatives, teamSpymaster } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
@@ -30,6 +31,7 @@ import { validateLobby as validateChessLobby } from '@/games/chess/lobbyValidati
 import { validateLobby as validateGoLobby } from '@/games/go/lobbyValidation'
 import { validateLobby as validateRoboRallyLobby } from '@/games/roborally/lobbyValidation'
 import { validateLobby as validateConnect4Lobby } from '@/games/connect4/lobbyValidation'
+import { validateLobby as validateBattleshipLobby } from '@/games/battleship/lobbyValidation'
 import { validateLobby as validateSolitaireLobby } from '@/games/solitaire/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
@@ -110,6 +112,7 @@ const isChess = computed(() => room.value?.game_type === 'chess')
 const isGo = computed(() => room.value?.game_type === 'go')
 const isRoboRally = computed(() => room.value?.game_type === 'roborally')
 const isConnect4 = computed(() => room.value?.game_type === 'connect4')
+const isBattleship = computed(() => room.value?.game_type === 'battleship')
 const isSolitaire = computed(() => room.value?.game_type === 'solitaire')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
@@ -127,6 +130,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'go') return validateGoLobby(room.value)
   if (room.value.game_type === 'roborally') return validateRoboRallyLobby(room.value)
   if (room.value.game_type === 'connect4') return validateConnect4Lobby(room.value)
+  if (room.value.game_type === 'battleship') return validateBattleshipLobby(room.value)
   if (room.value.game_type === 'solitaire') return validateSolitaireLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
@@ -480,6 +484,21 @@ async function copyUrl() {
 
       <Connect4Lobby
         v-else-if="isConnect4"
+        v-model:solo-practice="soloPractice"
+        v-model:ai-difficulty="aiDifficulty"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+      />
+
+      <BattleshipLobby
+        v-else-if="isBattleship"
         v-model:solo-practice="soloPractice"
         v-model:ai-difficulty="aiDifficulty"
         :room="room"
