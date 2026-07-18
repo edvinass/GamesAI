@@ -17,6 +17,7 @@ import PokerLobby from '@/games/poker/PokerLobby.vue'
 import ChessLobby from '@/games/chess/ChessLobby.vue'
 import GoLobby from '@/games/go/GoLobby.vue'
 import RoboRallyLobby from '@/games/roborally/RoboRallyLobby.vue'
+import SolitaireLobby from '@/games/solitaire/SolitaireLobby.vue'
 import { validateLobby as validateCodenamesLobby, teamOperatives, teamSpymaster } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
@@ -27,6 +28,7 @@ import { validateLobby as validatePokerLobby } from '@/games/poker/lobbyValidati
 import { validateLobby as validateChessLobby } from '@/games/chess/lobbyValidation'
 import { validateLobby as validateGoLobby } from '@/games/go/lobbyValidation'
 import { validateLobby as validateRoboRallyLobby } from '@/games/roborally/lobbyValidation'
+import { validateLobby as validateSolitaireLobby } from '@/games/solitaire/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
@@ -105,6 +107,7 @@ const isPoker = computed(() => room.value?.game_type === 'poker')
 const isChess = computed(() => room.value?.game_type === 'chess')
 const isGo = computed(() => room.value?.game_type === 'go')
 const isRoboRally = computed(() => room.value?.game_type === 'roborally')
+const isSolitaire = computed(() => room.value?.game_type === 'solitaire')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
@@ -120,6 +123,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'chess') return validateChessLobby(room.value)
   if (room.value.game_type === 'go') return validateGoLobby(room.value)
   if (room.value.game_type === 'roborally') return validateRoboRallyLobby(room.value)
+  if (room.value.game_type === 'solitaire') return validateSolitaireLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
@@ -189,6 +193,11 @@ const mapId = computed({
 const registerSize = computed({
   get: () => Number(room.value?.settings?.register_size ?? 5),
   set: (val: number) => updateSettings({ register_size: val }),
+})
+
+const drawCount = computed({
+  get: () => Number(room.value?.settings?.draw_count ?? 1),
+  set: (val: number) => updateSettings({ draw_count: val }),
 })
 
 const soloAiDifficulties = computed({
@@ -467,6 +476,18 @@ async function copyUrl() {
 
       <GravityMasterLobby
         v-else-if="isGravityMaster"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+      />
+
+      <SolitaireLobby
+        v-else-if="isSolitaire"
+        v-model:draw-count="drawCount"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

@@ -623,7 +623,35 @@ export interface RoboRallyGameState {
   total_checkpoints: number
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState
+export interface SolitaireCard {
+  rank: string | null
+  suit: string | null
+  face_up: boolean
+}
+
+export interface SolitaireFoundation {
+  top: { rank: string; suit: string } | null
+  count: number
+}
+
+export interface SolitaireGameState {
+  phase: 'playing' | 'finished'
+  tableau: SolitaireCard[][]
+  foundations: Record<string, SolitaireFoundation>
+  stock_count: number
+  waste_top: SolitaireCard | null
+  waste_count: number
+  moves: number
+  players: Player[]
+  settings: Record<string, unknown>
+  winner: string | null
+  win_reason: string | null
+  last_action: Record<string, unknown> | null
+  viewer_id: string | null
+  can_auto_complete: boolean
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | SolitaireGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -663,6 +691,10 @@ export function isGoState(state: GameState): state is GoGameState {
 
 export function isRoboRallyState(state: GameState): state is RoboRallyGameState {
   return 'register_order' in state && 'robots' in state && 'register_size' in state
+}
+
+export function isSolitaireState(state: GameState): state is SolitaireGameState {
+  return 'tableau' in state && 'foundations' in state && 'stock_count' in state
 }
 
 export interface WsMessage {
