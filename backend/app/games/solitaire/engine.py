@@ -105,7 +105,8 @@ class SolitaireEngine(GamePlugin):
         if action_type == "hint":
             from app.games.solitaire.ai import choose_action
 
-            chosen, reason = choose_action(state)
+            # Hints ignore Watch cycle memory so leftover history can't hide legal moves
+            chosen, reason = choose_action(state, use_history=False)
             if chosen:
                 state["hint"] = {**chosen, "reason": reason}
             else:

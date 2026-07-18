@@ -432,10 +432,82 @@ def test_ai_blocks_recorded_reverse():
         "card_index": 1,
         "target_col": 0,
     }
+    # State as if 5♥ already moved onto col 0
+    state["tableau"] = [
+        [
+            {"rank": "6", "suit": "spades", "face_up": True},
+            {"rank": "5", "suit": "hearts", "face_up": True},
+        ],
+        [{"rank": "6", "suit": "clubs", "face_up": True}],
+        [],
+        [],
+        [],
+        [],
+        [],
+    ]
     record_autoplay_action(state, forward)
 
-    # Even if a reverse were legal as a "build", history must block it;
-    # and productive-move filter should not offer empty rearranges anyway.
-    action, _ = choose_action(state)
+    action, _ = choose_action(state, use_history=True)
     if action and action.get("type") == "move_to_tableau" and action.get("source") == "tableau":
-        assert action.get("source_index") != 0 or action.get("target_col") != 1
+        assert not (
+            action.get("source_index") == 0 and action.get("target_col") == 1
+        )
+
+
+def test_draw_still_suggested_after_many_draws():
+    """Draw must not be history-blocked — every draw shares one signature."""
+    from app.games.solitaire.ai import choose_action, record_autoplay_action
+
+    eng, state = _engine_state(
+        stock=[
+            {"rank": "3", "suit": "clubs", "face_up": False},
+            {"rank": "4", "suit": "clubs", "face_up": False},
+            {"rank": "5", "suit": "clubs", "face_up": False},
+        ],
+        waste=[{"rank": "9", "suit": "hearts", "face_up": True}],
+        tableau=[[], [], [], [], [], [], []],
+        autoplay_history=[],
+    )
+    # Simulate prior card moves filling history, plus the old bug of recording draws
+    for _ in range(5):
+        record_autoplay_action(state, {"type": "draw"})
+    record_autoplay_action(
+        state,
+        {
+            "type": "move_to_tableau",
+            "source": "waste",
+            "source_index": None,
+            "card_index": 0,
+            "target_col": 0,
+        },
+    )
+
+    action, reason = choose_action(state, use_history=True)
+    assert action is not None
+    assert action["type"] == "draw"
+    assert "Draw" in reason
+
+
+def test_hint_finds_waste_play_ignoring_history():
+    eng, state = _engine_state(
+        waste=[{"rank": "5", "suit": "hearts", "face_up": True}],
+        tableau=[
+            [{"rank": "6", "suit": "spades", "face_up": True}],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ],
+        autoplay_history=[
+            "move_to_tableau|waste|None|0|0",
+            "move_to_tableau|tableau|0|1|1",
+        ],
+        autoplay_stock_passes=2,
+    )
+
+    state, _ = eng.apply_action(state, {"type": "hint"}, PLAYERS[0])
+    assert state["hint"]["type"] == "move_to_tableau"
+    assert state["hint"]["source"] == "waste"
+    assert state["hint"]["target_col"] == 0
