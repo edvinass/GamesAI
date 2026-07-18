@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import type { CSSProperties } from 'vue'
 import type { Room, SolitaireCard, SolitaireGameState } from '@/types'
 import {
   disposeSounds,
@@ -35,6 +36,114 @@ const suppressSounds = ref(true)
 const lastSoundActionKey = ref('')
 const coachMessage = ref('')
 let coachMessageTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Dynamic tableau stack spacing so long columns stay on-screen. */
+const boardEl = ref<HTMLElement | null>(null)
+const tableauEl = ref<HTMLElement | null>(null)
+const faceDownOffsetPx = ref(12)
+const faceUpOffsetPx = ref(28)
+const MIN_FACE_DOWN_OFFSET = 7
+const MAX_FACE_DOWN_OFFSET = 14
+const MIN_FACE_UP_OFFSET = 12
+const MAX_FACE_UP_OFFSET = 32
+let tableauResizeObserver: ResizeObserver | null = null
+
+const boardLayoutStyle = computed((): CSSProperties => ({
+  '--card-offset': `${faceUpOffsetPx.value}px`,
+  '--card-offset-down': `${faceDownOffsetPx.value}px`,
+}))
+
+function peekStats(col: SolitaireCard[]): { down: number; up: number } {
+  let down = 0
+  let up = 0
+  for (let i = 0; i < col.length - 1; i++) {
+    if (col[i]?.face_up) up += 1
+    else down += 1
+  }
+  return { down, up }
+}
+
+function cardStackTop(col: SolitaireCard[], cardIndex: number): number {
+  let top = 0
+  for (let i = 0; i < cardIndex; i++) {
+    top += col[i]?.face_up ? faceUpOffsetPx.value : faceDownOffsetPx.value
+  }
+  return top
+}
+
+function measureCardHeight(tableau: HTMLElement, root: HTMLElement): number {
+  const sample =
+    (tableau.querySelector('.tableau-card--top .playing-card') as HTMLElement | null) ||
+    (tableau.querySelector('.empty-column') as HTMLElement | null) ||
+    (root.querySelector('.playing-card') as HTMLElement | null)
+  const measured = sample?.getBoundingClientRect().height ?? 0
+  if (measured > 0) return measured
+  const widthVar = getComputedStyle(root).getPropertyValue('--card-width')
+  const width = Number.parseFloat(widthVar)
+  return Number.isFinite(width) && width > 0 ? width * 1.4 : 110
+}
+
+function recomputeStackOffsets() {
+  const tableau = tableauEl.value
+  const root = boardEl.value
+  if (!tableau || !root) return
+
+  const cardHeight = measureCardHeight(tableau, root)
+  // Leave a little slack so the top card isn't flush against the chrome
+  const available = Math.max(tableau.clientHeight - 8, cardHeight + 24)
+  const cols = board.value.tableau
+  let worstDown = 0
+  let worstUp = 0
+  let worstHeightAtMax = 0
+
+  for (const col of cols) {
+    if (col.length <= 1) continue
+    const { down, up } = peekStats(col)
+    const atMax = cardHeight + down * MAX_FACE_DOWN_OFFSET + up * MAX_FACE_UP_OFFSET
+    if (atMax > worstHeightAtMax) {
+      worstHeightAtMax = atMax
+      worstDown = down
+      worstUp = up
+    }
+  }
+
+  if (worstDown + worstUp === 0) {
+    faceDownOffsetPx.value = MAX_FACE_DOWN_OFFSET
+    faceUpOffsetPx.value = MAX_FACE_UP_OFFSET
+    return
+  }
+
+  let fd = MAX_FACE_DOWN_OFFSET
+  let fu = MAX_FACE_UP_OFFSET
+  const fits = (d: number, u: number) =>
+    cardHeight + worstDown * d + worstUp * u <= available
+
+  if (!fits(fd, fu)) {
+    // Shrink face-up peeks first (they're the bulk of long cascades)
+    if (worstUp > 0) {
+      const room = available - cardHeight - worstDown * fd
+      fu = Math.max(MIN_FACE_UP_OFFSET, Math.floor(room / worstUp))
+    }
+    if (!fits(fd, fu) && worstDown > 0) {
+      fu = Math.max(fu, MIN_FACE_UP_OFFSET)
+      const room = available - cardHeight - worstUp * fu
+      fd = Math.max(MIN_FACE_DOWN_OFFSET, Math.floor(room / worstDown))
+    }
+    // Final squeeze if still overflowing
+    if (!fits(fd, fu)) {
+      fd = MIN_FACE_DOWN_OFFSET
+      if (worstUp > 0) {
+        const room = available - cardHeight - worstDown * fd
+        fu = Math.max(MIN_FACE_UP_OFFSET, Math.floor(room / worstUp))
+      } else {
+        fu = MIN_FACE_UP_OFFSET
+      }
+    }
+  }
+
+  faceDownOffsetPx.value = fd
+  faceUpOffsetPx.value = fu
+}
 
 const AUTOPLAY_FLIGHT_MS = 900
 const ANIMATABLE_ACTIONS = new Set([
@@ -976,15 +1085,32 @@ watch(
   },
 )
 
+watch(
+  () => board.value.tableau.map((col) => `${col.length}:${col.filter((c) => c.face_up).length}`).join('|'),
+  async () => {
+    await nextTick()
+    recomputeStackOffsets()
+  },
+)
+
 onMounted(() => {
   // Skip sounds from the initial state snapshot / reconnect
   requestAnimationFrame(() => {
     suppressSounds.value = false
+    recomputeStackOffsets()
   })
+  if (tableauEl.value && typeof ResizeObserver !== 'undefined') {
+    tableauResizeObserver = new ResizeObserver(() => recomputeStackOffsets())
+    tableauResizeObserver.observe(tableauEl.value)
+  }
+  window.addEventListener('resize', recomputeStackOffsets)
 })
 
 onUnmounted(() => {
   if (coachMessageTimer) clearTimeout(coachMessageTimer)
+  tableauResizeObserver?.disconnect()
+  tableauResizeObserver = null
+  window.removeEventListener('resize', recomputeStackOffsets)
   cancelFlight()
   if (dragState.value) {
     releaseDragCapture(dragState.value)
@@ -1108,11 +1234,13 @@ function isHintTargetFoundation(suit: string): boolean {
 
 <template>
   <div
+    ref="boardEl"
     class="solitaire-board"
     :class="{
       'solitaire-board--dragging': isDragging,
       'solitaire-board--autoplay': isAutoplay || isFlightAnimating,
     }"
+    :style="boardLayoutStyle"
     @click.self="clearSelection"
   >
     <div class="status-bar">
@@ -1288,7 +1416,7 @@ function isHintTargetFoundation(suit: string): boolean {
         </div>
       </div>
 
-      <div class="tableau">
+      <div ref="tableauEl" class="tableau">
         <div
           v-for="(col, colIndex) in board.tableau"
           :key="colIndex"
@@ -1331,7 +1459,7 @@ function isHintTargetFoundation(suit: string): boolean {
             :data-col="colIndex"
             :data-card="cardIndex"
             :style="{
-              '--card-index': cardIndex,
+              top: `${cardStackTop(col, cardIndex)}px`,
               zIndex: cardIndex === col.length - 1 ? cardIndex + 20 : cardIndex + 1,
             }"
             @click="selectTableauCard(colIndex, cardIndex)"
@@ -1446,16 +1574,21 @@ function isHintTargetFoundation(suit: string): boolean {
   --card-width: clamp(70px, 10vw, 100px);
   --card-height: calc(var(--card-width) * 1.4);
   --card-gap: clamp(0.4rem, 1vw, 0.75rem);
-  --card-offset: clamp(24px, 3.5vh, 32px);
+  /* Overridden dynamically via boardLayoutStyle for tall cascades */
+  --card-offset: 28px;
+  --card-offset-down: 12px;
   
   width: 100%;
   max-width: 1400px;
   margin: 0 auto;
   padding: 0 1.5rem 1.5rem;
   min-height: calc(100vh - 5.5rem);
+  height: calc(100vh - 5.5rem);
+  max-height: calc(100vh - 5.5rem);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
+  overflow: hidden;
   background:
     radial-gradient(ellipse 100% 60% at 50% -10%, rgba(34, 139, 34, 0.1) 0%, transparent 50%),
     radial-gradient(ellipse 80% 40% at 50% 110%, rgba(139, 69, 19, 0.08) 0%, transparent 45%);
@@ -1665,11 +1798,12 @@ function isHintTargetFoundation(suit: string): boolean {
 }
 
 .game-area {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.65rem;
   min-height: 0;
+  overflow: hidden;
 }
 
 .top-row {
@@ -1979,14 +2113,18 @@ function isHintTargetFoundation(suit: string): boolean {
   gap: var(--card-gap);
   justify-content: center;
   align-items: stretch;
-  flex: 1;
-  min-height: calc(var(--card-height) + var(--card-offset) * 12);
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Fill remaining viewport so offset math has a real height budget */
+  height: 100%;
+  overflow: hidden;
 }
 
 .tableau-column {
   position: relative;
   width: var(--card-width);
   min-height: var(--card-height);
+  height: 100%;
   /* Stretch so empty space below short piles is still a drop target */
   align-self: stretch;
 }
@@ -2107,14 +2245,14 @@ function isHintTargetFoundation(suit: string): boolean {
 .tableau-card {
   position: absolute;
   left: 0;
-  top: calc(var(--card-index, 0) * var(--card-offset));
+  /* `top` is set inline from cardStackTop() for mixed face-down/up spacing */
   width: var(--card-width);
   height: var(--card-height);
   cursor: grab;
   z-index: 1;
   background: transparent;
   /* Soft shadow only — hard drop shadows read as black bars between peeks */
-  transition: transform 0.2s ease, box-shadow 0.25s ease, opacity 0.15s ease;
+  transition: top 0.2s ease, transform 0.2s ease, box-shadow 0.25s ease, opacity 0.15s ease;
 }
 
 .solitaire-board--dragging .tableau-card {
@@ -2129,6 +2267,10 @@ function isHintTargetFoundation(suit: string): boolean {
   height: var(--card-offset);
   overflow: visible;
   background: transparent;
+}
+
+.tableau-card.face-down:not(.tableau-card--top) {
+  height: var(--card-offset-down);
 }
 
 .tableau-card:not(.tableau-card--top) .playing-card {
@@ -2344,10 +2486,17 @@ function isHintTargetFoundation(suit: string): boolean {
   display: flex;
   justify-content: center;
   gap: 2rem;
-  padding: 0.85rem 1.25rem;
+  padding: 0.65rem 1.25rem;
   background: rgba(21, 28, 44, 0.6);
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+@media (max-height: 700px) {
+  .controls-hint {
+    display: none;
+  }
 }
 
 .hint-item {
