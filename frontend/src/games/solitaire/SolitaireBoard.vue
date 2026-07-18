@@ -391,13 +391,19 @@ const cardsInFoundations = computed(() => {
 
 <style scoped>
 .solitaire-board {
-  max-width: 1200px;
+  --card-width: clamp(70px, 10vw, 100px);
+  --card-height: calc(var(--card-width) * 1.4);
+  --card-gap: clamp(0.4rem, 1vw, 0.75rem);
+  --card-offset: clamp(24px, 3.5vh, 32px);
+  
+  width: 100%;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 0 1rem 1.5rem;
+  padding: 0 1.5rem 1.5rem;
   min-height: calc(100vh - 5.5rem);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
   background:
     radial-gradient(ellipse 100% 60% at 50% -10%, rgba(34, 139, 34, 0.1) 0%, transparent 50%),
     radial-gradient(ellipse 80% 40% at 50% 110%, rgba(139, 69, 19, 0.08) 0%, transparent 45%);
@@ -531,33 +537,36 @@ const cardsInFoundations = computed(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
+  min-height: 0;
 }
 
 .top-row {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
+  align-items: flex-start;
+  gap: var(--card-gap);
   flex-wrap: wrap;
 }
 
 .stock-waste {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--card-gap);
 }
 
 .foundations {
   display: flex;
-  gap: 0.6rem;
+  gap: var(--card-gap);
 }
 
 .card-slot {
-  width: 80px;
-  height: 112px;
-  border-radius: 12px;
+  width: var(--card-width);
+  height: var(--card-height);
+  border-radius: calc(var(--card-width) * 0.12);
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.25s ease;
   position: relative;
+  flex-shrink: 0;
 }
 
 .card-slot:hover {
@@ -576,7 +585,7 @@ const cardsInFoundations = computed(() => {
   width: 100%;
   height: 100%;
   border: 2.5px dashed rgba(255, 255, 255, 0.18);
-  border-radius: 12px;
+  border-radius: calc(var(--card-width) * 0.12);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -609,7 +618,7 @@ const cardsInFoundations = computed(() => {
 }
 
 .empty-king {
-  font-size: 1.8rem;
+  font-size: clamp(1.2rem, calc(var(--card-width) * 0.22), 2rem);
   font-weight: 800;
   color: rgba(255, 215, 0, 0.35);
 }
@@ -620,7 +629,7 @@ const cardsInFoundations = computed(() => {
 }
 
 .foundation-suit {
-  font-size: 2.2rem;
+  font-size: clamp(1.5rem, calc(var(--card-width) * 0.28), 2.5rem);
   opacity: 0.35;
   color: #1a1a1a;
 }
@@ -710,7 +719,7 @@ const cardsInFoundations = computed(() => {
 }
 
 .recycle-icon {
-  font-size: 2rem;
+  font-size: clamp(1.5rem, calc(var(--card-width) * 0.28), 2.2rem);
   color: rgba(91, 156, 255, 0.8);
 }
 
@@ -725,7 +734,7 @@ const cardsInFoundations = computed(() => {
 .playing-card {
   width: 100%;
   height: 100%;
-  border-radius: 12px;
+  border-radius: calc(var(--card-width) * 0.12);
   background: linear-gradient(165deg, #fffef9 0%, #f8f4ea 50%, #f0ece2 100%);
   border: 1px solid rgba(0, 0, 0, 0.1);
   position: relative;
@@ -792,52 +801,53 @@ const cardsInFoundations = computed(() => {
 }
 
 .corner--tl {
-  top: 6px;
-  left: 7px;
+  top: calc(var(--card-width) * 0.06);
+  left: calc(var(--card-width) * 0.08);
 }
 
 .corner--br {
-  bottom: 6px;
-  right: 7px;
+  bottom: calc(var(--card-width) * 0.06);
+  right: calc(var(--card-width) * 0.08);
   transform: rotate(180deg);
 }
 
 .corner__rank {
-  font-size: 1rem;
+  font-size: clamp(0.7rem, calc(var(--card-width) * 0.14), 1.1rem);
   font-weight: 800;
   letter-spacing: -0.02em;
 }
 
 .corner__suit {
-  font-size: 0.9rem;
+  font-size: clamp(0.6rem, calc(var(--card-width) * 0.12), 1rem);
   margin-top: -1px;
 }
 
 .suit--center {
-  font-size: 2.2rem;
+  font-size: clamp(1.5rem, calc(var(--card-width) * 0.3), 2.5rem);
   line-height: 1;
   opacity: 0.95;
 }
 
 .tableau {
   display: flex;
-  gap: 0.6rem;
+  gap: var(--card-gap);
   justify-content: center;
   flex: 1;
-  min-height: 400px;
-  --card-offset: 28px;
+  min-height: calc(var(--card-height) + var(--card-offset) * 12);
 }
 
 .tableau-column {
   position: relative;
-  width: 80px;
-  min-height: 112px;
+  width: var(--card-width);
+  min-height: var(--card-height);
 }
 
 .empty-column {
   position: absolute;
   top: 0;
   left: 0;
+  width: var(--card-width);
+  height: var(--card-height);
 }
 
 .empty-column.drop-target .empty-slot {
@@ -848,9 +858,9 @@ const cardsInFoundations = computed(() => {
 .tableau-card {
   position: absolute;
   left: 0;
-  top: calc(var(--card-index, 0) * var(--card-offset, 28px));
-  width: 80px;
-  height: 112px;
+  top: calc(var(--card-index, 0) * var(--card-offset));
+  width: var(--card-width);
+  height: var(--card-height);
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.25s ease;
 }
@@ -1082,62 +1092,27 @@ const cardsInFoundations = computed(() => {
   color: var(--text-muted);
 }
 
+/* Large screens - bigger cards */
+@media (min-width: 1200px) {
+  .solitaire-board {
+    --card-width: clamp(90px, 8vw, 110px);
+    --card-offset: clamp(28px, 3.5vh, 36px);
+  }
+}
+
+@media (min-width: 1600px) {
+  .solitaire-board {
+    --card-width: clamp(100px, 7vw, 120px);
+    --card-offset: clamp(32px, 4vh, 40px);
+    max-width: 1600px;
+  }
+}
+
 @media (max-width: 768px) {
-  .card-slot {
-    width: 56px;
-    height: 78px;
-    border-radius: 9px;
-  }
-
-  .tableau {
-    --card-offset: 22px;
-  }
-
-  .tableau-column {
-    width: 56px;
-  }
-
-  .tableau-card {
-    width: 56px;
-    height: 78px;
-  }
-
-  .corner__rank {
-    font-size: 0.75rem;
-  }
-
-  .corner__suit {
-    font-size: 0.65rem;
-  }
-
-  .suit--center {
-    font-size: 1.5rem;
-  }
-
-  .corner--tl {
-    top: 4px;
-    left: 5px;
-  }
-
-  .corner--br {
-    bottom: 4px;
-    right: 5px;
-  }
-
-  .foundation-suit {
-    font-size: 1.5rem;
-  }
-
-  .recycle-icon {
-    font-size: 1.6rem;
-  }
-
-  .empty-king {
-    font-size: 1.3rem;
-  }
-
-  .playing-card {
-    border-radius: 9px;
+  .solitaire-board {
+    --card-width: clamp(52px, 12vw, 65px);
+    --card-offset: clamp(18px, 2.8vh, 24px);
+    padding: 0 0.75rem 1rem;
   }
 
   .top-row {
@@ -1161,15 +1136,17 @@ const cardsInFoundations = computed(() => {
 
 @media (max-width: 480px) {
   .solitaire-board {
-    padding: 0 0.5rem 1rem;
-    gap: 0.75rem;
+    --card-width: clamp(42px, 13vw, 50px);
+    --card-offset: clamp(16px, 2.5vh, 20px);
+    padding: 0 0.35rem 0.75rem;
+    gap: 0.5rem;
   }
 
   .status-bar {
-    padding: 0.6rem 0.85rem;
+    padding: 0.5rem 0.75rem;
     border-radius: 10px;
     flex-direction: column;
-    gap: 0.6rem;
+    gap: 0.5rem;
   }
 
   .stats-row {
@@ -1180,61 +1157,6 @@ const cardsInFoundations = computed(() => {
   .status-bar__right {
     width: 100%;
     justify-content: center;
-  }
-
-  .card-slot {
-    width: 44px;
-    height: 62px;
-    border-radius: 7px;
-  }
-
-  .tableau {
-    --card-offset: 18px;
-    gap: 0.25rem;
-  }
-
-  .tableau-column {
-    width: 44px;
-    min-height: 62px;
-  }
-
-  .tableau-card {
-    width: 44px;
-    height: 62px;
-  }
-
-  .foundations {
-    gap: 0.35rem;
-  }
-
-  .stock-waste {
-    gap: 0.5rem;
-  }
-
-  .playing-card {
-    border-radius: 7px;
-  }
-
-  .corner__rank {
-    font-size: 0.65rem;
-  }
-
-  .corner__suit {
-    font-size: 0.55rem;
-  }
-
-  .suit--center {
-    font-size: 1.15rem;
-  }
-
-  .corner--tl {
-    top: 3px;
-    left: 4px;
-  }
-
-  .corner--br {
-    bottom: 3px;
-    right: 4px;
   }
 
   .stat-value {
@@ -1262,6 +1184,8 @@ const cardsInFoundations = computed(() => {
 /* Phone landscape mode */
 @media (max-height: 500px) and (orientation: landscape) {
   .solitaire-board {
+    --card-width: clamp(48px, 14vh, 60px);
+    --card-offset: clamp(14px, 2vh, 18px);
     padding: 0.25rem 0.5rem;
     min-height: calc(100vh - 3.5rem);
     gap: 0.35rem;
@@ -1314,81 +1238,29 @@ const cardsInFoundations = computed(() => {
   .top-row {
     flex-direction: column;
     justify-content: flex-start;
-    gap: 0.5rem;
+    gap: 0.4rem;
     flex-shrink: 0;
     width: auto;
   }
 
   .stock-waste {
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.3rem;
   }
 
   .foundations {
     flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .card-slot {
-    width: 52px;
-    height: 72px;
-    border-radius: 8px;
+    gap: 0.2rem;
   }
 
   .tableau {
     flex: 1;
-    gap: 0.25rem;
     min-height: 0;
     align-items: flex-start;
-    --card-offset: 16px;
-  }
-
-  .tableau-column {
-    width: 52px;
-    min-height: 72px;
-  }
-
-  .tableau-card {
-    width: 52px;
-    height: 72px;
-  }
-
-  .corner__rank {
-    font-size: 0.7rem;
-  }
-
-  .corner__suit {
-    font-size: 0.6rem;
-  }
-
-  .suit--center {
-    font-size: 1.25rem;
-  }
-
-  .corner--tl {
-    top: 3px;
-    left: 4px;
-  }
-
-  .corner--br {
-    bottom: 3px;
-    right: 4px;
-  }
-
-  .foundation-suit {
-    font-size: 1.35rem;
-  }
-
-  .recycle-icon {
-    font-size: 1.4rem;
   }
 
   .recycle-label {
     font-size: 0.55rem;
-  }
-
-  .empty-king {
-    font-size: 1.1rem;
   }
 
   .stock-badge,
@@ -1434,6 +1306,8 @@ const cardsInFoundations = computed(() => {
 /* Very small landscape (iPhone SE landscape, etc.) */
 @media (max-height: 400px) and (orientation: landscape) {
   .solitaire-board {
+    --card-width: clamp(38px, 12vh, 48px);
+    --card-offset: clamp(12px, 1.8vh, 15px);
     padding: 0.15rem 0.35rem;
     gap: 0.25rem;
   }
@@ -1446,56 +1320,12 @@ const cardsInFoundations = computed(() => {
     font-size: 0.85rem;
   }
 
-  .card-slot {
-    width: 42px;
-    height: 58px;
-    border-radius: 6px;
-  }
-
-  .tableau {
-    --card-offset: 14px;
-  }
-
-  .tableau-column {
-    width: 42px;
-    min-height: 58px;
-  }
-
-  .tableau-card {
-    width: 42px;
-    height: 58px;
-  }
-
-  .corner__rank {
-    font-size: 0.6rem;
-  }
-
-  .corner__suit {
-    font-size: 0.5rem;
-  }
-
-  .suit--center {
-    font-size: 1rem;
-  }
-
-  .foundation-suit {
-    font-size: 1.1rem;
-  }
-
-  .recycle-icon {
-    font-size: 1.1rem;
-  }
-
   .stock-waste {
-    gap: 0.25rem;
-  }
-
-  .foundations {
     gap: 0.2rem;
   }
 
-  .playing-card {
-    border-radius: 6px;
+  .foundations {
+    gap: 0.15rem;
   }
 }
 </style>
