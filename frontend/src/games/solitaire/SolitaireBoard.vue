@@ -42,10 +42,10 @@ const boardEl = ref<HTMLElement | null>(null)
 const tableauEl = ref<HTMLElement | null>(null)
 const faceDownOffsetPx = ref(12)
 const faceUpOffsetPx = ref(28)
-const MIN_FACE_DOWN_OFFSET = 7
+const MIN_FACE_DOWN_OFFSET = 8
 const MAX_FACE_DOWN_OFFSET = 14
-const MIN_FACE_UP_OFFSET = 12
-const MAX_FACE_UP_OFFSET = 32
+const MIN_FACE_UP_OFFSET = 18
+const MAX_FACE_UP_OFFSET = 34
 let tableauResizeObserver: ResizeObserver | null = null
 
 const boardLayoutStyle = computed((): CSSProperties => ({
@@ -1308,7 +1308,8 @@ function isHintTargetFoundation(suit: string): boolean {
     <p v-if="hintReason" class="coach-banner" role="status">{{ hintReason }}</p>
 
     <div class="game-area">
-      <div class="top-row">
+      <!-- Stock/waste + foundations sit beside the tableau so cascades keep full height -->
+      <aside class="side-rail" aria-label="Stock and foundations">
         <div class="stock-waste">
           <div
             class="card-slot stock"
@@ -1414,7 +1415,7 @@ function isHintTargetFoundation(suit: string): boolean {
             </div>
           </div>
         </div>
-      </div>
+      </aside>
 
       <div ref="tableauEl" class="tableau">
         <div
@@ -1800,33 +1801,41 @@ function isHintTargetFoundation(suit: string): boolean {
 .game-area {
   flex: 1 1 auto;
   display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.75rem;
   min-height: 0;
   overflow: hidden;
 }
 
-.top-row {
+.side-rail {
+  flex: 0 0 auto;
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--card-gap);
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.55rem;
+  width: calc(var(--card-width) * 2 + var(--card-gap));
+  max-height: 100%;
+  overflow: visible;
+  z-index: 2;
 }
 
 .stock-waste {
   display: flex;
+  flex-direction: row;
   gap: var(--card-gap);
+  flex-shrink: 0;
 }
 
 .waste--fan {
-  width: calc(var(--card-width) + (var(--fan-count, 1) - 1) * var(--card-offset));
+  /* Draw-3 fan may extend past the rail into the tableau gutter */
+  width: calc(var(--card-width) + (var(--fan-count, 1) - 1) * min(18px, var(--card-offset)));
+  z-index: 3;
 }
 
 .waste-fan-card {
   position: absolute;
   top: 0;
-  left: calc(var(--fan-index, 0) * var(--card-offset));
+  left: calc(var(--fan-index, 0) * min(18px, var(--card-offset)));
   width: var(--card-width);
   height: var(--card-height);
   pointer-events: none;
@@ -1837,8 +1846,10 @@ function isHintTargetFoundation(suit: string): boolean {
 }
 
 .foundations {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, var(--card-width));
   gap: var(--card-gap);
+  flex-shrink: 0;
 }
 
 .card-slot {
@@ -2111,13 +2122,15 @@ function isHintTargetFoundation(suit: string): boolean {
 .tableau {
   display: flex;
   gap: var(--card-gap);
-  justify-content: center;
+  justify-content: space-evenly;
   align-items: stretch;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
-  /* Fill remaining viewport so offset math has a real height budget */
+  /* Full height beside the side rail — long cascades stay readable */
   height: 100%;
   overflow: hidden;
+  padding-left: 0.15rem;
 }
 
 .tableau-column {
@@ -2538,18 +2551,18 @@ function isHintTargetFoundation(suit: string): boolean {
 
 @media (max-width: 768px) {
   .solitaire-board {
-    --card-width: clamp(52px, 12vw, 65px);
+    --card-width: clamp(48px, 11vw, 60px);
     --card-offset: clamp(18px, 2.8vh, 24px);
-    padding: 0 0.75rem 1rem;
+    padding: 0 0.5rem 0.75rem;
   }
 
-  .top-row {
-    flex-direction: column;
-    align-items: center;
+  .side-rail {
+    width: calc(var(--card-width) * 2 + var(--card-gap));
+    gap: 0.4rem;
   }
 
   .foundations {
-    order: -1;
+    grid-template-columns: repeat(2, var(--card-width));
   }
 
   .stats-row {
@@ -2658,33 +2671,30 @@ function isHintTargetFoundation(suit: string): boolean {
 
   .game-area {
     flex-direction: row;
-    gap: 0.5rem;
+    gap: 0.4rem;
     flex: 1;
     min-height: 0;
   }
 
-  .top-row {
-    flex-direction: column;
-    justify-content: flex-start;
-    gap: 0.4rem;
-    flex-shrink: 0;
-    width: auto;
-  }
-
-  .stock-waste {
-    flex-direction: column;
+  .side-rail {
+    width: calc(var(--card-width) * 2 + var(--card-gap));
     gap: 0.3rem;
   }
 
+  .stock-waste {
+    flex-direction: row;
+    gap: 0.25rem;
+  }
+
   .foundations {
-    flex-direction: column;
-    gap: 0.2rem;
+    grid-template-columns: repeat(2, var(--card-width));
+    gap: 0.25rem;
   }
 
   .tableau {
     flex: 1;
     min-height: 0;
-    align-items: flex-start;
+    align-items: stretch;
   }
 
   .recycle-label {
@@ -2749,11 +2759,15 @@ function isHintTargetFoundation(suit: string): boolean {
   }
 
   .stock-waste {
-    gap: 0.2rem;
+    gap: 0.15rem;
   }
 
   .foundations {
     gap: 0.15rem;
+  }
+
+  .side-rail {
+    gap: 0.2rem;
   }
 }
 </style>
