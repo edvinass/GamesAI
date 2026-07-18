@@ -8,6 +8,7 @@ import { pokerRules } from './poker/rules'
 import { snakeRules } from './snake/rules'
 import { spyfallRules } from './spyfall/rules'
 import { tetrisRules } from './tetris/rules'
+import { connect4Rules } from './connect4/rules'
 
 const rulesByGameType: Record<string, GameRules> = {
   codenames: codenamesRules,
@@ -20,6 +21,7 @@ const rulesByGameType: Record<string, GameRules> = {
   chess: chessRules,
   go: goRules,
   roborally: roborallyRules,
+  connect4: connect4Rules,
 }
 
 export function getGameRules(gameType: string): GameRules | null {

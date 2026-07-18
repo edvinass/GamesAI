@@ -66,6 +66,12 @@ const metaByGameType: Record<string, GameMeta> = {
     emoji: '🤖',
     lobbyHint: 'Need 2–4 players. Pick a map, add AI to fill seats, then start.',
   },
+  connect4: {
+    name: 'Connect Four',
+    description: 'Drop discs to connect four in a row — play a friend or AI.',
+    emoji: '🔴',
+    lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
+  },
 }
 
 export interface GameListItem {

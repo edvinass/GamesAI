@@ -17,6 +17,7 @@ import PokerLobby from '@/games/poker/PokerLobby.vue'
 import ChessLobby from '@/games/chess/ChessLobby.vue'
 import GoLobby from '@/games/go/GoLobby.vue'
 import RoboRallyLobby from '@/games/roborally/RoboRallyLobby.vue'
+import Connect4Lobby from '@/games/connect4/Connect4Lobby.vue'
 import { validateLobby as validateCodenamesLobby, teamOperatives, teamSpymaster } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
@@ -27,6 +28,7 @@ import { validateLobby as validatePokerLobby } from '@/games/poker/lobbyValidati
 import { validateLobby as validateChessLobby } from '@/games/chess/lobbyValidation'
 import { validateLobby as validateGoLobby } from '@/games/go/lobbyValidation'
 import { validateLobby as validateRoboRallyLobby } from '@/games/roborally/lobbyValidation'
+import { validateLobby as validateConnect4Lobby } from '@/games/connect4/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
@@ -105,6 +107,7 @@ const isPoker = computed(() => room.value?.game_type === 'poker')
 const isChess = computed(() => room.value?.game_type === 'chess')
 const isGo = computed(() => room.value?.game_type === 'go')
 const isRoboRally = computed(() => room.value?.game_type === 'roborally')
+const isConnect4 = computed(() => room.value?.game_type === 'connect4')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
@@ -120,6 +123,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'chess') return validateChessLobby(room.value)
   if (room.value.game_type === 'go') return validateGoLobby(room.value)
   if (room.value.game_type === 'roborally') return validateRoboRallyLobby(room.value)
+  if (room.value.game_type === 'connect4') return validateConnect4Lobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
@@ -453,6 +457,21 @@ async function copyUrl() {
         v-model:solo-practice="soloPractice"
         v-model:map-id="mapId"
         v-model:register-size="registerSize"
+        v-model:ai-difficulty="aiDifficulty"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+      />
+
+      <Connect4Lobby
+        v-else-if="isConnect4"
+        v-model:solo-practice="soloPractice"
         v-model:ai-difficulty="aiDifficulty"
         :room="room"
         :is-host="isHost"
