@@ -80,6 +80,8 @@ class SolitaireEngine(GamePlugin):
             "last_action": None,
             "autoplay": False,
             "hint": None,
+            "autoplay_history": [],
+            "autoplay_stock_passes": 0,
         }
 
     def apply_action(
@@ -113,10 +115,15 @@ class SolitaireEngine(GamePlugin):
             return state, events
 
         if action_type == "set_autoplay":
+            from app.games.solitaire.ai import clear_autoplay_memory
+
             enabled = bool(action.get("enabled"))
             state["autoplay"] = enabled
             if enabled:
                 state["hint"] = None
+                clear_autoplay_memory(state)
+            else:
+                clear_autoplay_memory(state)
             state["last_action"] = {"type": "set_autoplay", "enabled": enabled}
             events.append({"type": "autoplay_changed", "enabled": enabled})
             return state, events
@@ -214,7 +221,10 @@ class SolitaireEngine(GamePlugin):
         if state.get("phase") != "playing" or not state.get("autoplay"):
             return state, []
 
-        from app.games.solitaire.ai import choose_action
+        from app.games.solitaire.ai import choose_action, record_autoplay_action
+
+        state.setdefault("autoplay_history", [])
+        state.setdefault("autoplay_stock_passes", 0)
 
         chosen, reason = choose_action(state)
         if not chosen:
@@ -226,6 +236,11 @@ class SolitaireEngine(GamePlugin):
         players = state.get("players") or []
         player = players[0] if players else {"id": "player", "name": "Player"}
         state, events = self.apply_action(state, chosen, player)
+        # apply_action may reset fields via new_game paths; re-sync memory keys
+        state.setdefault("autoplay_history", [])
+        state.setdefault("autoplay_stock_passes", 0)
+        if events:
+            record_autoplay_action(state, chosen)
         if state.get("last_action"):
             state["last_action"] = {
                 **state["last_action"],

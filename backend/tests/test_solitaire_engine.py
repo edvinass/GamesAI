@@ -363,3 +363,79 @@ def test_choose_action_exposes_face_down():
     assert action["source_index"] == 1
     assert action["target_col"] == 0
     assert "Expose" in reason
+
+
+def test_ai_does_not_ping_pong_tableau_slide():
+    """Reversible 5♥ between two 6s must not loop forever under Watch."""
+    from app.games.solitaire.ai import choose_action, record_autoplay_action
+
+    eng, state = _engine_state(
+        tableau=[
+            [
+                {"rank": "6", "suit": "spades", "face_up": True},
+                {"rank": "5", "suit": "hearts", "face_up": True},
+            ],
+            [{"rank": "6", "suit": "clubs", "face_up": True}],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ],
+        autoplay=True,
+        autoplay_history=[],
+        autoplay_stock_passes=0,
+    )
+
+    # First choice may still move 5♥ onto the other 6 (no expose either way).
+    # After that move is recorded, the reverse must be blocked and AI should draw/stop.
+    action1, _ = choose_action(state)
+    # Pure rearrange with no expose / empty-column should be skipped entirely now
+    if action1 and action1.get("type") == "move_to_tableau" and action1.get("source") == "tableau":
+        # Apply and ensure we don't bounce back
+        state, _ = eng.apply_action(state, action1, PLAYERS[0])
+        record_autoplay_action(state, action1)
+        action2, _ = choose_action(state)
+        if action2 and action2.get("type") == "move_to_tableau":
+            assert not (
+                action2.get("source_index") == action1.get("target_col")
+                and action2.get("target_col") == action1.get("source_index")
+            )
+    else:
+        # Preferred: no pointless slide is offered when nothing is exposed
+        assert action1 is None or action1.get("type") in ("draw", "reset_stock", "move_to_foundation")
+
+
+def test_ai_blocks_recorded_reverse():
+    from app.games.solitaire.ai import choose_action, record_autoplay_action
+
+    eng, state = _engine_state(
+        tableau=[
+            [{"rank": "6", "suit": "spades", "face_up": True}],
+            [
+                {"rank": "6", "suit": "clubs", "face_up": True},
+                {"rank": "5", "suit": "hearts", "face_up": True},
+            ],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ],
+        autoplay_history=[],
+    )
+
+    forward = {
+        "type": "move_to_tableau",
+        "source": "tableau",
+        "source_index": 1,
+        "card_index": 1,
+        "target_col": 0,
+    }
+    record_autoplay_action(state, forward)
+
+    # Even if a reverse were legal as a "build", history must block it;
+    # and productive-move filter should not offer empty rearranges anyway.
+    action, _ = choose_action(state)
+    if action and action.get("type") == "move_to_tableau" and action.get("source") == "tableau":
+        assert action.get("source_index") != 0 or action.get("target_col") != 1
