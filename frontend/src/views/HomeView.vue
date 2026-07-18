@@ -613,27 +613,22 @@ function switchToJoin() {
 
 .launch {
   animation: fadeInUp 0.5s var(--ease-smooth) 0.16s both;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.85rem;
   padding: 1.25rem;
+  overflow: hidden;
 }
 
 @media (min-width: 640px) {
   .launch {
-    flex-direction: row;
-    align-items: flex-end;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: end;
     gap: 1rem;
   }
 
-  .launch label {
-    flex: 1;
-  }
-
-  .enter-btn {
-    flex-shrink: 0;
-    width: auto;
-    min-width: 220px;
+  .launch .error-msg {
+    grid-column: 1 / -1;
   }
 }
 
@@ -644,16 +639,28 @@ label {
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--text-muted);
+  min-width: 0;
+}
+
+.launch input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .enter-btn {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   font-size: 1.05rem;
   letter-spacing: 0.02em;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

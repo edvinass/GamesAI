@@ -1,7 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import type { BattleshipGameState, Room } from '@/types'
 import { buildShipSegmentMap, previewSegments, type ShipSegment } from './shipVisual'
+import {
+  isSoundMuted,
+  playAutoPlace,
+  playBattleStart,
+  playFire,
+  playHit,
+  playLose,
+  playMiss,
+  playPlaceShip,
+  playReady,
+  playRemoveShip,
+  playSink,
+  playWin,
+  playYourTurn,
+  setSoundMuted,
+  unlockAudio,
+} from './sounds'
 
 const props = defineProps<{
   gameState: BattleshipGameState
@@ -16,6 +33,30 @@ const emit = defineEmits<{
 const selectedShipId = ref<string | null>(null)
 const horizontal = ref(true)
 const hoverCell = ref<{ row: number; col: number } | null>(null)
+const soundMuted = ref(isSoundMuted())
+
+type ShotFx = {
+  key: number
+  row: number
+  col: number
+  kind: 'miss' | 'hit' | 'sunk'
+  board: 'own' | 'enemy'
+  sunkKeys: Set<string>
+}
+
+const shotFx = ref<ShotFx | null>(null)
+const resultFlash = ref<{ key: number; text: string; tone: 'miss' | 'hit' | 'sunk' | 'win' | 'lose' } | null>(
+  null,
+)
+const boardImpact = ref<'miss' | 'hit' | 'sunk' | null>(null)
+
+let fxClearTimer: ReturnType<typeof setTimeout> | null = null
+let flashClearTimer: ReturnType<typeof setTimeout> | null = null
+let impactClearTimer: ReturnType<typeof setTimeout> | null = null
+let lastShotSig = ''
+let lastPhase = props.gameState.phase
+let lastActorId = props.gameState.current_actor_id
+let lastPlacedCount = -1
 
 const viewerId = computed(() => props.gameState.viewer_id)
 const opponentId = computed(() => props.gameState.opponent_id)
@@ -174,10 +215,18 @@ function enemySeg(row: number, col: number): ShipSegment | null {
   return segmentAt(enemySegments.value, row, col)
 }
 
+function toggleMute() {
+  const next = !soundMuted.value
+  setSoundMuted(next)
+  soundMuted.value = next
+  if (!next) void unlockAudio()
+}
+
 function onOwnCellClick(row: number, col: number) {
   if (props.gameState.phase !== 'placing' || isSpectator.value || isReady.value) return
   if (!selectedShipId.value) return
   if (!previewCells(row, col)) return
+  void unlockAudio()
   emit('action', {
     type: 'place_ship',
     ship_id: selectedShipId.value,
@@ -190,23 +239,59 @@ function onOwnCellClick(row: number, col: number) {
 function onOppCellClick(row: number, col: number) {
   if (!isMyTurn.value) return
   if (!legalShotSet.value.has(`${row},${col}`)) return
+  void unlockAudio()
+  playFire()
   emit('action', { type: 'fire', row, col })
 }
 
 function removeShip(shipId: string) {
   if (props.gameState.phase !== 'placing' || isReady.value) return
+  void unlockAudio()
+  playRemoveShip()
   emit('action', { type: 'remove_ship', ship_id: shipId })
 }
 
 function autoPlace() {
   if (props.gameState.phase !== 'placing' || isReady.value) return
+  void unlockAudio()
+  playAutoPlace()
   emit('action', { type: 'auto_place' })
 }
 
 function readyUp() {
   if (props.gameState.phase !== 'placing' || isReady.value) return
   if (placedShips.value.length < props.gameState.ship_defs.length) return
+  void unlockAudio()
+  playReady()
   emit('action', { type: 'ready' })
+}
+
+function showResultFlash(text: string, tone: 'miss' | 'hit' | 'sunk' | 'win' | 'lose') {
+  resultFlash.value = { key: Date.now(), text, tone }
+  if (flashClearTimer) clearTimeout(flashClearTimer)
+  flashClearTimer = setTimeout(() => {
+    resultFlash.value = null
+  }, tone === 'sunk' || tone === 'win' || tone === 'lose' ? 1600 : 900)
+}
+
+function triggerBoardImpact(kind: 'miss' | 'hit' | 'sunk') {
+  boardImpact.value = kind
+  if (impactClearTimer) clearTimeout(impactClearTimer)
+  impactClearTimer = setTimeout(() => {
+    boardImpact.value = null
+  }, kind === 'sunk' ? 700 : 380)
+}
+
+function cellFxClass(board: 'own' | 'enemy', row: number, col: number) {
+  const fx = shotFx.value
+  if (!fx || fx.board !== board) return {}
+  const key = `${row},${col}`
+  const isEpicenter = fx.row === row && fx.col === col
+  return {
+    'fx-miss': isEpicenter && fx.kind === 'miss',
+    'fx-hit': isEpicenter && (fx.kind === 'hit' || fx.kind === 'sunk'),
+    'fx-sunk-cell': fx.kind === 'sunk' && fx.sunkKeys.has(key),
+  }
 }
 
 function resign() {
@@ -297,10 +382,140 @@ const lastShotLabel = computed(() => {
   if (shot.result === 'hit') return `${who} hit at ${coord}`
   return `${who} missed at ${coord}`
 })
+
+watch(
+  () => props.gameState.last_shot,
+  (shot) => {
+    if (!shot) return
+    const sig = `${shot.player_id}:${shot.row},${shot.col}:${shot.result}:${props.gameState.shot_history.length}`
+    if (sig === lastShotSig) return
+    lastShotSig = sig
+
+    void unlockAudio()
+    // AI (or remote) fires without a local click — play launch then impact.
+    if (shot.player_id !== props.playerId) {
+      playFire()
+    }
+
+    const board: 'own' | 'enemy' =
+      shot.target_player_id === viewerId.value ? 'own' : 'enemy'
+    const sunkKeys = new Set<string>()
+    if (shot.result === 'sunk' && shot.sunk_ship?.cells) {
+      for (const [r, c] of shot.sunk_ship.cells) sunkKeys.add(`${r},${c}`)
+    }
+
+    const kind = shot.result === 'sunk' ? 'sunk' : shot.result === 'hit' ? 'hit' : 'miss'
+    shotFx.value = {
+      key: Date.now(),
+      row: shot.row,
+      col: shot.col,
+      kind,
+      board,
+      sunkKeys,
+    }
+    if (fxClearTimer) clearTimeout(fxClearTimer)
+    fxClearTimer = setTimeout(() => {
+      shotFx.value = null
+    }, kind === 'sunk' ? 1400 : 750)
+
+    const delay = shot.player_id !== props.playerId ? 180 : 40
+    setTimeout(() => {
+      if (kind === 'miss') {
+        playMiss()
+        showResultFlash('MISS', 'miss')
+        triggerBoardImpact('miss')
+      } else if (kind === 'hit') {
+        playHit()
+        showResultFlash('HIT!', 'hit')
+        triggerBoardImpact('hit')
+      } else {
+        playSink()
+        const name = shot.sunk_ship?.name?.toUpperCase() ?? 'SHIP'
+        showResultFlash(`SUNK — ${name}`, 'sunk')
+        triggerBoardImpact('sunk')
+      }
+    }, delay)
+  },
+)
+
+watch(
+  () => props.gameState.phase,
+  (phase) => {
+    if (phase === lastPhase) return
+    const prev = lastPhase
+    lastPhase = phase
+    void unlockAudio()
+    if (phase === 'playing' && prev === 'placing') {
+      playBattleStart()
+      showResultFlash('BATTLE STATIONS', 'hit')
+    }
+    if (phase === 'game_over') {
+      const won = props.gameState.winner === props.playerId
+      if (won) {
+        playWin()
+        showResultFlash('VICTORY', 'win')
+      } else if (props.gameState.winner) {
+        playLose()
+        showResultFlash('DEFEATED', 'lose')
+      }
+    }
+  },
+)
+
+watch(
+  () => props.gameState.current_actor_id,
+  (actorId) => {
+    if (actorId === lastActorId) return
+    lastActorId = actorId
+    if (
+      props.gameState.phase === 'playing' &&
+      actorId === props.playerId &&
+      props.gameState.shot_history.length > 0
+    ) {
+      void unlockAudio()
+      playYourTurn()
+    }
+  },
+)
+
+watch(placedShips, (ships) => {
+  const count = ships.length
+  if (lastPlacedCount < 0) {
+    lastPlacedCount = count
+    return
+  }
+  if (count > lastPlacedCount) {
+    void unlockAudio()
+    playPlaceShip()
+  }
+  lastPlacedCount = count
+})
+
+onUnmounted(() => {
+  if (fxClearTimer) clearTimeout(fxClearTimer)
+  if (flashClearTimer) clearTimeout(flashClearTimer)
+  if (impactClearTimer) clearTimeout(impactClearTimer)
+})
 </script>
 
 <template>
-  <div class="battleship-board" :class="{ 'my-turn': isMyTurn }">
+  <div
+    class="battleship-board"
+    :class="[
+      { 'my-turn': isMyTurn },
+      boardImpact ? `impact-${boardImpact}` : null,
+    ]"
+  >
+    <div
+      v-if="resultFlash"
+      :key="resultFlash.key"
+      class="result-flash"
+      :class="resultFlash.tone"
+      aria-live="polite"
+    >
+      {{ resultFlash.text }}
+    </div>
+
     <div class="shell">
       <div class="play-area">
         <div class="player-bar me" :class="{ active: isMyTurn || gameState.phase === 'placing' }">
@@ -319,10 +534,19 @@ const lastShotLabel = computed(() => {
               </template>
             </p>
           </div>
+          <button
+            type="button"
+            class="mute-btn"
+            :aria-pressed="soundMuted"
+            :title="soundMuted ? 'Unmute sounds' : 'Mute sounds'"
+            @click="toggleMute"
+          >
+            {{ soundMuted ? '🔇' : '🔊' }}
+          </button>
         </div>
 
         <div class="boards">
-          <section class="board-panel own">
+          <section class="board-panel own" :class="{ 'panel-hit': boardImpact === 'hit' || boardImpact === 'sunk' }">
             <header class="board-header">
               <h3>Your waters</h3>
               <span v-if="gameState.phase === 'placing' && !isReady" class="hint">
@@ -345,7 +569,7 @@ const lastShotLabel = computed(() => {
                     :key="`${ri}-${ci}`"
                     type="button"
                     class="cell"
-                    :class="
+                    :class="[
                       cellClass(cell, {
                         seg: ownSeg(ri, ci),
                         preview: isPreviewCell(ri, ci),
@@ -353,8 +577,9 @@ const lastShotLabel = computed(() => {
                         last:
                           lastShotKey === `${ri},${ci}` &&
                           gameState.last_shot?.target_player_id === viewerId,
-                      })
-                    "
+                      }),
+                      cellFxClass('own', ri, ci),
+                    ]"
                     :disabled="gameState.phase !== 'placing' || isReady || isSpectator"
                     :aria-label="`Own ${cols[ci]}${r}`"
                     @mouseenter="hoverCell = { row: ri, col: ci }"
@@ -370,6 +595,11 @@ const lastShotLabel = computed(() => {
                       <i v-if="ownSeg(ri, ci)?.hasBridge" class="superstructure" />
                       <i v-if="ownSeg(ri, ci)?.role === 'mid'" class="porthole" />
                     </span>
+                    <span class="fx-layer" aria-hidden="true">
+                      <i class="splash" />
+                      <i class="boom" />
+                      <i class="ring" />
+                    </span>
                   </button>
                 </div>
               </div>
@@ -383,7 +613,13 @@ const lastShotLabel = computed(() => {
             </div>
           </section>
 
-          <section class="board-panel enemy" :class="{ armed: isMyTurn }">
+          <section
+            class="board-panel enemy"
+            :class="{
+              armed: isMyTurn,
+              'panel-hit': boardImpact === 'hit' || boardImpact === 'sunk',
+            }"
+          >
             <header class="board-header">
               <h3>Enemy waters</h3>
               <span v-if="isMyTurn" class="hint fire">Fire when ready</span>
@@ -402,15 +638,16 @@ const lastShotLabel = computed(() => {
                     :key="`e-${ri}-${ci}`"
                     type="button"
                     class="cell"
-                    :class="
+                    :class="[
                       cellClass(cell, {
                         seg: enemySeg(ri, ci),
                         last:
                           lastShotKey === `${ri},${ci}` &&
                           gameState.last_shot?.target_player_id === opponentId,
                         clickable: isMyTurn && legalShotSet.has(`${ri},${ci}`),
-                      })
-                    "
+                      }),
+                      cellFxClass('enemy', ri, ci),
+                    ]"
                     :disabled="!isMyTurn || !legalShotSet.has(`${ri},${ci}`)"
                     :aria-label="`Enemy ${cols[ci]}${r}`"
                     @click="onOppCellClick(ri, ci)"
@@ -423,6 +660,11 @@ const lastShotLabel = computed(() => {
                     >
                       <i v-if="enemySeg(ri, ci)?.hasBridge" class="superstructure" />
                       <i v-if="enemySeg(ri, ci)?.role === 'mid'" class="porthole" />
+                    </span>
+                    <span class="fx-layer" aria-hidden="true">
+                      <i class="splash" />
+                      <i class="boom" />
+                      <i class="ring" />
                     </span>
                   </button>
                 </div>
@@ -575,6 +817,7 @@ const lastShotLabel = computed(() => {
   --hull-deep: #8a6f45;
   --hit: #e85d4c;
   --miss: #8ec8d4;
+  position: relative;
   flex: 1;
   min-height: 0;
   width: 100%;
@@ -631,6 +874,165 @@ const lastShotLabel = computed(() => {
 .player-bar.active {
   border-color: rgba(45, 156, 170, 0.45);
   box-shadow: 0 0 0 1px rgba(45, 156, 170, 0.12);
+}
+
+.mute-btn {
+  border: 1px solid var(--border);
+  background: rgba(10, 14, 23, 0.45);
+  border-radius: 8px;
+  width: 2.1rem;
+  height: 2.1rem;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.mute-btn:hover {
+  border-color: rgba(45, 156, 170, 0.45);
+  background: rgba(45, 156, 170, 0.12);
+}
+
+.result-flash {
+  position: absolute;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  z-index: 20;
+  pointer-events: none;
+  font-family: 'Outfit', 'DM Sans', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: clamp(1.4rem, 3.5vw, 2.2rem);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.45rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  animation: flashPop 0.9s var(--ease-bounce) both;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+}
+
+.result-flash.miss {
+  color: #b8e8f0;
+  background: rgba(20, 50, 60, 0.82);
+  border-color: rgba(142, 200, 212, 0.45);
+}
+
+.result-flash.hit {
+  color: #ffc4b8;
+  background: rgba(60, 22, 18, 0.88);
+  border-color: rgba(232, 93, 76, 0.55);
+  animation-duration: 1s;
+}
+
+.result-flash.sunk {
+  color: #ffe0a8;
+  background: linear-gradient(145deg, rgba(70, 40, 16, 0.92), rgba(30, 18, 12, 0.95));
+  border-color: rgba(232, 160, 70, 0.55);
+  animation: flashPop 1.4s var(--ease-bounce) both, sunkGlow 0.8s ease-in-out 0.1s 2;
+}
+
+.result-flash.win {
+  color: #d4f5c8;
+  background: rgba(18, 50, 30, 0.9);
+  border-color: rgba(100, 200, 120, 0.5);
+  animation-duration: 1.5s;
+}
+
+.result-flash.lose {
+  color: #d0d6e0;
+  background: rgba(20, 24, 34, 0.92);
+  border-color: rgba(120, 130, 150, 0.4);
+  animation-duration: 1.5s;
+}
+
+@keyframes flashPop {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.7) translateY(8px);
+  }
+  18% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.08) translateY(0);
+  }
+  70% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.96) translateY(-6px);
+  }
+}
+
+@keyframes sunkGlow {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.25);
+  }
+}
+
+.battleship-board.impact-miss .boards {
+  animation: boardNudge 0.35s var(--ease-smooth);
+}
+
+.battleship-board.impact-hit .boards {
+  animation: boardKick 0.4s var(--ease-smooth);
+}
+
+.battleship-board.impact-sunk .boards {
+  animation: boardQuake 0.65s var(--ease-smooth);
+}
+
+@keyframes boardNudge {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(2px);
+  }
+}
+
+@keyframes boardKick {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(-2px, 1px);
+  }
+  55% {
+    transform: translate(2px, -1px);
+  }
+}
+
+@keyframes boardQuake {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  15% {
+    transform: translate(-3px, 2px) rotate(-0.4deg);
+  }
+  35% {
+    transform: translate(3px, -2px) rotate(0.4deg);
+  }
+  55% {
+    transform: translate(-2px, 1px) rotate(-0.2deg);
+  }
+  75% {
+    transform: translate(2px, -1px) rotate(0.2deg);
+  }
+}
+
+.board-panel.panel-hit {
+  box-shadow: 0 0 0 1px rgba(232, 93, 76, 0.25), 0 0 24px rgba(232, 93, 76, 0.12);
 }
 
 .mark {
@@ -992,6 +1394,146 @@ const lastShotLabel = computed(() => {
 
 .cell.hit .hull-piece {
   display: none;
+}
+
+.fx-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.fx-layer .splash,
+.fx-layer .boom,
+.fx-layer .ring {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  border-radius: 50%;
+}
+
+.cell.fx-miss .splash {
+  opacity: 1;
+  background:
+    radial-gradient(circle at 50% 55%, rgba(200, 240, 255, 0.85) 0%, rgba(100, 180, 200, 0.35) 35%, transparent 65%);
+  animation: splashBurst 0.7s var(--ease-smooth) both;
+}
+
+.cell.fx-miss .ring {
+  opacity: 1;
+  border: 2px solid rgba(180, 230, 245, 0.7);
+  animation: rippleOut 0.7s var(--ease-smooth) both;
+}
+
+.cell.fx-hit .boom {
+  opacity: 1;
+  background:
+    radial-gradient(circle at 50% 45%, #fff3c4 0%, #ff8a50 28%, #e85d4c 52%, transparent 70%);
+  animation: boomBurst 0.65s var(--ease-smooth) both;
+}
+
+.cell.fx-hit .ring {
+  opacity: 1;
+  border: 2px solid rgba(255, 160, 120, 0.85);
+  animation: rippleOut 0.55s var(--ease-smooth) both;
+}
+
+.cell.fx-hit .cell-fill {
+  animation: hitPop 0.45s var(--ease-bounce) both;
+}
+
+.cell.fx-sunk-cell .cell-fill,
+.cell.fx-sunk-cell .hull-piece {
+  animation: sunkShake 0.7s ease-in-out both;
+}
+
+.cell.fx-sunk-cell .boom {
+  opacity: 1;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(255, 220, 140, 0.9) 0%, rgba(232, 93, 76, 0.55) 40%, transparent 68%);
+  animation: boomBurst 0.9s var(--ease-smooth) both;
+}
+
+.cell.ship.fx-sunk-cell .cell-fill {
+  filter: grayscale(0.2) brightness(0.85) saturate(0.8);
+}
+
+@keyframes splashBurst {
+  0% {
+    transform: scale(0.2);
+    opacity: 0.9;
+  }
+  55% {
+    transform: scale(1.35);
+    opacity: 0.75;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+@keyframes boomBurst {
+  0% {
+    transform: scale(0.15);
+    opacity: 1;
+  }
+  40% {
+    transform: scale(1.25);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes rippleOut {
+  0% {
+    transform: scale(0.3);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@keyframes hitPop {
+  0% {
+    transform: scale(0.4);
+  }
+  55% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes sunkShake {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(-2px, 1px) rotate(-1deg);
+  }
+  40% {
+    transform: translate(2px, -1px) rotate(1deg);
+  }
+  60% {
+    transform: translate(-1px, 2px) rotate(-0.5deg);
+  }
+  80% {
+    transform: translate(1px, -1px) rotate(0.5deg);
+  }
+}
+
+.cell.clickable:active .cell-fill {
+  transform: scale(0.92);
+  background: rgba(232, 93, 76, 0.25);
 }
 
 .cell.miss .cell-fill {
@@ -1386,7 +1928,19 @@ const lastShotLabel = computed(() => {
   .cell.last .cell-fill,
   .game-over-card,
   .hint.fire,
-  .cell.preview .cell-fill {
+  .cell.preview .cell-fill,
+  .result-flash,
+  .battleship-board.impact-miss .boards,
+  .battleship-board.impact-hit .boards,
+  .battleship-board.impact-sunk .boards,
+  .cell.fx-miss .splash,
+  .cell.fx-miss .ring,
+  .cell.fx-hit .boom,
+  .cell.fx-hit .ring,
+  .cell.fx-hit .cell-fill,
+  .cell.fx-sunk-cell .cell-fill,
+  .cell.fx-sunk-cell .hull-piece,
+  .cell.fx-sunk-cell .boom {
     animation: none !important;
   }
 }
