@@ -163,9 +163,15 @@ function seatInitial(nickname: string): string {
             <span v-for="i in 100" :key="i" class="mini-cell" />
           </div>
           <div class="mini-ships">
-            <i class="ship long" />
-            <i class="ship mid" />
-            <i class="ship short" />
+            <span class="ship long" aria-hidden="true">
+              <i class="stern" /><i class="mid" /><i class="mid bridge" /><i class="mid" /><i class="bow" />
+            </span>
+            <span class="ship mid-ship" aria-hidden="true">
+              <i class="stern" /><i class="mid bridge" /><i class="bow" />
+            </span>
+            <span class="ship short" aria-hidden="true">
+              <i class="stern" /><i class="bow" />
+            </span>
           </div>
         </div>
 
@@ -513,24 +519,58 @@ function seatInitial(nickname: string): string {
 
 .ship {
   position: absolute;
-  height: 8%;
-  border-radius: 3px;
-  background: linear-gradient(180deg, #e0c89a, var(--hull) 55%, #8a6f45);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  height: 9%;
+  display: flex;
+  align-items: stretch;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
   animation: shipIn 0.55s var(--ease-bounce) backwards;
 }
 
+.ship i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(180deg, #e8d2a8, var(--hull) 50%, #8a6f45);
+  position: relative;
+}
+
+.ship .stern {
+  width: 18%;
+  clip-path: polygon(18% 22%, 100% 14%, 100% 86%, 18% 78%, 0% 50%);
+}
+
+.ship .mid {
+  flex: 1;
+  clip-path: polygon(0% 14%, 100% 14%, 100% 86%, 0% 86%);
+  margin: 0 -1px;
+}
+
+.ship .bow {
+  width: 22%;
+  clip-path: polygon(0% 14%, 55% 8%, 100% 50%, 55% 92%, 0% 86%);
+}
+
+.ship .mid.bridge::after {
+  content: '';
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  top: 6%;
+  height: 40%;
+  border-radius: 1px;
+  background: #4a3b28;
+}
+
 .ship.long {
-  width: 42%;
-  left: 12%;
-  top: 28%;
+  width: 46%;
+  left: 10%;
+  top: 26%;
   animation-delay: 0.15s;
 }
 
-.ship.mid {
-  width: 28%;
-  left: 48%;
-  top: 55%;
+.ship.mid-ship {
+  width: 30%;
+  left: 52%;
+  top: 54%;
   animation-delay: 0.3s;
 }
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { BattleshipGameState, Room } from '@/types'
+import { buildShipSegmentMap, previewSegments, type ShipSegment } from './shipVisual'
 
 const props = defineProps<{
   gameState: BattleshipGameState
@@ -123,17 +124,55 @@ function previewCells(row: number, col: number): Array<[number, number]> | null 
   return cells
 }
 
-const previewSet = computed(() => {
-  if (!hoverCell.value) return new Set<string>()
-  const cells = previewCells(hoverCell.value.row, hoverCell.value.col)
-  if (!cells) return new Set<string>()
-  return new Set(cells.map(([r, c]) => `${r},${c}`))
-})
-
 const previewValid = computed(() => {
   if (!hoverCell.value || !selectedShipId.value) return false
   return previewCells(hoverCell.value.row, hoverCell.value.col) !== null
 })
+
+const ownSegments = computed(() => buildShipSegmentMap(placedShips.value))
+
+const enemySegments = computed(() => {
+  const ships = (oppFleet.value?.ships ?? []).filter(
+    (s) => s.placed && s.cells?.length && (s.sunk || props.gameState.phase === 'game_over'),
+  )
+  return buildShipSegmentMap(ships)
+})
+
+const previewSegmentMap = computed(() => {
+  if (props.gameState.phase !== 'placing' || !selectedShipId.value || isReady.value) {
+    return new Map<string, ShipSegment>()
+  }
+  if (!hoverCell.value) return new Map<string, ShipSegment>()
+  const ship = unplacedShips.value.find((s) => s.id === selectedShipId.value)
+  if (!ship) return new Map<string, ShipSegment>()
+  // Always show a ghost hull shape; validity is signaled separately.
+  return previewSegments(
+    hoverCell.value.row,
+    hoverCell.value.col,
+    ship.length,
+    horizontal.value,
+  )
+})
+
+function segmentAt(
+  map: Map<string, ShipSegment>,
+  row: number,
+  col: number,
+): ShipSegment | null {
+  return map.get(`${row},${col}`) ?? null
+}
+
+function ownSeg(row: number, col: number): ShipSegment | null {
+  return segmentAt(ownSegments.value, row, col) ?? segmentAt(previewSegmentMap.value, row, col)
+}
+
+function isPreviewCell(row: number, col: number): boolean {
+  return !ownSegments.value.has(`${row},${col}`) && previewSegmentMap.value.has(`${row},${col}`)
+}
+
+function enemySeg(row: number, col: number): ShipSegment | null {
+  return segmentAt(enemySegments.value, row, col)
+}
 
 function onOwnCellClick(row: number, col: number) {
   if (props.gameState.phase !== 'placing' || isSpectator.value || isReady.value) return
@@ -179,13 +218,30 @@ function resign() {
 
 function cellClass(
   cell: { state: string },
-  opts: { preview?: boolean; last?: boolean; clickable?: boolean } = {},
+  opts: {
+    last?: boolean
+    clickable?: boolean
+    seg?: ShipSegment | null
+    preview?: boolean
+    previewInvalid?: boolean
+  } = {},
 ) {
+  const seg = opts.seg
   return {
-    [cell.state]: true,
-    preview: opts.preview,
+    hit: cell.state === 'hit',
+    miss: cell.state === 'miss',
+    ship: Boolean(seg) && !opts.preview,
+    preview: Boolean(opts.preview && seg),
+    'preview-invalid': Boolean(opts.preview && opts.previewInvalid),
     last: opts.last,
     clickable: opts.clickable,
+    bow: seg?.role === 'bow',
+    mid: seg?.role === 'mid',
+    stern: seg?.role === 'stern',
+    horizontal: Boolean(seg?.horizontal),
+    vertical: Boolean(seg && !seg.horizontal),
+    bridge: Boolean(seg?.hasBridge),
+    sunk: Boolean(seg?.sunk),
   }
 }
 
@@ -289,12 +345,16 @@ const lastShotLabel = computed(() => {
                     :key="`${ri}-${ci}`"
                     type="button"
                     class="cell"
-                    :class="cellClass(cell, {
-                      preview: previewSet.has(`${ri},${ci}`),
-                      last:
-                        lastShotKey === `${ri},${ci}` &&
-                        gameState.last_shot?.target_player_id === viewerId,
-                    })"
+                    :class="
+                      cellClass(cell, {
+                        seg: ownSeg(ri, ci),
+                        preview: isPreviewCell(ri, ci),
+                        previewInvalid: isPreviewCell(ri, ci) && !previewValid,
+                        last:
+                          lastShotKey === `${ri},${ci}` &&
+                          gameState.last_shot?.target_player_id === viewerId,
+                      })
+                    "
                     :disabled="gameState.phase !== 'placing' || isReady || isSpectator"
                     :aria-label="`Own ${cols[ci]}${r}`"
                     @mouseenter="hoverCell = { row: ri, col: ci }"
@@ -302,6 +362,14 @@ const lastShotLabel = computed(() => {
                     @click="onOwnCellClick(ri, ci)"
                   >
                     <span class="cell-fill" />
+                    <span
+                      v-if="ownSeg(ri, ci) && cell.state !== 'hit'"
+                      class="hull-piece"
+                      aria-hidden="true"
+                    >
+                      <i v-if="ownSeg(ri, ci)?.hasBridge" class="superstructure" />
+                      <i v-if="ownSeg(ri, ci)?.role === 'mid'" class="porthole" />
+                    </span>
                   </button>
                 </div>
               </div>
@@ -334,24 +402,28 @@ const lastShotLabel = computed(() => {
                     :key="`e-${ri}-${ci}`"
                     type="button"
                     class="cell"
-                    :class="cellClass(cell, {
-                      last:
-                        lastShotKey === `${ri},${ci}` &&
-                        gameState.last_shot?.target_player_id === opponentId,
-                      clickable: isMyTurn && legalShotSet.has(`${ri},${ci}`),
-                    })"
+                    :class="
+                      cellClass(cell, {
+                        seg: enemySeg(ri, ci),
+                        last:
+                          lastShotKey === `${ri},${ci}` &&
+                          gameState.last_shot?.target_player_id === opponentId,
+                        clickable: isMyTurn && legalShotSet.has(`${ri},${ci}`),
+                      })
+                    "
                     :disabled="!isMyTurn || !legalShotSet.has(`${ri},${ci}`)"
                     :aria-label="`Enemy ${cols[ci]}${r}`"
                     @click="onOppCellClick(ri, ci)"
                   >
                     <span class="cell-fill" />
                     <span
-                      v-if="
-                        gameState.phase === 'game_over' &&
-                        cell.state === 'ship'
-                      "
-                      class="reveal-ship"
-                    />
+                      v-if="enemySeg(ri, ci) && cell.state !== 'hit'"
+                      class="hull-piece"
+                      aria-hidden="true"
+                    >
+                      <i v-if="enemySeg(ri, ci)?.hasBridge" class="superstructure" />
+                      <i v-if="enemySeg(ri, ci)?.role === 'mid'" class="porthole" />
+                    </span>
                   </button>
                 </div>
               </div>
@@ -430,8 +502,12 @@ const lastShotLabel = computed(() => {
               "
             >
               <span class="ship-name">{{ ship.name }}</span>
-              <span class="ship-len" aria-hidden="true">
-                <i v-for="n in ship.length" :key="n" />
+              <span class="ship-mini" aria-hidden="true" :style="{ '--len': ship.length }">
+                <span class="mini-stern" />
+                <span v-for="n in Math.max(0, ship.length - 2)" :key="n" class="mini-mid">
+                  <i v-if="n === Math.max(1, Math.floor((ship.length - 2) * 0.55))" class="mini-bridge" />
+                </span>
+                <span class="mini-bow" />
               </span>
               <span class="ship-action">
                 {{ placedShips.some((s) => s.id === ship.id) ? 'Remove' : 'Place' }}
@@ -748,23 +824,181 @@ const lastShotLabel = computed(() => {
     transform 0.12s;
 }
 
-.cell.ship .cell-fill {
-  background: linear-gradient(180deg, #e0c89a, var(--hull) 50%, var(--hull-deep));
+/* Connected hull segments — pointed bow, flat stern, tapered mid. */
+.cell.ship .cell-fill,
+.cell.preview .cell-fill {
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, #ecd7b0 0%, var(--hull) 42%, var(--hull-deep) 100%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 1px 2px rgba(0, 0, 0, 0.3);
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.28),
+    0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+.cell.ship.vertical .cell-fill,
+.cell.preview.vertical .cell-fill {
+  background:
+    linear-gradient(90deg, var(--hull-deep) 0%, var(--hull) 45%, #ecd7b0 100%);
+}
+
+.cell.ship.horizontal.stern .cell-fill,
+.cell.preview.horizontal.stern .cell-fill {
+  clip-path: polygon(12% 22%, 100% 16%, 100% 84%, 12% 78%, 0% 50%);
+  margin-right: -1px;
+}
+
+.cell.ship.horizontal.mid .cell-fill,
+.cell.preview.horizontal.mid .cell-fill {
+  clip-path: polygon(0% 16%, 100% 16%, 100% 84%, 0% 84%);
+  margin: 0 -1px;
+}
+
+.cell.ship.horizontal.bow .cell-fill,
+.cell.preview.horizontal.bow .cell-fill {
+  clip-path: polygon(0% 16%, 62% 10%, 100% 50%, 62% 90%, 0% 84%);
+  margin-left: -1px;
+}
+
+.cell.ship.vertical.stern .cell-fill,
+.cell.preview.vertical.stern .cell-fill {
+  /* Flat/rounded stern at top, full width into mid below */
+  clip-path: polygon(22% 14%, 50% 4%, 78% 14%, 84% 100%, 16% 100%);
+  margin-bottom: -1px;
+}
+
+.cell.ship.vertical.mid .cell-fill,
+.cell.preview.vertical.mid .cell-fill {
+  clip-path: polygon(16% 0%, 84% 0%, 84% 100%, 16% 100%);
+  margin: -1px 0;
+}
+
+.cell.ship.vertical.bow .cell-fill,
+.cell.preview.vertical.bow .cell-fill {
+  /* Pointed bow at bottom */
+  clip-path: polygon(16% 0%, 84% 0%, 90% 62%, 50% 100%, 10% 62%);
+  margin-top: -1px;
+}
+
+.cell.ship.sunk .cell-fill {
+  filter: grayscale(0.35) brightness(0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 6px rgba(232, 93, 76, 0.35);
+}
+
+.cell.preview .cell-fill {
+  background: linear-gradient(180deg, rgba(190, 230, 240, 0.7), rgba(70, 130, 150, 0.65));
+  box-shadow: 0 0 0 1px rgba(180, 230, 240, 0.45);
+  animation: previewBob 1.1s ease-in-out infinite;
+}
+
+.cell.preview.vertical .cell-fill {
+  background: linear-gradient(90deg, rgba(70, 130, 150, 0.65), rgba(190, 230, 240, 0.7));
+}
+
+.cell.preview-invalid .cell-fill {
+  background: linear-gradient(180deg, rgba(255, 150, 130, 0.65), rgba(180, 60, 50, 0.55));
+  box-shadow: 0 0 0 1px rgba(255, 140, 120, 0.55);
+}
+
+.hull-piece {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.superstructure {
+  position: absolute;
+  display: block;
+  background: linear-gradient(180deg, #6a5640, #3d3226);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.cell.horizontal .superstructure {
+  left: 28%;
+  right: 28%;
+  top: 8%;
+  height: 38%;
+}
+
+.cell.horizontal .superstructure::after {
+  content: '';
+  position: absolute;
+  left: 35%;
+  right: 35%;
+  top: -55%;
+  height: 55%;
+  border-radius: 1px 1px 0 0;
+  background: #2e261c;
+}
+
+.cell.vertical .superstructure {
+  top: 28%;
+  bottom: 28%;
+  left: 8%;
+  width: 38%;
+}
+
+.cell.vertical .superstructure::after {
+  content: '';
+  position: absolute;
+  top: 35%;
+  bottom: 35%;
+  left: -55%;
+  width: 55%;
+  border-radius: 1px 0 0 1px;
+  background: #2e261c;
+}
+
+.porthole {
+  position: absolute;
+  width: 18%;
+  height: 18%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #4a7a8a, #152830 70%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+  opacity: 0.85;
+}
+
+.cell.horizontal .porthole {
+  left: 40%;
+  top: 41%;
+}
+
+.cell.vertical .porthole {
+  left: 41%;
+  top: 40%;
+}
+
+.cell.hit {
+  z-index: 3;
 }
 
 .cell.hit .cell-fill {
   background:
     radial-gradient(circle at 50% 45%, #ff8a78 0%, var(--hit) 45%, #8a2a20 100%);
   box-shadow: 0 0 8px rgba(232, 93, 76, 0.45);
+  border-radius: 50%;
+  inset: 16%;
+  clip-path: none !important;
+  margin: 0 !important;
+  filter: none;
+}
+
+.cell.hit .hull-piece {
+  display: none;
 }
 
 .cell.miss .cell-fill {
   background:
     radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.35) 0%, transparent 35%),
     linear-gradient(160deg, rgba(36, 120, 135, 0.4), rgba(10, 47, 56, 0.9));
+  clip-path: none;
 }
 
 .cell.miss .cell-fill::after {
@@ -774,11 +1008,6 @@ const lastShotLabel = computed(() => {
   border-radius: 50%;
   background: var(--miss);
   opacity: 0.85;
-}
-
-.cell.preview .cell-fill {
-  background: linear-gradient(180deg, rgba(224, 200, 154, 0.75), rgba(138, 111, 69, 0.85));
-  box-shadow: 0 0 0 1px rgba(224, 200, 154, 0.5);
 }
 
 .cell.clickable:hover .cell-fill,
@@ -801,12 +1030,14 @@ const lastShotLabel = computed(() => {
   }
 }
 
-.reveal-ship {
-  position: absolute;
-  inset: 18%;
-  border-radius: 2px;
-  background: rgba(196, 165, 116, 0.55);
-  pointer-events: none;
+@keyframes previewBob {
+  0%,
+  100% {
+    opacity: 0.72;
+  }
+  50% {
+    opacity: 0.95;
+  }
 }
 
 .preview-banner {
@@ -943,16 +1174,55 @@ const lastShotLabel = computed(() => {
   font-weight: 600;
 }
 
-.ship-len {
+.ship-mini {
+  --len: 3;
   display: flex;
-  gap: 2px;
+  align-items: center;
+  height: 0.85rem;
+  width: calc(0.42rem * var(--len) + 0.35rem);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
 }
 
-.ship-len i {
-  width: 7px;
-  height: 7px;
+.mini-stern,
+.mini-mid,
+.mini-bow {
+  display: block;
+  height: 100%;
+  background: linear-gradient(180deg, #e0c89a, var(--hull) 50%, var(--hull-deep));
+  position: relative;
+}
+
+.mini-stern {
+  width: 0.45rem;
+  clip-path: polygon(20% 20%, 100% 12%, 100% 88%, 20% 80%, 0% 50%);
+}
+
+.mini-mid {
+  flex: 1;
+  min-width: 0.28rem;
+  clip-path: polygon(0% 14%, 100% 14%, 100% 86%, 0% 86%);
+  margin: 0 -1px;
+}
+
+.mini-bow {
+  width: 0.55rem;
+  clip-path: polygon(0% 14%, 55% 8%, 100% 50%, 55% 92%, 0% 86%);
+}
+
+.mini-bridge {
+  position: absolute;
+  left: 25%;
+  right: 25%;
+  top: 4%;
+  height: 42%;
   border-radius: 1px;
-  background: var(--hull);
+  background: #4a3b28;
+}
+
+.ship-row.selected .mini-stern,
+.ship-row.selected .mini-mid,
+.ship-row.selected .mini-bow {
+  background: linear-gradient(180deg, #f0e0c0, #d4b888 50%, #9a7a48);
 }
 
 .ship-action {
@@ -1115,7 +1385,8 @@ const lastShotLabel = computed(() => {
   .turn-pill,
   .cell.last .cell-fill,
   .game-over-card,
-  .hint.fire {
+  .hint.fire,
+  .cell.preview .cell-fill {
     animation: none !important;
   }
 }
