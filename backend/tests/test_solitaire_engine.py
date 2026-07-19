@@ -1,14 +1,16 @@
 """Tests for Klondike solitaire engine."""
 
-from app.games.solitaire.cards import can_stack_on_tableau, is_valid_tableau_run
+from app.games.solitaire.cards import RANKS, SUITS, can_stack_on_tableau, is_valid_tableau_run
 from app.games.solitaire.engine import SolitaireEngine
+from app.games.solitaire.solver import is_solvable
 
 PLAYERS = [{"id": "p1", "name": "Player"}]
 
 
 def _engine_state(**overrides):
     eng = SolitaireEngine()
-    state = eng.create_initial_state(PLAYERS, {"draw_count": 1})
+    # Bypass solvability filter — tests build their own layouts.
+    state = eng._deal_raw(PLAYERS, eng.validate_settings({"draw_count": 1}))
     state["stock"] = []
     state["waste"] = []
     state["foundations"] = {s: [] for s in ("hearts", "diamonds", "clubs", "spades")}
@@ -511,3 +513,49 @@ def test_hint_finds_waste_play_ignoring_history():
     assert state["hint"]["type"] == "move_to_tableau"
     assert state["hint"]["source"] == "waste"
     assert state["hint"]["target_col"] == 0
+
+
+def test_solver_accepts_near_win():
+    eng, state = _engine_state()
+    for suit in SUITS:
+        state["foundations"][suit] = [
+            {"rank": r, "suit": suit, "face_up": True} for r in RANKS[:-1]
+        ]
+    for i, suit in enumerate(SUITS):
+        state["tableau"][i] = [{"rank": "K", "suit": suit, "face_up": True}]
+    assert is_solvable(state, max_nodes=1_000)
+
+
+def test_solver_rejects_impossible_foundation_block():
+    """King buried under wrong color with empty stock and no legal moves."""
+    eng, state = _engine_state(
+        tableau=[
+            [
+                {"rank": "K", "suit": "spades", "face_up": False},
+                {"rank": "Q", "suit": "spades", "face_up": True},
+            ],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ],
+        foundations={
+            "hearts": [{"rank": r, "suit": "hearts", "face_up": True} for r in RANKS],
+            "diamonds": [{"rank": r, "suit": "diamonds", "face_up": True} for r in RANKS],
+            "clubs": [{"rank": r, "suit": "clubs", "face_up": True} for r in RANKS],
+            "spades": [],
+        },
+    )
+    assert not is_solvable(state, max_nodes=5_000)
+
+
+def test_new_game_deals_are_solvable():
+    eng = SolitaireEngine()
+    for draw_count in (1, 3):
+        state = eng.create_initial_state(PLAYERS, {"draw_count": draw_count})
+        assert state["phase"] == "playing"
+        assert sum(len(col) for col in state["tableau"]) == 28
+        assert len(state["stock"]) == 24
+        assert is_solvable(state, max_nodes=eng._SOLVER_MAX_NODES)

@@ -16,6 +16,8 @@ from app.games.battleship.ai import choose_battleship_action
 from app.games.battleship.engine import BattleshipEngine
 from app.games.chess.ai import choose_chess_move
 from app.games.chess.engine import ChessEngine
+from app.games.connect4.ai import get_ai_move, get_valid_columns
+from app.games.connect4.engine import Connect4Engine
 from app.games.go.ai import choose_go_move
 from app.games.go.engine import GoEngine
 from app.games.roborally.ai import choose_ai_actions
@@ -430,6 +432,8 @@ class RoomService:
                 await self._setup_roborally_solo(room)
             elif room.game_type == "battleship":
                 await self._setup_battleship_solo(room)
+            elif room.game_type == "connect4":
+                await self._setup_connect4_solo(room)
             await self.db.refresh(room, ["players"])
         elif settings.get("single_player") and room.game_type == "tetris":
             await self._setup_tetris_single_player(room)
@@ -676,6 +680,26 @@ class RoomService:
         )
         await self.db.flush()
 
+    async def _setup_connect4_solo(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+        token = generate_session_token()
+        self.db.add(
+            RoomPlayer(
+                room_id=room.id,
+                nickname="🤖 AI Opponent",
+                session_token_hash=hash_session_token(token),
+                team=None,
+                role=None,
+                is_ai=True,
+                is_connected=True,
+            )
+        )
+        await self.db.flush()
+
     async def _setup_battleship_solo(self, room: Room) -> None:
         for p in list(room.players):
             if p.is_ai:
@@ -903,6 +927,8 @@ AI_POKER_THINK_PAUSE_SEC = 3.0
 AI_POKER_TURN_PAUSE_SEC = 1.5
 AI_CHESS_THINK_PAUSE_SEC = 1.2
 AI_CHESS_TURN_PAUSE_SEC = 0.6
+AI_CONNECT4_THINK_PAUSE_SEC = 0.7
+AI_CONNECT4_TURN_PAUSE_SEC = 0.35
 AI_BATTLESHIP_THINK_PAUSE_SEC = 0.8
 AI_BATTLESHIP_TURN_PAUSE_SEC = 0.45
 AI_GO_THINK_PAUSE_SEC = 1.0
@@ -1168,6 +1194,49 @@ async def _process_chess_ai_turn(
     return True
 
 
+async def _process_connect4_ai_turn(
+    service: RoomService,
+    room_id: uuid.UUID,
+    room: Room,
+    broadcast_fn,
+) -> bool:
+    """Run one Connect Four AI action. Returns True if an action was taken."""
+    engine: Connect4Engine = get_game("connect4")  # type: ignore
+    state = room.game_state.state
+    if state.get("winner") or state.get("phase") != "playing":
+        return False
+
+    actor_data = engine.get_current_actor(state)
+    if not actor_data or not actor_data.get("is_ai"):
+        return False
+
+    actor = next((p for p in room.players if str(p.id) == actor_data["id"]), None)
+    if not actor:
+        return False
+
+    await asyncio.sleep(AI_CONNECT4_THINK_PAUSE_SEC)
+    difficulty = actor_data.get("ai_difficulty", "medium")
+    col = await asyncio.to_thread(get_ai_move, state, difficulty)
+    if col is None:
+        return False
+
+    action = {"type": "drop", "col": col}
+    try:
+        room, state, events = await service.apply_game_action(
+            room_id, actor.id, action, allow_ai=True
+        )
+    except ValueError:
+        legal = get_valid_columns(state["board"])
+        if not legal:
+            return False
+        room, state, events = await service.apply_game_action(
+            room_id, actor.id, {"type": "drop", "col": legal[0]}, allow_ai=True
+        )
+    await broadcast_fn(room, events)
+    await asyncio.sleep(AI_CONNECT4_TURN_PAUSE_SEC)
+    return True
+
+
 async def _process_battleship_ai_turn(
     service: RoomService,
     room_id: uuid.UUID,
@@ -1316,6 +1385,8 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                         acted = await _process_poker_ai_turn(service, room_id, room, broadcast_fn)
                     elif room.game_type == "chess":
                         acted = await _process_chess_ai_turn(service, room_id, room, broadcast_fn)
+                    elif room.game_type == "connect4":
+                        acted = await _process_connect4_ai_turn(service, room_id, room, broadcast_fn)
                     elif room.game_type == "battleship":
                         acted = await _process_battleship_ai_turn(service, room_id, room, broadcast_fn)
                     elif room.game_type == "go":

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import random
-from typing import Any
-
 from app.games.base import GamePlugin
 
 
@@ -18,6 +15,7 @@ class Connect4Engine(GamePlugin):
         return {
             "ai_difficulty": "medium",
             "solo_practice": False,
+            "max_players": 2,
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -42,30 +40,35 @@ class Connect4Engine(GamePlugin):
         return None
 
     def create_initial_state(self, players: list[dict], settings: dict) -> dict:
-        if settings.get("solo_practice"):
-            human = next((p for p in players if not p.get("is_ai")), players[0])
-            from .ai import get_ai_move
+        settings = self.validate_settings(settings)
+        if len(players) != 2:
+            raise ValueError("Connect Four requires exactly 2 players")
 
-            ai_player = {
-                "id": f"ai_{random.randint(1000, 9999)}",
-                "nickname": "🤖 AI Opponent",
-                "is_ai": True,
-                "ai_difficulty": settings.get("ai_difficulty", "medium"),
-            }
-            players = [human, ai_player]
+        # Human prefers red in solo; otherwise first player is red.
+        humans = [p for p in players if not p.get("is_ai")]
+        if settings.get("solo_practice") and len(humans) == 1:
+            red = humans[0]
+            yellow = next(p for p in players if p["id"] != red["id"])
+        else:
+            red, yellow = players[0], players[1]
 
-        player_list = []
-        colors = ["red", "yellow"]
-        for i, p in enumerate(players[:2]):
-            player_list.append(
-                {
-                    "id": p["id"],
-                    "nickname": p.get("nickname", f"Player {i + 1}"),
-                    "is_ai": p.get("is_ai", False),
-                    "ai_difficulty": p.get("ai_difficulty", settings.get("ai_difficulty", "medium")),
-                    "color": colors[i],
-                }
-            )
+        difficulty = settings.get("ai_difficulty", "medium")
+        player_list = [
+            {
+                "id": red["id"],
+                "nickname": red.get("nickname", "Player 1"),
+                "is_ai": red.get("is_ai", False),
+                "ai_difficulty": red.get("ai_difficulty", difficulty),
+                "color": "red",
+            },
+            {
+                "id": yellow["id"],
+                "nickname": yellow.get("nickname", "Player 2"),
+                "is_ai": yellow.get("is_ai", False),
+                "ai_difficulty": yellow.get("ai_difficulty", difficulty),
+                "color": "yellow",
+            },
+        ]
 
         board = [[None for _ in range(self.COLS)] for _ in range(self.ROWS)]
 
@@ -105,23 +108,23 @@ class Connect4Engine(GamePlugin):
         self, state: dict, action: dict, player: dict, events: list[dict]
     ) -> tuple[dict, list[dict]]:
         if state["phase"] != "playing":
-            return state, events
+            raise ValueError("Game is already over")
 
         if player["id"] != state["current_actor_id"]:
-            return state, events
+            raise ValueError("Not your turn")
 
         col = action.get("col")
         if col is None or not isinstance(col, int):
-            return state, events
+            raise ValueError("Invalid column")
 
         if col < 0 or col >= self.COLS:
-            return state, events
+            raise ValueError("Invalid column")
 
         board = [row[:] for row in state["board"]]
         row = self._find_drop_row(board, col)
 
         if row is None:
-            return state, events
+            raise ValueError("Column is full")
 
         current_color = state["current_color"]
         board[row][col] = current_color
@@ -297,26 +300,13 @@ class Connect4Engine(GamePlugin):
     def check_winner(self, state: dict) -> str | None:
         return state.get("winner")
 
-    def tick_interval_ms(self) -> int | None:
-        return 500
-
-    def tick(self, state: dict) -> tuple[dict, list[dict]]:
-        if state["phase"] != "playing":
-            return state, []
-
-        current_player = next(
-            (p for p in state["players"] if p["id"] == state["current_actor_id"]), None
-        )
-        if not current_player or not current_player.get("is_ai"):
-            return state, []
-
-        from .ai import get_ai_move
-
-        difficulty = current_player.get("ai_difficulty", "medium")
-        col = get_ai_move(state, difficulty)
-
-        if col is not None:
-            action = {"type": "drop", "col": col}
-            return self.apply_action(state, action, current_player)
-
-        return state, []
+    def get_current_actor(self, state: dict) -> dict | None:
+        if state.get("winner") or state.get("phase") != "playing":
+            return None
+        actor_id = state.get("current_actor_id")
+        if not actor_id:
+            return None
+        player = next((p for p in state["players"] if p["id"] == actor_id), None)
+        if not player or not player.get("is_ai"):
+            return None
+        return player

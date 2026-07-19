@@ -8,10 +8,15 @@ from app.games.solitaire.cards import (
     is_valid_tableau_run,
     shuffle_deck,
 )
+from app.games.solitaire.solver import deal_until_solvable
 
 
 class SolitaireEngine(GamePlugin):
     game_type = "solitaire"
+
+    # Reject deals the solver cannot win within this search budget.
+    _SOLVER_MAX_NODES = 80_000
+    _SOLVER_MAX_ATTEMPTS = 60
 
     def default_settings(self) -> dict:
         return {
@@ -44,6 +49,14 @@ class SolitaireEngine(GamePlugin):
         return self._new_game(players, settings)
 
     def _new_game(self, players: list[dict], settings: dict) -> dict:
+        return deal_until_solvable(
+            lambda: self._deal_raw(players, settings),
+            max_attempts=self._SOLVER_MAX_ATTEMPTS,
+            max_nodes=self._SOLVER_MAX_NODES,
+        )
+
+    def _deal_raw(self, players: list[dict], settings: dict) -> dict:
+        """Shuffle and deal one Klondike layout (no solvability filter)."""
         deck = shuffle_deck(create_deck())
 
         tableau: list[list[Card]] = [[] for _ in range(7)]

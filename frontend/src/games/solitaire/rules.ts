@@ -24,7 +24,7 @@ export const solitaireRules: GameRules = {
     },
     {
       heading: 'Winning',
-      body: 'Move all 52 cards to the four foundation piles to win. The game tracks your move count — try to win in as few moves as possible!',
+      body: 'Move all 52 cards to the four foundation piles to win. Every new deal is verified as winnable with careful play before you start. The game tracks your move count — try to win in as few moves as possible!',
     },
     {
       heading: 'Learn mode',
