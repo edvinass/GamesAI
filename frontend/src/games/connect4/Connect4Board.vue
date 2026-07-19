@@ -15,6 +15,11 @@ const emit = defineEmits<{
 const hoveredCol = ref<number | null>(null)
 
 const viewerColor = computed(() => props.gameState.viewer_color)
+const isHost = computed(() => props.room.host_player_id === props.playerId)
+const isGameOver = computed(() => props.gameState.phase === 'game_over')
+const winnerColor = computed(
+  () => props.gameState.players.find((p) => p.id === props.gameState.winner)?.color ?? null,
+)
 
 const isMyTurn = computed(() => {
   if (props.gameState.phase !== 'playing') return false
@@ -81,6 +86,10 @@ function resign() {
   if (window.confirm('Resign this game?')) {
     emit('action', { type: 'resign' })
   }
+}
+
+function startNewGame() {
+  emit('action', { type: 'start_game' })
 }
 
 const statusText = computed(() => {
@@ -259,14 +268,24 @@ function colorLabel(color: 'red' | 'yellow' | undefined): string {
             </div>
           </div>
 
-          <div v-if="gameState.phase === 'game_over'" class="game-over-overlay">
+          <div v-if="isGameOver" class="game-over-overlay">
             <div class="game-over-card">
               <span
+                v-if="winnerColor"
                 class="game-over-disc"
-                :class="gameState.players.find((p) => p.id === gameState.winner)?.color ?? 'red'"
+                :class="winnerColor"
                 aria-hidden="true"
               />
               <p class="game-over-title">{{ statusText }}</p>
+              <button
+                v-if="isHost"
+                type="button"
+                class="btn-primary play-again-btn"
+                @click="startNewGame"
+              >
+                Play Again
+              </button>
+              <p v-else class="waiting-host">Waiting for host to start a new game…</p>
             </div>
           </div>
         </div>
@@ -985,6 +1004,18 @@ function colorLabel(color: 'red' | 'yellow' | undefined): string {
   font-size: 1.15rem;
   text-align: center;
   line-height: 1.35;
+}
+
+.play-again-btn {
+  margin-top: 0.15rem;
+  min-width: 8.5rem;
+}
+
+.waiting-host {
+  margin: 0.15rem 0 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 .side-rail {

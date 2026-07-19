@@ -872,7 +872,7 @@ class RoomService:
         )
         room.game_state.state = state
         room.game_state.version += 1
-        if state.get("winner") or state.get("phase") == "finished":
+        if state.get("winner") or state.get("phase") in ("finished", "game_over"):
             room.status = RoomStatus.FINISHED
         elif (
             room.game_type == "solitaire"
@@ -900,7 +900,7 @@ class RoomService:
             state, events = game.tick(copy.deepcopy(room.game_state.state))
             room.game_state.state = state
             room.game_state.version += 1
-            if state.get("winner"):
+            if state.get("winner") or state.get("phase") in ("finished", "game_over"):
                 room.status = RoomStatus.FINISHED
 
             await self.db.commit()
