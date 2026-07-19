@@ -533,10 +533,6 @@ function getMovingCardFrom(ref: CardRef | null): { rank: string | null; suit: st
   return null
 }
 
-function getSelectedMovingCard(): { rank: string | null; suit: string | null } | null {
-  return getMovingCardFrom(selectedCard.value)
-}
-
 function getDragCards(source: CardRef): SolitaireCard[] {
   if (source.source === 'waste') {
     return props.gameState.waste_top ? [props.gameState.waste_top] : []
@@ -593,11 +589,6 @@ function canStackOnFoundation(
 function canMoveSelectionToTableau(targetCol: number): boolean {
   if (!selectedCard.value) return false
   return canMoveRefToTableau(selectedCard.value, targetCol)
-}
-
-function canMoveSelectionToFoundation(): boolean {
-  if (!selectedCard.value) return false
-  return canMoveRefToFoundation(selectedCard.value)
 }
 
 function activeMoveRef(): CardRef | null {
