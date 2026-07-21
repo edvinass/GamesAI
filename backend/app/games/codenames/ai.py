@@ -17,14 +17,17 @@ logger = logging.getLogger(__name__)
 
 SPYMASTER_TEMPERATURE = 0.3
 OPERATIVE_TEMPERATURE = 0.5
-SPYMASTER_ATTEMPTS = 3
 OPERATIVE_ATTEMPTS = 3
+SELF_CHECK_ATTEMPTS = 2
+SELF_CHECK_ATTEMPTS_MULTI = 3
+SELF_CHECK_CONFIDENCE = 0.35
+MIN_MULTI_TARGETS = 2
 
 SPYMASTER_SYSTEM = (
     "You are an expert Codenames spymaster with full memory of every clue given this game. "
     "Track what your operatives found, missed, and guessed wrong — build on prior clues when "
     "targets remain unrevealed, and avoid repeating associations that led to mistakes. "
-    "Give precise clues that connect only your team's unrevealed words. "
+    "Default to linking 2-3 team words with one clue — single-word clues are a last resort. "
     "Never lead operatives toward opponent, neutral, or assassin words. "
     "List every board word your clue might accidentally suggest in risky_words."
 )
@@ -78,13 +81,24 @@ def _game_situation(state: dict, team: str) -> tuple[int, int, str]:
     opponent_remaining = state["blue_remaining"] if team == "red" else state["red_remaining"]
 
     if team_remaining <= 2:
-        strategy = "Endgame: prioritize safe, precise play. One wrong guess can lose."
+        strategy = (
+            "Endgame: prioritize safe, precise play. One wrong guess can lose. "
+            "1-word clues are OK here."
+        )
     elif team_remaining < opponent_remaining:
-        strategy = "Behind: look for safe 2-3 word clues; take measured risks when clearly safe."
+        strategy = (
+            "Behind: give a safe 2-3 word clue whenever possible — "
+            "avoid falling back to 1-word clues."
+        )
     elif team_remaining > opponent_remaining:
-        strategy = "Ahead: play conservatively — avoid clues that could touch the assassin."
+        strategy = (
+            "Ahead: still prefer safe 2-word clues; only go to 1 if a multi-word clue "
+            "would risk the assassin."
+        )
     else:
-        strategy = "Even: balanced play — prefer safe 2-word clues when available."
+        strategy = (
+            "Even: prefer safe 2-3 word clues. Single-word clues make the game slow — avoid them."
+        )
 
     return team_remaining, opponent_remaining, strategy
 
@@ -197,12 +211,12 @@ Rules:
 - number: how many of YOUR TARGETS the clue applies to (must match targets list length)
 - targets: the specific words from YOUR TARGETS that the clue is meant for
 - risky_words: unrevealed board words your clue might accidentally suggest (list all plausible ones)
-- prefer safe clues for 2-3 targets when possible; use 1 if no safe multi-word clue exists
+- REQUIRED when 3+ team words remain: aim for 2-3 targets. Use number=1 only in endgame or when no safe pair exists
 - if unresolved targets remain from a prior clue, consider a follow-up clue for those words
 - if any risky_words are opponent, neutral, or assassin words, pick a different clue
 
 Respond ONLY with compact JSON (no extra keys):
-{{"clue": "WORD", "number": N, "targets": ["TARGET1"], "risky_words": ["MAYBE1"]}}"""
+{{"clue": "WORD", "number": 2, "targets": ["TARGET1", "TARGET2"], "risky_words": ["MAYBE1"]}}"""
 
 
 def _format_clue_entry(entry: dict, *, current: bool = False) -> str:
@@ -592,6 +606,193 @@ def _accept_focused_fallback(
     return True
 
 
+def _cards_by_index(state: dict) -> dict[int, dict]:
+    return {int(c.get("index", i)): c for i, c in enumerate(state["cards"])}
+
+
+def _state_for_clue_self_check(state: dict, team: str, clue: str, number: int) -> dict:
+    """Fresh guess turn with the candidate clue, no in-progress guesses."""
+    sim = dict(state)
+    sim["current_clue"] = {"word": clue, "number": number}
+    sim["guesses_remaining"] = number + 1
+
+    history = state.get("clue_history") or {}
+    team_hist = list(history.get(team, []))
+    if team_hist and not team_hist[-1].get("completed"):
+        team_hist = team_hist[:-1]
+    sim["clue_history"] = {**{k: list(v) for k, v in history.items()}, team: team_hist}
+    return sim
+
+
+def _guessed_words_for_feedback(state: dict, guess_indices: list[int]) -> list[str]:
+    by_index = _cards_by_index(state)
+    words: list[str] = []
+    for idx in guess_indices:
+        card = by_index.get(idx)
+        if card:
+            words.append(str(card["word"]))
+        else:
+            words.append(f"#{idx}")
+    return words
+
+
+def _min_acceptable_targets(state: dict, team: str) -> int:
+    team_remaining, _, _ = _game_situation(state, team)
+    if team_remaining <= 2 or len(_unrevealed_team_words(state["cards"], team)) < 2:
+        return 1
+    return MIN_MULTI_TARGETS
+
+
+def _safe_recovered_targets(
+    state: dict,
+    team: str,
+    targets: list[str],
+    guess_indices: list[int],
+) -> list[str] | None:
+    """
+    Targets recovered safely from operative guesses.
+
+    Returns None if any guess is opponent/assassin (hard fail).
+    Otherwise returns intended targets that appear in the guess window,
+    preserving intended order.
+    """
+    if not targets or not guess_indices:
+        return []
+
+    opponent = _opponent_team(team)
+    by_index = _cards_by_index(state)
+    intended_by_upper = {word.upper(): word for word in targets}
+    recovered: list[str] = []
+
+    for idx in guess_indices[: len(targets)]:
+        card = by_index.get(idx)
+        if not card or card.get("revealed"):
+            continue
+        color = card.get("color")
+        if color in (opponent, "assassin"):
+            return None
+        key = str(card["word"]).upper()
+        word = intended_by_upper.get(key)
+        if word and word not in recovered:
+            recovered.append(word)
+
+    return recovered
+
+
+def _clue_self_check_passes(
+    state: dict,
+    team: str,
+    targets: list[str],
+    guess_indices: list[int],
+) -> bool:
+    """True if guesses cover all targets and never hit opponent/assassin."""
+    recovered = _safe_recovered_targets(state, team, targets, guess_indices)
+    if recovered is None:
+        return False
+    return len(recovered) == len(targets) and set(recovered) == set(targets)
+
+
+def _resolve_self_check_targets(
+    state: dict,
+    team: str,
+    targets: list[str],
+    guess_indices: list[int],
+) -> list[str] | None:
+    """Full match or safe partial multi-target recovery worth keeping."""
+    recovered = _safe_recovered_targets(state, team, targets, guess_indices)
+    if recovered is None:
+        return None
+    min_keep = _min_acceptable_targets(state, team)
+    if len(recovered) == len(targets):
+        return list(targets)
+    if len(recovered) >= min_keep:
+        return recovered
+    return None
+
+
+async def _simulate_operative_guesses(
+    state: dict,
+    team: str,
+    clue: str,
+    number: int,
+) -> list[int]:
+    """One-shot operative simulation for self-check (current-clue guesses only)."""
+    if number <= 0:
+        return []
+
+    sim = _state_for_clue_self_check(state, team, clue, number)
+    prompt = _build_operative_prompt(sim, team, number)
+
+    try:
+        response = await deepseek_chat(
+            prompt,
+            system=OPERATIVE_SYSTEM,
+            temperature=OPERATIVE_TEMPERATURE,
+            json_mode=True,
+        )
+        data = _parse_json(response)
+    except Exception as e:
+        logger.warning("Clue self-check operative simulation failed: %s", e)
+        return []
+
+    current_candidates = _parse_guess_list(data.get("current_guesses"), sim)
+    if not current_candidates and isinstance(data.get("guesses"), list):
+        current_candidates = _parse_guess_list(data.get("guesses"), sim)
+
+    result: list[int] = []
+    for idx, conf in current_candidates:
+        if len(result) >= number:
+            break
+        if conf >= SELF_CHECK_CONFIDENCE:
+            result.append(idx)
+        else:
+            break
+    return result
+
+
+async def _self_check_clue(
+    state: dict,
+    team: str,
+    clue: str,
+    number: int,
+    targets: list[str],
+) -> tuple[list[str] | None, list[int]]:
+    """Return accepted targets (full or partial) and raw guess indices."""
+    guesses = await _simulate_operative_guesses(state, team, clue, number)
+    accepted = _resolve_self_check_targets(state, team, targets, guesses)
+    return accepted, guesses
+
+
+def _spymaster_size_feedback(
+    preferred_n: int,
+    *,
+    rejected_clues: list[str],
+    failed_check: str | None = None,
+) -> str:
+    if preferred_n >= MIN_MULTI_TARGETS:
+        lines = [
+            f"Give a multi-word clue for exactly {preferred_n} targets "
+            f"(number={preferred_n}, len(targets)={preferred_n}). "
+            f"Do not use number=1."
+        ]
+    else:
+        lines = [
+            f"Your clue must target exactly {preferred_n} word(s) "
+            f"(number={preferred_n}, len(targets)={preferred_n})."
+        ]
+    if rejected_clues:
+        lines.append(f"Do not reuse these failed clues: {', '.join(rejected_clues)}.")
+    if failed_check:
+        lines.append(failed_check)
+    return "\n".join(lines)
+
+
+def _size_attempts(preferred_n: int) -> int:
+    if preferred_n >= MIN_MULTI_TARGETS:
+        return SELF_CHECK_ATTEMPTS_MULTI
+    return SELF_CHECK_ATTEMPTS
+
+
 async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
     targets = _unrevealed_team_words(state["cards"], team)
     if not targets:
@@ -600,8 +801,11 @@ async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
     board_words = board_words_upper(state["cards"])
     avoid = _avoid_clue_words(state["cards"], team)
     other_board_words = [c["word"] for c in state["cards"] if c["word"] not in targets]
+    min_keep = _min_acceptable_targets(state, team)
 
     for group in _fallback_target_groups(targets):
+        if len(group) < min_keep:
+            continue
         prompt = _build_focused_fallback_prompt(group, avoid, other_board_words)
         try:
             response = await deepseek_chat(
@@ -612,10 +816,48 @@ async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
             )
             data = _parse_json(response)
             validated = _validate_spymaster_response(data, targets, board_words, avoid)
-            if validated and _accept_focused_fallback(validated, group):
-                return validated
+            if not validated or not _accept_focused_fallback(validated, group):
+                continue
+            clue, number, chosen = validated
+            accepted, _guesses = await _self_check_clue(
+                state, team, clue, number, chosen
+            )
+            if accepted:
+                return clue, len(accepted), accepted
+            logger.info(
+                "Fallback clue %s %s failed self-check for targets %s",
+                clue,
+                number,
+                chosen,
+            )
         except Exception as e:
             logger.warning("Focused fallback clue failed for %s: %s", group, e)
+
+    # Midgame: keep trying single-target focused clues only as absolute last resort
+    if min_keep > 1:
+        for group in _fallback_target_groups(targets):
+            if len(group) != 1:
+                continue
+            prompt = _build_focused_fallback_prompt(group, avoid, other_board_words)
+            try:
+                response = await deepseek_chat(
+                    prompt,
+                    system=SPYMASTER_SYSTEM,
+                    temperature=SPYMASTER_TEMPERATURE,
+                    json_mode=True,
+                )
+                data = _parse_json(response)
+                validated = _validate_spymaster_response(data, targets, board_words, avoid)
+                if not validated or not _accept_focused_fallback(validated, group):
+                    continue
+                clue, number, chosen = validated
+                accepted, _guesses = await _self_check_clue(
+                    state, team, clue, number, chosen
+                )
+                if accepted:
+                    return clue, len(accepted), accepted
+            except Exception as e:
+                logger.warning("Single-target fallback clue failed for %s: %s", group, e)
 
     return _random_generic_clue(state), 1, [targets[0]] if targets else []
 
@@ -629,40 +871,112 @@ async def ai_spymaster_clue(state: dict, team: str) -> tuple[str, int, list[str]
     if not targets:
         return _random_generic_clue(state), 1, []
 
-    prompt = _build_spymaster_prompt(state, team)
-    feedback = ""
+    base_prompt = _build_spymaster_prompt(state, team)
+    rejected_clues: list[str] = []
+    max_n = min(3, len(targets))
+    min_n = _min_acceptable_targets(state, team)
 
-    for attempt in range(SPYMASTER_ATTEMPTS):
-        try:
-            full_prompt = prompt if not feedback else f"{prompt}\n\nPrevious invalid response:\n{feedback}"
-            response = await deepseek_chat(
-                full_prompt,
-                system=SPYMASTER_SYSTEM,
-                temperature=SPYMASTER_TEMPERATURE,
-                json_mode=True,
-            )
-            data = _parse_json(response)
-            validated = _validate_spymaster_response(data, targets, board_words, avoid)
-            if validated:
-                return validated
+    for preferred_n in range(max_n, min_n - 1, -1):
+        feedback = _spymaster_size_feedback(preferred_n, rejected_clues=rejected_clues)
 
-            risky_hits = _risky_words_hit_avoid(data, avoid)
-            if risky_hits:
-                feedback = (
-                    f"{json.dumps(data)}\n"
-                    f"Invalid: clue would suggest dangerous words: {', '.join(risky_hits)}. "
-                    "Choose a different clue or different targets."
+        for attempt in range(_size_attempts(preferred_n)):
+            try:
+                full_prompt = f"{base_prompt}\n\n{feedback}"
+                response = await deepseek_chat(
+                    full_prompt,
+                    system=SPYMASTER_SYSTEM,
+                    temperature=SPYMASTER_TEMPERATURE,
+                    json_mode=True,
                 )
-            else:
-                feedback = (
-                    f"{json.dumps(data)}\n"
-                    "Invalid: clue must be one board-external word (no substring overlap), "
-                    f"targets must be unrevealed {team} words only, "
-                    "number must equal len(targets), and risky_words must not include danger words."
+                data = _parse_json(response)
+                validated = _validate_spymaster_response(data, targets, board_words, avoid)
+                if not validated:
+                    risky_hits = _risky_words_hit_avoid(data, avoid)
+                    if risky_hits:
+                        feedback = (
+                            f"{json.dumps(data)}\n"
+                            f"Invalid: clue would suggest dangerous words: {', '.join(risky_hits)}. "
+                            "Choose a different clue or different targets.\n"
+                            + _spymaster_size_feedback(
+                                preferred_n, rejected_clues=rejected_clues
+                            )
+                        )
+                    else:
+                        feedback = (
+                            f"{json.dumps(data)}\n"
+                            "Invalid: clue must be one board-external word (no substring overlap), "
+                            f"targets must be unrevealed {team} words only, "
+                            "number must equal len(targets), and risky_words must not include "
+                            "danger words.\n"
+                            + _spymaster_size_feedback(
+                                preferred_n, rejected_clues=rejected_clues
+                            )
+                        )
+                    continue
+
+                clue, number, chosen = validated
+                # Accept smaller multi-word clues early (e.g. asked for 3, got a solid 2).
+                if number > preferred_n or number < min_n:
+                    feedback = (
+                        f"{json.dumps(data)}\n"
+                        f"Invalid for this step: need {preferred_n} target(s) "
+                        f"(or at least {min_n}), got {number}.\n"
+                        + _spymaster_size_feedback(
+                            preferred_n, rejected_clues=rejected_clues
+                        )
+                    )
+                    continue
+                if number < preferred_n and number < MIN_MULTI_TARGETS and min_n > 1:
+                    feedback = (
+                        f"{json.dumps(data)}\n"
+                        f"Invalid: midgame clues must cover at least {MIN_MULTI_TARGETS} "
+                        f"targets; got {number}.\n"
+                        + _spymaster_size_feedback(
+                            preferred_n, rejected_clues=rejected_clues
+                        )
+                    )
+                    continue
+
+                accepted, guesses = await _self_check_clue(
+                    state, team, clue, number, chosen
                 )
-        except Exception as e:
-            logger.warning("AI spymaster attempt %s failed: %s", attempt + 1, e)
-            feedback = str(e)
+                if accepted:
+                    return clue, len(accepted), accepted
+
+                if clue not in rejected_clues:
+                    rejected_clues.append(clue)
+                guessed = _guessed_words_for_feedback(state, guesses)
+                failed = (
+                    f"Clue '{clue}' failed operative self-check. "
+                    f"Operative guessed: {', '.join(guessed) or '(none)'}. "
+                    f"Intended targets: {', '.join(chosen)}. "
+                    "Choose a DIFFERENT clue that more clearly points only at the targets."
+                )
+                feedback = _spymaster_size_feedback(
+                    preferred_n,
+                    rejected_clues=rejected_clues,
+                    failed_check=failed,
+                )
+                logger.info(
+                    "Spymaster clue %s %s failed self-check (attempt %s, n=%s)",
+                    clue,
+                    number,
+                    attempt + 1,
+                    preferred_n,
+                )
+            except Exception as e:
+                logger.warning(
+                    "AI spymaster self-check attempt %s (n=%s) failed: %s",
+                    attempt + 1,
+                    preferred_n,
+                    e,
+                )
+                feedback = (
+                    f"{e}\n"
+                    + _spymaster_size_feedback(
+                        preferred_n, rejected_clues=rejected_clues
+                    )
+                )
 
     return await fallback_clue(state, team)
 

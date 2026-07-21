@@ -6,8 +6,12 @@ from app.games.codenames import ai as codenames_ai
 from app.games.codenames.ai import (
     _accept_focused_fallback,
     _build_focused_fallback_prompt,
+    _clue_self_check_passes,
     _fallback_target_groups,
+    _min_acceptable_targets,
     _parse_operative_guesses,
+    _resolve_self_check_targets,
+    ai_spymaster_clue,
     fallback_clue,
 )
 
@@ -208,17 +212,30 @@ def test_accept_focused_fallback_rejects_single_when_multi_requested() -> None:
 async def test_fallback_clue_accepts_multi_target_before_singles(monkeypatch) -> None:
     state = {
         "cards": [
-            {"word": "APPLE", "color": "red", "revealed": False},
-            {"word": "ORANGE", "color": "red", "revealed": False},
-            {"word": "BANANA", "color": "red", "revealed": False},
-            {"word": "KNIFE", "color": "blue", "revealed": False},
-            {"word": "TABLE", "color": "neutral", "revealed": False},
-        ]
+            {"index": 0, "word": "APPLE", "color": "red", "revealed": False},
+            {"index": 1, "word": "ORANGE", "color": "red", "revealed": False},
+            {"index": 2, "word": "BANANA", "color": "red", "revealed": False},
+            {"index": 3, "word": "KNIFE", "color": "blue", "revealed": False},
+            {"index": 4, "word": "TABLE", "color": "neutral", "revealed": False},
+        ],
+        "red_remaining": 3,
+        "blue_remaining": 5,
+        "clue_history": {"red": [], "blue": []},
     }
     calls: list[str] = []
 
     async def fake_chat(prompt: str, **_kwargs: object) -> str:
         calls.append(prompt)
+        if "CURRENT CLUE" in prompt:
+            return json.dumps(
+                {
+                    "current_guesses": [
+                        {"index": 0, "confidence": 0.9},
+                        {"index": 1, "confidence": 0.9},
+                    ],
+                    "bonus_guess": None,
+                }
+            )
         if "number must be 3" in prompt or "number must be 2" in prompt:
             return json.dumps(
                 {
@@ -249,4 +266,271 @@ async def test_fallback_clue_accepts_multi_target_before_singles(monkeypatch) ->
     assert clue == "FRUIT"
     assert number == 2
     assert set(targets) == {"APPLE", "ORANGE"}
-    assert len(calls) == 1
+    assert len(calls) == 2
+
+
+def _board_state() -> dict:
+    return {
+        "cards": [
+            {"index": 0, "word": "APPLE", "color": "red", "revealed": False},
+            {"index": 1, "word": "ORANGE", "color": "red", "revealed": False},
+            {"index": 2, "word": "BANANA", "color": "red", "revealed": False},
+            {"index": 3, "word": "PEAR", "color": "red", "revealed": False},
+            {"index": 4, "word": "KNIFE", "color": "blue", "revealed": False},
+            {"index": 5, "word": "GUN", "color": "assassin", "revealed": False},
+            {"index": 6, "word": "TABLE", "color": "neutral", "revealed": False},
+        ],
+        "red_remaining": 4,
+        "blue_remaining": 5,
+        "clue_history": {"red": [], "blue": []},
+    }
+
+
+def test_clue_self_check_passes_all_targets_safe() -> None:
+    state = _board_state()
+    assert (
+        _clue_self_check_passes(state, "red", ["APPLE", "ORANGE"], [0, 1]) is True
+    )
+
+
+def test_clue_self_check_fails_missing_target() -> None:
+    state = _board_state()
+    assert (
+        _clue_self_check_passes(state, "red", ["APPLE", "ORANGE"], [0, 6]) is False
+    )
+
+
+def test_clue_self_check_fails_opponent_or_assassin() -> None:
+    state = _board_state()
+    assert (
+        _clue_self_check_passes(state, "red", ["APPLE", "ORANGE"], [0, 4]) is False
+    )
+    assert (
+        _clue_self_check_passes(state, "red", ["APPLE", "ORANGE"], [0, 5]) is False
+    )
+
+
+def test_resolve_self_check_keeps_safe_partial_multi() -> None:
+    state = _board_state()
+    # Operative found 2 of 3 intended targets safely → keep the pair
+    accepted = _resolve_self_check_targets(
+        state, "red", ["APPLE", "ORANGE", "BANANA"], [0, 1]
+    )
+    assert accepted == ["APPLE", "ORANGE"]
+
+
+def test_resolve_self_check_rejects_dangerous_partial() -> None:
+    state = _board_state()
+    assert (
+        _resolve_self_check_targets(
+            state, "red", ["APPLE", "ORANGE", "BANANA"], [0, 4]
+        )
+        is None
+    )
+
+
+def test_min_acceptable_targets_defers_singles_midgame() -> None:
+    state = _board_state()
+    assert _min_acceptable_targets(state, "red") == 2
+    state["red_remaining"] = 2
+    assert _min_acceptable_targets(state, "red") == 1
+
+
+@pytest.mark.asyncio
+async def test_spymaster_retries_after_failed_self_check(monkeypatch) -> None:
+    state = _board_state()
+    spymaster_calls = 0
+
+    async def fake_chat(prompt: str, **_kwargs: object) -> str:
+        nonlocal spymaster_calls
+        if "CURRENT CLUE" in prompt:
+            if 'CURRENT CLUE: "WEAK"' in prompt:
+                return json.dumps(
+                    {
+                        "current_guesses": [{"index": 4, "confidence": 0.9}],
+                        "bonus_guess": None,
+                    }
+                )
+            return json.dumps(
+                {
+                    "current_guesses": [
+                        {"index": 0, "confidence": 0.9},
+                        {"index": 1, "confidence": 0.9},
+                        {"index": 2, "confidence": 0.9},
+                    ],
+                    "bonus_guess": None,
+                }
+            )
+
+        spymaster_calls += 1
+        if spymaster_calls == 1:
+            return json.dumps(
+                {
+                    "clue": "WEAK",
+                    "number": 3,
+                    "targets": ["APPLE", "ORANGE", "BANANA"],
+                    "risky_words": [],
+                }
+            )
+        return json.dumps(
+            {
+                "clue": "FRUIT",
+                "number": 3,
+                "targets": ["APPLE", "ORANGE", "BANANA"],
+                "risky_words": [],
+            }
+        )
+
+    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+
+    clue, number, targets = await ai_spymaster_clue(state, "red")
+
+    assert clue == "FRUIT"
+    assert number == 3
+    assert set(targets) == {"APPLE", "ORANGE", "BANANA"}
+
+
+@pytest.mark.asyncio
+async def test_spymaster_accepts_partial_self_check_as_smaller_clue(monkeypatch) -> None:
+    state = _board_state()
+
+    async def fake_chat(prompt: str, **_kwargs: object) -> str:
+        if "CURRENT CLUE" in prompt:
+            return json.dumps(
+                {
+                    "current_guesses": [
+                        {"index": 0, "confidence": 0.9},
+                        {"index": 1, "confidence": 0.9},
+                    ],
+                    "bonus_guess": None,
+                }
+            )
+        return json.dumps(
+            {
+                "clue": "FRUIT",
+                "number": 3,
+                "targets": ["APPLE", "ORANGE", "BANANA"],
+                "risky_words": [],
+            }
+        )
+
+    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+
+    clue, number, targets = await ai_spymaster_clue(state, "red")
+
+    assert clue == "FRUIT"
+    assert number == 2
+    assert set(targets) == {"APPLE", "ORANGE"}
+
+
+@pytest.mark.asyncio
+async def test_spymaster_shrinks_from_3_to_2_after_self_check_fails(monkeypatch) -> None:
+    state = _board_state()
+    spymaster_by_n: list[int] = []
+
+    async def fake_chat(prompt: str, **_kwargs: object) -> str:
+        if "CURRENT CLUE" in prompt:
+            if 'CURRENT CLUE: "TRIPLE"' in prompt:
+                return json.dumps(
+                    {
+                        "current_guesses": [{"index": 4, "confidence": 0.9}],
+                        "bonus_guess": None,
+                    }
+                )
+            return json.dumps(
+                {
+                    "current_guesses": [
+                        {"index": 0, "confidence": 0.9},
+                        {"index": 1, "confidence": 0.9},
+                    ],
+                    "bonus_guess": None,
+                }
+            )
+
+        if "exactly 3 word(s)" in prompt or "exactly 3 targets" in prompt:
+            spymaster_by_n.append(3)
+            return json.dumps(
+                {
+                    "clue": "TRIPLE",
+                    "number": 3,
+                    "targets": ["APPLE", "ORANGE", "BANANA"],
+                    "risky_words": [],
+                }
+            )
+        spymaster_by_n.append(2)
+        return json.dumps(
+            {
+                "clue": "CITRUS",
+                "number": 2,
+                "targets": ["APPLE", "ORANGE"],
+                "risky_words": [],
+            }
+        )
+
+    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+
+    clue, number, targets = await ai_spymaster_clue(state, "red")
+
+    assert clue == "CITRUS"
+    assert number == 2
+    assert set(targets) == {"APPLE", "ORANGE"}
+    assert 3 in spymaster_by_n
+    assert 2 in spymaster_by_n
+
+
+@pytest.mark.asyncio
+async def test_fallback_skips_clue_that_fails_self_check(monkeypatch) -> None:
+    state = _board_state()
+    spymaster_calls = 0
+
+    async def fake_chat(prompt: str, **_kwargs: object) -> str:
+        nonlocal spymaster_calls
+        if "CURRENT CLUE" in prompt:
+            if 'CURRENT CLUE: "BAD"' in prompt:
+                return json.dumps(
+                    {
+                        "current_guesses": [{"index": 4, "confidence": 0.9}],
+                        "bonus_guess": None,
+                    }
+                )
+            return json.dumps(
+                {
+                    "current_guesses": [
+                        {"index": 0, "confidence": 0.9},
+                        {"index": 3, "confidence": 0.9},
+                    ],
+                    "bonus_guess": None,
+                }
+            )
+
+        spymaster_calls += 1
+        if spymaster_calls == 1:
+            return json.dumps(
+                {
+                    "clue": "BAD",
+                    "number": 2,
+                    "targets": ["APPLE", "ORANGE"],
+                    "risky_words": [],
+                }
+            )
+        return json.dumps(
+            {
+                "clue": "PRODUCE",
+                "number": 2,
+                "targets": ["APPLE", "PEAR"],
+                "risky_words": [],
+            }
+        )
+
+    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+    monkeypatch.setattr(
+        codenames_ai,
+        "_fallback_target_groups",
+        lambda _targets: [["APPLE", "ORANGE"], ["APPLE", "PEAR"]],
+    )
+
+    clue, number, targets = await fallback_clue(state, "red")
+
+    assert clue == "PRODUCE"
+    assert number == 2
+    assert set(targets) == {"APPLE", "PEAR"}
