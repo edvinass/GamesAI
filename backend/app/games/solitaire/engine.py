@@ -94,7 +94,9 @@ class SolitaireEngine(GamePlugin):
             "autoplay": False,
             "hint": None,
             "autoplay_history": [],
+            "autoplay_seen": [],
             "autoplay_stock_passes": 0,
+            "unwinnable": False,
         }
 
     def apply_action(
@@ -238,7 +240,9 @@ class SolitaireEngine(GamePlugin):
         from app.games.solitaire.ai import choose_action, record_autoplay_action
 
         state.setdefault("autoplay_history", [])
+        state.setdefault("autoplay_seen", [])
         state.setdefault("autoplay_stock_passes", 0)
+        state.setdefault("unwinnable", False)
 
         chosen, reason = choose_action(state)
         if not chosen:
@@ -252,7 +256,9 @@ class SolitaireEngine(GamePlugin):
         state, events = self.apply_action(state, chosen, player)
         # apply_action may reset fields via new_game paths; re-sync memory keys
         state.setdefault("autoplay_history", [])
+        state.setdefault("autoplay_seen", [])
         state.setdefault("autoplay_stock_passes", 0)
+        state.setdefault("unwinnable", False)
         if events:
             record_autoplay_action(state, chosen)
         if state.get("last_action"):

@@ -515,6 +515,156 @@ def test_hint_finds_waste_play_ignoring_history():
     assert state["hint"]["target_col"] == 0
 
 
+def test_ai_blocks_interleaved_tableau_reverse():
+    """A→B, then an unrelated slide, then B→A must still be blocked under Watch."""
+    from app.games.solitaire.ai import choose_action, record_autoplay_action
+
+    eng, state = _engine_state(
+        tableau=[
+            [
+                {"rank": "6", "suit": "spades", "face_up": True},
+                {"rank": "5", "suit": "hearts", "face_up": True},
+            ],
+            [{"rank": "6", "suit": "clubs", "face_up": True}],
+            [
+                {"rank": "8", "suit": "spades", "face_up": True},
+                {"rank": "7", "suit": "diamonds", "face_up": True},
+            ],
+            [{"rank": "8", "suit": "clubs", "face_up": True}],
+            [],
+            [],
+            [],
+        ],
+        autoplay_history=[],
+        autoplay_seen=[],
+    )
+
+    record_autoplay_action(
+        state,
+        {
+            "type": "move_to_tableau",
+            "source": "tableau",
+            "source_index": 1,
+            "card_index": 0,
+            "target_col": 0,
+        },
+    )
+    # Unrelated slide so the reverse is no longer "immediate"
+    record_autoplay_action(
+        state,
+        {
+            "type": "move_to_tableau",
+            "source": "tableau",
+            "source_index": 2,
+            "card_index": 1,
+            "target_col": 3,
+        },
+    )
+
+    action, _ = choose_action(state, use_history=True)
+    if action and action.get("type") == "move_to_tableau" and action.get("source") == "tableau":
+        assert not (
+            action.get("source_index") == 0 and action.get("target_col") == 1
+        )
+
+
+def test_ai_skips_tableau_reshuffle_on_revisited_board():
+    from app.games.solitaire.ai import board_fingerprint, choose_action
+
+    eng, state = _engine_state(
+        tableau=[
+            [
+                {"rank": "6", "suit": "spades", "face_up": True},
+                {"rank": "5", "suit": "hearts", "face_up": True},
+            ],
+            [{"rank": "6", "suit": "clubs", "face_up": True}],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ],
+        autoplay_history=[],
+        autoplay_seen=[],
+    )
+    fp = board_fingerprint(state)
+    state["autoplay_seen"] = [fp]
+
+    action, _ = choose_action(state, use_history=True)
+    assert action is None or action.get("type") in ("draw", "reset_stock", "move_to_foundation")
+    if action and action.get("type") == "move_to_tableau":
+        assert action.get("source") == "waste"
+
+
+def test_hint_does_not_reverse_last_tableau_move():
+    from app.games.solitaire.ai import choose_action
+
+    eng, state = _engine_state(
+        tableau=[
+            [
+                {"rank": "6", "suit": "spades", "face_up": True},
+                {"rank": "5", "suit": "hearts", "face_up": True},
+            ],
+            [{"rank": "6", "suit": "clubs", "face_up": True}],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ],
+        last_action={
+            "type": "move_to_tableau",
+            "source": "tableau",
+            "source_index": 1,
+            "card_index": 0,
+            "target_col": 0,
+        },
+    )
+
+    action, _ = choose_action(state, use_history=False)
+    if action and action.get("type") == "move_to_tableau" and action.get("source") == "tableau":
+        assert not (
+            action.get("source_index") == 0 and action.get("target_col") == 1
+        )
+
+
+def test_unwinnable_stops_autoplay_and_hint():
+    eng, state = _engine_state(
+        tableau=[
+            [
+                {"rank": "K", "suit": "spades", "face_up": False},
+                {"rank": "Q", "suit": "spades", "face_up": True},
+            ],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ],
+        foundations={
+            "hearts": [{"rank": r, "suit": "hearts", "face_up": True} for r in RANKS],
+            "diamonds": [{"rank": r, "suit": "diamonds", "face_up": True} for r in RANKS],
+            "clubs": [{"rank": r, "suit": "clubs", "face_up": True} for r in RANKS],
+            "spades": [],
+        },
+        autoplay=True,
+    )
+    assert not is_solvable(state, max_nodes=5_000)
+
+    state, events = eng.tick(state)
+    assert state["autoplay"] is False
+    assert any(e["type"] == "autoplay_stuck" for e in events)
+    assert state["hint"]["type"] == "none"
+    assert "unwinnable" in state["hint"]["reason"].lower()
+    assert state.get("unwinnable") is True
+
+    state["autoplay"] = False
+    state, _ = eng.apply_action(state, {"type": "hint"}, PLAYERS[0])
+    assert state["hint"]["type"] == "none"
+    assert "unwinnable" in state["hint"]["reason"].lower()
+
+
 def test_solver_accepts_near_win():
     eng, state = _engine_state()
     for suit in SUITS:
