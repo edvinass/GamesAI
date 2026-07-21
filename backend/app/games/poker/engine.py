@@ -620,7 +620,9 @@ class PokerEngine(GamePlugin):
     def _award_uncontested(self, state: dict, winner_id: str) -> dict:
         total = self._pot_total(state)
         state["players"][winner_id]["chips"] += total
-        state["winners"] = [{"player_id": winner_id, "amount": total, "hand": None}]
+        winner_contribution = state["players"][winner_id]["total_bet_hand"]
+        contested_winnings = total - winner_contribution
+        state["winners"] = [{"player_id": winner_id, "amount": contested_winnings, "hand": None}]
         for pid in state["seat_order"]:
             state["players"][pid]["bet_this_round"] = 0
             state["players"][pid]["total_bet_hand"] = 0

@@ -340,6 +340,44 @@ def test_show_cards_on_fold_setting_enabled_reveals_cards(engine: PokerEngine) -
     assert len(winner_from_loser["hole_cards"]) == 2
 
 
+def test_uncalled_bet_not_counted_in_winnings(engine: PokerEngine) -> None:
+    """When winner raises and everyone folds, the uncalled portion should not count as winnings."""
+    state = engine.create_initial_state(
+        make_players(2), {"host_id": "p0", "small_blind": 5, "big_blind": 10}
+    )
+    # In heads-up: p0 is dealer/SB, p1 is BB
+    # p0 posted SB=5, p1 posted BB=10
+    # Dealer/SB acts first in heads-up preflop
+
+    p0_actor = {"id": "p0", "nickname": "P0", "is_ai": False}
+    p1_actor = {"id": "p1", "nickname": "P1", "is_ai": False}
+
+    # p0 (dealer/SB) raises to 50
+    assert state["current_actor_id"] == "p0"
+    state, _ = engine.apply_action(state, {"type": "raise", "amount": 50}, p0_actor)
+
+    # p1 (BB) raises to 200
+    assert state["current_actor_id"] == "p1"
+    state, _ = engine.apply_action(state, {"type": "raise", "amount": 200}, p1_actor)
+
+    # p0 folds - p1 wins but their raise to 200 was uncalled
+    assert state["current_actor_id"] == "p0"
+    state, _ = engine.apply_action(state, {"type": "fold"}, p0_actor)
+
+    assert state["phase"] in ("hand_complete", "game_over")
+    assert state["win_by_fold"] is True
+    assert len(state["winners"]) == 1
+
+    winner = state["winners"][0]
+    assert winner["player_id"] == "p1"
+    # p0 put in 50 total, p1 put in 200 total
+    # The contested amount (what p0 actually risked) is 50
+    # p1's winnings should be 50, not 250 (the full pot)
+    assert winner["amount"] == 50, (
+        f"Expected winnings of 50 (contested amount), got {winner['amount']}"
+    )
+
+
 def test_showdown_always_reveals_cards(engine: PokerEngine) -> None:
     """Even with show_cards_on_fold=False, showdown should always reveal cards."""
     from app.games.poker.deck import make_card
