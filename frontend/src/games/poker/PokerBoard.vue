@@ -2751,6 +2751,10 @@ onUnmounted(() => {
     height: clamp(68px, 17vw, 114px);
   }
 
+  .table-felt :deep(.corner__suit) {
+    display: none;
+  }
+
   .phase-banner {
     font-size: clamp(1rem, 4.5vw, 1.45rem);
     padding: 0.65rem 1.15rem;
