@@ -9,6 +9,7 @@ export type SnakeSnapshot = {
   color: string
   score: number
   ghost?: boolean
+  speedMode?: 'normal' | 'fast' | 'slow'
 }
 
 export const FOOD_PARTICLE_COLORS: Record<SnakeFoodType, string> = {
@@ -17,6 +18,8 @@ export const FOOD_PARTICLE_COLORS: Record<SnakeFoodType, string> = {
   poison: '#a3e635',
   ghost: '#67e8f9',
   ammo: '#fb923c',
+  turbo: '#f472b6',
+  slow: '#94a3b8',
 }
 
 export type Particle = {
@@ -296,6 +299,20 @@ const FOOD_PALETTES: Record<SnakeFoodType, FoodPalette> = {
     leaf: '#fbbf24',
     stem: '#7c2d12',
     ring: 'rgba(255, 200, 120, 0.5)',
+  },
+  turbo: {
+    glow: ['rgba(244, 114, 182, 0.7)', 'rgba(219, 39, 119, 0.25)', 'rgba(157, 23, 77, 0)'],
+    body: ['#fbcfe8', '#f472b6', '#be185d'],
+    leaf: '#fda4af',
+    stem: '#9f1239',
+    ring: 'rgba(251, 113, 133, 0.55)',
+  },
+  slow: {
+    glow: ['rgba(148, 163, 184, 0.55)', 'rgba(100, 116, 139, 0.2)', 'rgba(51, 65, 85, 0)'],
+    body: ['#cbd5e1', '#94a3b8', '#475569'],
+    leaf: '#94a3b8',
+    stem: '#334155',
+    ring: 'rgba(148, 163, 184, 0.4)',
   },
 }
 
@@ -633,10 +650,26 @@ export function drawSnake(
   gridH: number,
   time: number,
   ghost = false,
+  speedMode: 'normal' | 'fast' | 'slow' = 'normal',
 ) {
   if (body.length === 0) return
-  const alpha = alive ? (ghost ? 0.55 : 1) : 0.32
+  let alpha = alive ? (ghost ? 0.55 : 1) : 0.32
+  if (alive && speedMode === 'slow') alpha *= 0.85
   const chunks = splitWrappedPath(body, gridW, gridH)
+
+  if (alive && speedMode === 'fast' && body[0]) {
+    const head = body[0]
+    const cx = offsetX + (head.x + 0.5) * cell
+    const cy = offsetY + (head.y + 0.5) * cell
+    const pulse = 0.7 + 0.3 * Math.sin(time * 0.02)
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, cell * 1.4)
+    glow.addColorStop(0, rgba(color, 0.35 * pulse))
+    glow.addColorStop(1, rgba(color, 0))
+    ctx.fillStyle = glow
+    ctx.beginPath()
+    ctx.arc(cx, cy, cell * 1.4, 0, Math.PI * 2)
+    ctx.fill()
+  }
 
   chunks.forEach((chunk, idx) => {
     const isHeadChunk = idx === 0
@@ -736,6 +769,7 @@ export type RenderFrame = {
       color: string
       alive: boolean
       ghost?: boolean
+      speedMode?: 'normal' | 'fast' | 'slow'
     }
   >
   playerId: string
@@ -795,6 +829,7 @@ export function renderFrame(
       gridH,
       time,
       Boolean(snake.ghost),
+      snake.speedMode ?? 'normal',
     )
   }
 

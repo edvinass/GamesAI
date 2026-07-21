@@ -37,14 +37,38 @@ SHOT_SPEED = 3  # cells advanced per game tick
 SHOT_SCORE_DAMAGE = 1  # score removed from a hit opponent
 SHOT_KILL_BONUS = 2
 SCORE_TO_WIN = 50
+SPEED_TICKS = 45
+SPEED_RATES = {
+    "normal": 1.0,
+    "fast": 2.0,
+    "slow": 0.5,
+}
 
-# score / grow / ghost_ticks / ammo / spawn weight
-FOOD_DEFS: dict[str, dict[str, int]] = {
-    "apple": {"score": 1, "grow": 1, "ghost_ticks": 0, "ammo": 0, "weight": 40},
-    "golden": {"score": 3, "grow": 2, "ghost_ticks": 0, "ammo": 0, "weight": 15},
-    "poison": {"score": 0, "grow": -2, "ghost_ticks": 0, "ammo": 0, "weight": 14},
-    "ghost": {"score": 1, "grow": 1, "ghost_ticks": 30, "ammo": 0, "weight": 12},
-    "ammo": {"score": 1, "grow": 0, "ghost_ticks": 0, "ammo": 2, "weight": 19},
+# score / grow / ghost_ticks / ammo / spawn weight / optional speed effect
+FOOD_DEFS: dict[str, dict] = {
+    "apple": {"score": 1, "grow": 1, "ghost_ticks": 0, "ammo": 0, "weight": 32},
+    "golden": {"score": 3, "grow": 2, "ghost_ticks": 0, "ammo": 0, "weight": 12},
+    "poison": {"score": 0, "grow": -2, "ghost_ticks": 0, "ammo": 0, "weight": 12},
+    "ghost": {"score": 1, "grow": 1, "ghost_ticks": 30, "ammo": 0, "weight": 10},
+    "ammo": {"score": 1, "grow": 0, "ghost_ticks": 0, "ammo": 2, "weight": 14},
+    "turbo": {
+        "score": 1,
+        "grow": 0,
+        "ghost_ticks": 0,
+        "ammo": 0,
+        "weight": 12,
+        "speed_mode": "fast",
+        "speed_ticks": SPEED_TICKS,
+    },
+    "slow": {
+        "score": 0,
+        "grow": 0,
+        "ghost_ticks": 0,
+        "ammo": 0,
+        "weight": 12,
+        "speed_mode": "slow",
+        "speed_ticks": SPEED_TICKS,
+    },
 }
 
 FOOD_TYPES = tuple(FOOD_DEFS.keys())
@@ -187,6 +211,9 @@ class SnakeEngine(GamePlugin):
                 "pending_grow": 0,
                 "ghost_until_tick": -1,
                 "ammo": 0,
+                "speed_mode": "normal",
+                "speed_until_tick": -1,
+                "move_credit": 0.0,
             }
 
         countdown_sec = settings["countdown_sec"]
@@ -501,35 +528,52 @@ class SnakeEngine(GamePlugin):
             return state.get("phase") == "finished"
         return False
 
-    def tick(self, state: dict) -> tuple[dict, list[dict]]:
+    def _active_speed_mode(self, snake: dict, tick_now: int) -> str:
+        until = int(snake.get("speed_until_tick", -1))
+        mode = snake.get("speed_mode") or "normal"
+        if until >= tick_now and mode in SPEED_RATES:
+            return mode
+        return "normal"
+
+    def _apply_food_effects(
+        self, snake: dict, food_item: dict, tick_now: int
+    ) -> tuple[int, str]:
+        """Apply non-growth food effects. Returns (grow, food_type)."""
+        ftype = food_item.get("type", "apple")
+        defs = FOOD_DEFS.get(ftype, FOOD_DEFS["apple"])
+        grow = int(defs["grow"])
+        snake["score"] = max(0, int(snake.get("score", 0)) + int(defs["score"]))
+        ghost_ticks = int(defs.get("ghost_ticks", 0))
+        if ghost_ticks > 0:
+            snake["ghost_until_tick"] = max(
+                snake.get("ghost_until_tick", -1),
+                tick_now + ghost_ticks,
+            )
+        ammo_gain = int(defs.get("ammo", 0))
+        if ammo_gain > 0:
+            snake["ammo"] = int(snake.get("ammo", 0)) + ammo_gain
+        speed_mode = defs.get("speed_mode")
+        speed_ticks = int(defs.get("speed_ticks", 0))
+        if speed_mode in SPEED_RATES and speed_ticks > 0:
+            snake["speed_mode"] = speed_mode
+            snake["speed_until_tick"] = tick_now + speed_ticks
+        return grow, ftype
+
+    def _step_movement(self, state: dict, moving: set[str]) -> list[dict]:
+        """Advance the given snakes by one cell and resolve collisions/food."""
         events: list[dict] = []
-
-        if state["phase"] == "finished":
-            return state, events
-
-        if state["phase"] == "countdown":
-            ends_at = state.get("countdown_ends_at")
-            if ends_at:
-                end = datetime.fromisoformat(ends_at)
-                if datetime.now(timezone.utc) >= end:
-                    state["phase"] = "playing"
-                    events.append({"type": "game_started"})
-            state["tick"] += 1
-            return state, events
-
-        events.extend(self._apply_ai_actions(state))
+        if not moving:
+            return events
 
         grid_width = state["grid_width"]
         grid_height = state["grid_height"]
         snakes = state["snakes"]
-
-        if state["phase"] == "finished":
-            state["tick"] += 1
-            return state, events
+        tick_now = state["tick"]
 
         new_heads: dict[str, list[int]] = {}
-        for pid, snake in snakes.items():
-            if not snake.get("alive"):
+        for pid in moving:
+            snake = snakes.get(pid)
+            if not snake or not snake.get("alive"):
                 continue
             direction = snake["next_direction"]
             if not _is_reverse(direction, snake["direction"]):
@@ -539,34 +583,36 @@ class SnakeEngine(GamePlugin):
             nx, ny = _wrap_pos(head[0] + dx, head[1] + dy, grid_width, grid_height)
             new_heads[pid] = [nx, ny]
 
+        if not new_heads:
+            return events
+
         food_by_cell: dict[tuple[int, int], dict] = {
             (f["x"], f["y"]): f for f in state.get("foods") or []
         }
         will_eat: dict[str, dict] = {}
         for pid, new_head in new_heads.items():
-            key = (new_head[0], new_head[1])
-            food_item = food_by_cell.get(key)
+            food_item = food_by_cell.get((new_head[0], new_head[1]))
             if food_item is not None:
                 will_eat[pid] = food_item
 
-        tick_now = state["tick"]
         body_cells_by_owner: dict[str, set[tuple[int, int]]] = {}
         all_body_cells: set[tuple[int, int]] = set()
         for pid, snake in snakes.items():
             if not snake.get("alive"):
                 continue
             body = snake["body"]
-            keeps_tail = snake.get("pending_grow", 0) > 0
-            if pid in will_eat:
-                ftype = will_eat[pid].get("type", "apple")
-                if FOOD_DEFS.get(ftype, {}).get("grow", 1) > 0:
-                    keeps_tail = True
+            keeps_tail = True
+            if pid in new_heads:
+                keeps_tail = snake.get("pending_grow", 0) > 0
+                if pid in will_eat:
+                    ftype = will_eat[pid].get("type", "apple")
+                    if FOOD_DEFS.get(ftype, {}).get("grow", 1) > 0:
+                        keeps_tail = True
             limit = len(body) if keeps_tail else len(body) - 1
-            cells = {(body[i][0], body[i][1]) for i in range(limit)}
+            cells = {(body[i][0], body[i][1]) for i in range(max(0, limit))}
             body_cells_by_owner[pid] = cells
             all_body_cells |= cells
 
-        died: set[str] = set()
         head_positions: dict[tuple[int, int], list[str]] = {}
         for pid, new_head in new_heads.items():
             key = (new_head[0], new_head[1])
@@ -577,20 +623,17 @@ class SnakeEngine(GamePlugin):
             x, y = new_head
             if len(head_positions.get((x, y), [])) > 1:
                 snake["alive"] = False
-                died.add(pid)
                 events.append({"type": "player_died", "player_id": pid, "reason": "head_on"})
                 continue
 
             is_ghost = snake.get("ghost_until_tick", -1) >= tick_now
             if is_ghost:
-                # Ghost: ignore own body, still die on others.
                 foreign = all_body_cells - body_cells_by_owner.get(pid, set())
                 hit = (x, y) in foreign
             else:
                 hit = (x, y) in all_body_cells
             if hit:
                 snake["alive"] = False
-                died.add(pid)
                 events.append({"type": "player_died", "player_id": pid, "reason": "collision"})
 
         eaten_keys: set[tuple[int, int]] = set()
@@ -603,19 +646,7 @@ class SnakeEngine(GamePlugin):
             grow = 0
             food_item = will_eat.get(pid)
             if food_item is not None:
-                ftype = food_item.get("type", "apple")
-                defs = FOOD_DEFS.get(ftype, FOOD_DEFS["apple"])
-                grow = int(defs["grow"])
-                snake["score"] = max(0, snake["score"] + int(defs["score"]))
-                ghost_ticks = int(defs.get("ghost_ticks", 0))
-                if ghost_ticks > 0:
-                    snake["ghost_until_tick"] = max(
-                        snake.get("ghost_until_tick", -1),
-                        tick_now + ghost_ticks,
-                    )
-                ammo_gain = int(defs.get("ammo", 0))
-                if ammo_gain > 0:
-                    snake["ammo"] = int(snake.get("ammo", 0)) + ammo_gain
+                grow, ftype = self._apply_food_effects(snake, food_item, tick_now)
                 eaten_keys.add((food_item["x"], food_item["y"]))
                 events.append(
                     {
@@ -647,8 +678,62 @@ class SnakeEngine(GamePlugin):
             ]
             self._ensure_foods(state)
 
-        # Projectiles move after snakes so shots lead the current facing.
-        events.extend(self._advance_projectiles(state))
+        return events
+
+    def tick(self, state: dict) -> tuple[dict, list[dict]]:
+        events: list[dict] = []
+
+        if state["phase"] == "finished":
+            return state, events
+
+        if state["phase"] == "countdown":
+            ends_at = state.get("countdown_ends_at")
+            if ends_at:
+                end = datetime.fromisoformat(ends_at)
+                if datetime.now(timezone.utc) >= end:
+                    state["phase"] = "playing"
+                    events.append({"type": "game_started"})
+            state["tick"] += 1
+            return state, events
+
+        events.extend(self._apply_ai_actions(state))
+
+        if state["phase"] == "finished":
+            state["tick"] += 1
+            return state, events
+
+        tick_now = state["tick"]
+        snakes = state["snakes"]
+
+        for snake in snakes.values():
+            if not snake.get("alive"):
+                continue
+            mode = self._active_speed_mode(snake, tick_now)
+            rate = SPEED_RATES.get(mode, 1.0)
+            snake["move_credit"] = float(snake.get("move_credit", 0.0)) + rate
+            if int(snake.get("speed_until_tick", -1)) < tick_now:
+                snake["speed_mode"] = "normal"
+
+        # Up to 2 substeps so fast snakes can move twice; slow snakes bank credit.
+        for _ in range(2):
+            moving = {
+                pid
+                for pid, snake in snakes.items()
+                if snake.get("alive")
+                and float(snake.get("move_credit", 0.0)) >= 1.0 - 1e-9
+            }
+            if not moving:
+                break
+            for pid in moving:
+                snakes[pid]["move_credit"] = (
+                    float(snakes[pid].get("move_credit", 0.0)) - 1.0
+                )
+            events.extend(self._step_movement(state, moving))
+            if state.get("phase") == "finished":
+                break
+
+        if state.get("phase") != "finished":
+            events.extend(self._advance_projectiles(state))
 
         if self._maybe_finish(state):
             events.append({"type": "game_over", "winner": state["winner"]})

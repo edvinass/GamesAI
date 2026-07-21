@@ -6,7 +6,7 @@ export const snakeRules: GameRules = {
   quickStart: [
     'Join a room with 2–8 players (or add AI bots).',
     'Use arrow keys or WASD to steer your snake.',
-    'Eat apples, gold, poison, ghost, or ammo pellets.',
+    'Eat apples, gold, poison, ghost, ammo, turbo, or slow pellets.',
     'Press Space to shoot when you have ammo — hits drain rival score.',
     'Pass through walls — you wrap to the opposite side.',
     'First player to 50 score wins.',
@@ -22,7 +22,7 @@ export const snakeRules: GameRules = {
     },
     {
       heading: 'Food types',
-      body: 'Three pellets are on the board at once. Red apple: +1 score and grow by 1. Golden: +3 score and grow by 2. Poison (lime): shrinks you by 2 (never below length 3) and gives no score. Ghost (cyan): +1 score, grow by 1, and briefly phase through your own body. Ammo (orange): +1 score and +2 shots.',
+      body: 'Three pellets are on the board at once. Red apple: +1 score and grow by 1. Golden: +3 score and grow by 2. Poison (lime): shrinks you by 2 (never below length 3) and gives no score. Ghost (cyan): +1 score, grow by 1, and briefly phase through your own body. Ammo (orange): +1 score and +2 shots. Turbo (pink): move twice as fast for a while. Slow (gray): move half as fast for a while.',
     },
     {
       heading: 'Shooting',

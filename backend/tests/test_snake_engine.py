@@ -48,7 +48,10 @@ def test_initial_state_spawns(engine: SnakeEngine) -> None:
     assert len(state["snakes"]) == 3
     assert state["phase"] == "countdown"
     assert len(state["foods"]) == 3
-    assert all(f["type"] in ("apple", "golden", "poison", "ghost", "ammo") for f in state["foods"])
+    assert all(
+        f["type"] in ("apple", "golden", "poison", "ghost", "ammo", "turbo", "slow")
+        for f in state["foods"]
+    )
 
     occupied: set[tuple[int, int]] = set()
     for snake in state["snakes"].values():
@@ -317,6 +320,64 @@ def test_countdown_to_playing(engine: SnakeEngine) -> None:
     state, events = engine.tick(state)
     assert state["phase"] == "playing"
     assert any(e["type"] == "game_started" for e in events)
+
+
+def test_turbo_food_moves_twice(engine: SnakeEngine, state: dict) -> None:
+    pid = state["players"][0]["id"]
+    other = state["players"][1]["id"]
+    snake = state["snakes"][pid]
+    snake["body"] = [[5, 5], [4, 5], [3, 5]]
+    snake["direction"] = "right"
+    snake["next_direction"] = "right"
+    snake["speed_mode"] = "fast"
+    snake["speed_until_tick"] = 999
+    snake["move_credit"] = 0.0
+    state["snakes"][other]["body"] = [[40, 20], [41, 20], [42, 20]]
+    state["snakes"][other]["direction"] = "left"
+    state["snakes"][other]["next_direction"] = "left"
+    state["foods"] = []
+
+    state, _ = engine.tick(state)
+    assert state["snakes"][pid]["body"][0] == [7, 5]
+
+
+def test_slow_food_moves_every_other_tick(engine: SnakeEngine, state: dict) -> None:
+    pid = state["players"][0]["id"]
+    other = state["players"][1]["id"]
+    snake = state["snakes"][pid]
+    snake["body"] = [[5, 5], [4, 5], [3, 5]]
+    snake["direction"] = "right"
+    snake["next_direction"] = "right"
+    snake["speed_mode"] = "slow"
+    snake["speed_until_tick"] = 999
+    snake["move_credit"] = 0.0
+    state["snakes"][other]["body"] = [[40, 20], [41, 20], [42, 20]]
+    state["snakes"][other]["direction"] = "left"
+    state["snakes"][other]["next_direction"] = "left"
+    state["foods"] = []
+
+    state, _ = engine.tick(state)
+    assert state["snakes"][pid]["body"][0] == [5, 5]
+    assert state["snakes"][pid]["move_credit"] == pytest.approx(0.5)
+
+    state, _ = engine.tick(state)
+    assert state["snakes"][pid]["body"][0] == [6, 5]
+
+
+def test_turbo_food_grants_buff(engine: SnakeEngine, state: dict) -> None:
+    pid = state["players"][0]["id"]
+    snake = state["snakes"][pid]
+    snake["body"] = [[5, 5], [4, 5], [3, 5]]
+    snake["direction"] = "right"
+    snake["next_direction"] = "right"
+    state["tick"] = 10
+    state["foods"] = [{"x": 6, "y": 5, "type": "turbo"}]
+    state["snakes"][state["players"][1]["id"]]["alive"] = False
+
+    state, events = engine.tick(state)
+    assert state["snakes"][pid]["speed_mode"] == "fast"
+    assert state["snakes"][pid]["speed_until_tick"] == 55
+    assert any(e.get("food_type") == "turbo" for e in events)
 
 
 def test_winner_score_limit(engine: SnakeEngine, state: dict) -> None:

@@ -92,9 +92,12 @@ export interface SnakeSegment {
   pending_grow?: number
   ghost_until_tick?: number
   ammo?: number
+  speed_mode?: 'normal' | 'fast' | 'slow'
+  speed_until_tick?: number
+  move_credit?: number
 }
 
-export type SnakeFoodType = 'apple' | 'golden' | 'poison' | 'ghost' | 'ammo'
+export type SnakeFoodType = 'apple' | 'golden' | 'poison' | 'ghost' | 'ammo' | 'turbo' | 'slow'
 
 export interface SnakeFood {
   x: number

@@ -18,9 +18,10 @@ OPPOSITE = {
 # Lower is more desirable when chasing.
 _FOOD_CHASE_RANK = {
     "golden": 0,
-    "ammo": 1,
-    "ghost": 2,
-    "apple": 3,
+    "turbo": 1,
+    "ammo": 2,
+    "ghost": 3,
+    "apple": 4,
 }
 
 
@@ -61,15 +62,15 @@ def _pick_food_target(foods: list[dict], head: list[int], grid_width: int, grid_
         )
         return chase[0]
 
-    # Only poison left — steer away from the nearest one.
-    poisons = [f for f in foods if f.get("type") == "poison"]
-    if not poisons:
+    # Only poison/slow left — steer away from the nearest hazard food.
+    hazards = [f for f in foods if f.get("type") in ("poison", "slow")]
+    if not hazards:
         return None
     nearest = min(
-        poisons,
+        hazards,
         key=lambda f: _manhattan(head[0], head[1], f["x"], f["y"], grid_width, grid_height),
     )
-    return {"x": nearest["x"], "y": nearest["y"], "type": "poison", "flee": True}
+    return {"x": nearest["x"], "y": nearest["y"], "type": nearest.get("type"), "flee": True}
 
 
 def choose_ai_direction(

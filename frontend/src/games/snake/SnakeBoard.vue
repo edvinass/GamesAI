@@ -105,6 +105,8 @@ function snapshotSnakes(state: SnakeGameState): Record<string, SnakeSnapshot> {
   const out: Record<string, SnakeSnapshot> = {}
   const tick = state.tick
   for (const [pid, snake] of Object.entries(state.snakes)) {
+    const speedActive = (snake.speed_until_tick ?? -1) >= tick
+    const mode = speedActive ? (snake.speed_mode ?? 'normal') : 'normal'
     out[pid] = {
       body: snake.body.map((s) => [...s]),
       direction: snake.direction,
@@ -112,6 +114,7 @@ function snapshotSnakes(state: SnakeGameState): Record<string, SnakeSnapshot> {
       color: snake.color,
       score: snake.score,
       ghost: (snake.ghost_until_tick ?? -1) >= tick,
+      speedMode: mode === 'fast' || mode === 'slow' ? mode : 'normal',
     }
   }
   return out
@@ -201,7 +204,14 @@ function paint(now: number) {
 
   const rendered: Record<
     string,
-    { body: Point[]; direction: string; color: string; alive: boolean; ghost?: boolean }
+    {
+      body: Point[]
+      direction: string
+      color: string
+      alive: boolean
+      ghost?: boolean
+      speedMode?: 'normal' | 'fast' | 'slow'
+    }
   > = {}
 
   for (const [pid, snake] of Object.entries(props.gameState.snakes)) {
@@ -213,6 +223,7 @@ function paint(now: number) {
       color: target.color,
       alive: target.alive,
       ghost: target.ghost,
+      speedMode: target.speedMode,
     }
   }
 
@@ -307,6 +318,8 @@ onUnmounted(() => {
           <li><span class="swatch poison" />Poison shrink</li>
           <li><span class="swatch ghost" />Ghost phase</li>
           <li><span class="swatch ammo" />Ammo shots</li>
+          <li><span class="swatch turbo" />Turbo fast</li>
+          <li><span class="swatch slow" />Slow</li>
         </ul>
       </div>
     </aside>
@@ -573,6 +586,16 @@ onUnmounted(() => {
 .swatch.ammo {
   background: #fb923c;
   color: #fb923c;
+}
+
+.swatch.turbo {
+  background: #f472b6;
+  color: #f472b6;
+}
+
+.swatch.slow {
+  background: #94a3b8;
+  color: #94a3b8;
 }
 
 @media (max-width: 640px) {
