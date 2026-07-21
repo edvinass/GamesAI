@@ -32,8 +32,10 @@ SNAKE_COLORS = [
 
 INITIAL_LENGTH = 3
 FOOD_COUNT = 3
-SHOT_TTL = 24
-SHOT_SHRINK = 1
+SHOT_TTL = 28  # cells of travel before expiring
+SHOT_SPEED = 3  # cells advanced per game tick
+SHOT_SCORE_DAMAGE = 1  # score removed from a hit opponent
+SHOT_KILL_BONUS = 2
 
 # score / grow / ghost_ticks / ammo / spawn weight
 FOOD_DEFS: dict[str, dict[str, int]] = {
@@ -258,40 +260,39 @@ class SnakeEngine(GamePlugin):
         events.extend(hit_events)
         return events
 
-    def _shorten_snake(
+    def _damage_snake_score(
         self, state: dict, target_id: str, amount: int, shooter_id: str | None
     ) -> list[dict]:
         events: list[dict] = []
         snake = state["snakes"].get(target_id)
         if not snake or not snake.get("alive"):
             return events
-        for _ in range(max(0, amount)):
-            if len(snake["body"]) > 1:
-                snake["body"].pop()
-            if len(snake["body"]) <= 1:
-                snake["alive"] = False
-                events.append(
-                    {
-                        "type": "player_died",
-                        "player_id": target_id,
-                        "reason": "shot",
-                        "by": shooter_id,
-                    }
-                )
-                if shooter_id and shooter_id in state["snakes"]:
-                    state["snakes"][shooter_id]["score"] = (
-                        state["snakes"][shooter_id].get("score", 0) + 2
-                    )
-                break
-        else:
+
+        snake["score"] = int(snake.get("score", 0)) - max(0, amount)
+        events.append(
+            {
+                "type": "snake_hit",
+                "player_id": target_id,
+                "by": shooter_id,
+                "score": snake["score"],
+                "damage": amount,
+            }
+        )
+
+        if snake["score"] < 0:
+            snake["alive"] = False
             events.append(
                 {
-                    "type": "snake_hit",
+                    "type": "player_died",
                     "player_id": target_id,
+                    "reason": "shot",
                     "by": shooter_id,
-                    "length": len(snake["body"]),
                 }
             )
+            if shooter_id and shooter_id in state["snakes"]:
+                state["snakes"][shooter_id]["score"] = (
+                    state["snakes"][shooter_id].get("score", 0) + SHOT_KILL_BONUS
+                )
         return events
 
     def _segment_owner_at(self, state: dict, x: int, y: int) -> str | None:
@@ -316,7 +317,7 @@ class SnakeEngine(GamePlugin):
             victim = self._segment_owner_at(state, proj["x"], proj["y"])
             if victim is not None and victim != owner:
                 events.extend(
-                    self._shorten_snake(state, victim, SHOT_SHRINK, owner)
+                    self._damage_snake_score(state, victim, SHOT_SCORE_DAMAGE, owner)
                 )
                 events.append(
                     {
@@ -337,27 +338,54 @@ class SnakeEngine(GamePlugin):
         events: list[dict] = []
         grid_width = state["grid_width"]
         grid_height = state["grid_height"]
-        advanced: list[dict] = []
+        surviving: list[dict] = []
+
         for proj in state.get("projectiles") or []:
             direction = proj.get("direction")
             if direction not in DIRECTIONS:
                 continue
             dx, dy = DIRECTIONS[direction]
-            proj["x"], proj["y"] = _wrap_pos(
-                proj["x"] + dx, proj["y"] + dy, grid_width, grid_height
-            )
-            proj["ttl"] = int(proj.get("ttl", 1)) - 1
-            if proj["ttl"] <= 0:
-                events.append(
-                    {
-                        "type": "projectile_expired",
-                        "projectile_id": proj["id"],
-                    }
+            hit = False
+            for _ in range(SHOT_SPEED):
+                proj["x"], proj["y"] = _wrap_pos(
+                    proj["x"] + dx, proj["y"] + dy, grid_width, grid_height
                 )
-                continue
-            advanced.append(proj)
-        state["projectiles"] = advanced
-        events.extend(self._apply_projectile_hits(state))
+                proj["ttl"] = int(proj.get("ttl", 1)) - 1
+                if proj["ttl"] <= 0:
+                    events.append(
+                        {
+                            "type": "projectile_expired",
+                            "projectile_id": proj["id"],
+                        }
+                    )
+                    hit = True
+                    break
+
+                owner = proj.get("owner_id")
+                victim = self._segment_owner_at(state, proj["x"], proj["y"])
+                if victim is not None and victim != owner:
+                    events.extend(
+                        self._damage_snake_score(
+                            state, victim, SHOT_SCORE_DAMAGE, owner
+                        )
+                    )
+                    events.append(
+                        {
+                            "type": "projectile_hit",
+                            "projectile_id": proj["id"],
+                            "player_id": victim,
+                            "by": owner,
+                            "x": proj["x"],
+                            "y": proj["y"],
+                        }
+                    )
+                    hit = True
+                    break
+
+            if not hit:
+                surviving.append(proj)
+
+        state["projectiles"] = surviving
         return events
 
     def apply_action(

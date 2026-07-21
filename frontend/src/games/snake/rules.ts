@@ -7,7 +7,7 @@ export const snakeRules: GameRules = {
     'Join a room with 2–8 players (or add AI bots).',
     'Use arrow keys or WASD to steer your snake.',
     'Eat apples, gold, poison, ghost, or ammo pellets.',
-    'Press Space to shoot when you have ammo — hits shorten rivals.',
+    'Press Space to shoot when you have ammo — hits drain rival score.',
     'Pass through walls — you wrap to the opposite side.',
     'Last snake alive wins; ties go to highest score.',
   ],
@@ -26,7 +26,7 @@ export const snakeRules: GameRules = {
     },
     {
       heading: 'Shooting',
-      body: 'Shots travel in the direction you are facing. Hitting another snake shortens it by one segment. If a snake is reduced to length 1, it dies. Landing a kill awards bonus score.',
+      body: 'Shots travel in the direction you are facing. Hitting another snake removes 1 score. If their score goes negative, they die. Landing a kill awards bonus score.',
     },
     {
       heading: 'Winning',
@@ -41,7 +41,7 @@ export const snakeRules: GameRules = {
     'Use wrap-around walls to escape tight spots.',
     'Queue your next turn early — e.g. right then up then left for a quick corner.',
     'Golden pellets are worth the detour; poison is bait near rivals.',
-    'Save ammo for long snakes — a few hits can finish them.',
+    'Save ammo for high-score rivals — a few hits can push them negative and finish them.',
     'Ghost timing lets you cut through your own coil to escape or ambush.',
   ],
 }

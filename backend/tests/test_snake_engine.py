@@ -236,7 +236,7 @@ def test_ammo_food_grants_shots(engine: SnakeEngine, state: dict) -> None:
     assert any(e.get("food_type") == "ammo" for e in events)
 
 
-def test_shoot_shortens_other_snake(engine: SnakeEngine, state: dict) -> None:
+def test_shoot_removes_score(engine: SnakeEngine, state: dict) -> None:
     p0, p1 = state["players"][0]["id"], state["players"][1]["id"]
     shooter = state["snakes"][p0]
     target = state["snakes"][p1]
@@ -247,6 +247,7 @@ def test_shoot_shortens_other_snake(engine: SnakeEngine, state: dict) -> None:
     target["body"] = [[8, 5], [9, 5], [10, 5], [11, 5]]
     target["direction"] = "up"
     target["next_direction"] = "up"
+    target["score"] = 3
     state["foods"] = []
     state["projectiles"] = []
 
@@ -260,13 +261,13 @@ def test_shoot_shortens_other_snake(engine: SnakeEngine, state: dict) -> None:
     state["projectiles"][0]["x"] = 8
     state["projectiles"][0]["y"] = 5
     hit_events = engine._apply_projectile_hits(state)
-    assert len(target["body"]) == 3
+    assert target["score"] == 2
     assert target["alive"]
     assert any(e["type"] == "snake_hit" for e in hit_events)
     assert state["projectiles"] == []
 
 
-def test_shot_kills_at_length_one(engine: SnakeEngine, state: dict) -> None:
+def test_shot_kills_on_negative_score(engine: SnakeEngine, state: dict) -> None:
     p0, p1 = state["players"][0]["id"], state["players"][1]["id"]
     shooter = state["snakes"][p0]
     target = state["snakes"][p1]
@@ -274,25 +275,25 @@ def test_shot_kills_at_length_one(engine: SnakeEngine, state: dict) -> None:
     shooter["direction"] = "right"
     shooter["next_direction"] = "right"
     shooter["ammo"] = 1
-    # Length 2 — one hit leaves length 1 → death
-    target["body"] = [[4, 10], [5, 10]]
+    shooter["score"] = 0
+    target["body"] = [[4, 10], [5, 10], [6, 10]]
     target["direction"] = "down"
     target["next_direction"] = "down"
+    target["score"] = 0
     state["foods"] = []
     state["projectiles"] = []
 
     player = state["players"][0]
-    state, events = engine.apply_action(state, {"type": "shoot"}, player)
+    state, _ = engine.apply_action(state, {"type": "shoot"}, player)
     assert state["projectiles"][0]["x"] == 3
 
-    # Move projectile onto target head cell (4,10)
     state["projectiles"][0]["x"] = 4
     state["projectiles"][0]["y"] = 10
     hit_events = engine._apply_projectile_hits(state)
+    assert target["score"] == -1
     assert not target["alive"]
     assert any(e.get("reason") == "shot" for e in hit_events)
-    assert len(target["body"]) == 1
-    assert state["phase"] != "finished" or state.get("winner") == p0
+    assert shooter["score"] == 2
 
 
 def test_shoot_without_ammo_noop(engine: SnakeEngine, state: dict) -> None:
