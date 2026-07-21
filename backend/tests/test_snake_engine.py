@@ -172,7 +172,7 @@ def test_poison_food_shrinks(engine: SnakeEngine, state: dict) -> None:
     state["snakes"][state["players"][1]["id"]]["alive"] = False
 
     state, events = engine.tick(state)
-    assert state["snakes"][pid]["score"] == 0
+    assert state["snakes"][pid]["score"] == 1
     assert len(state["snakes"][pid]["body"]) == 4
     assert any(e.get("food_type") == "poison" for e in events)
 

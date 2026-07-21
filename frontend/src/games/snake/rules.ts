@@ -22,7 +22,7 @@ export const snakeRules: GameRules = {
     },
     {
       heading: 'Food types',
-      body: 'Three pellets are on the board at once. Red apple: +1 score and grow by 1. Golden: +3 score and grow by 2. Poison (lime): shrinks you by 2 (never below length 3) and gives no score. Ghost (cyan): +1 score, grow by 1, and briefly phase through your own body. Ammo (orange): +1 score and +2 shots. Turbo (pink): move twice as fast for a while. Slow (gray): move half as fast for a while.',
+      body: 'Three pellets are on the board at once. Every food gives at least +1 score. Red apple: grow by 1. Golden: +3 score and grow by 2. Poison (lime): shrinks you by 2 (never below length 3). Ghost (cyan): grow by 1, and briefly phase through your own body. Ammo (orange): +2 shots. Turbo (pink): move twice as fast for a while. Slow (gray): move half as fast for a while.',
     },
     {
       heading: 'Shooting',

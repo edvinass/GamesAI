@@ -48,7 +48,7 @@ SPEED_RATES = {
 FOOD_DEFS: dict[str, dict] = {
     "apple": {"score": 1, "grow": 1, "ghost_ticks": 0, "ammo": 0, "weight": 32},
     "golden": {"score": 3, "grow": 2, "ghost_ticks": 0, "ammo": 0, "weight": 12},
-    "poison": {"score": 0, "grow": -2, "ghost_ticks": 0, "ammo": 0, "weight": 12},
+    "poison": {"score": 1, "grow": -2, "ghost_ticks": 0, "ammo": 0, "weight": 12},
     "ghost": {"score": 1, "grow": 1, "ghost_ticks": 30, "ammo": 0, "weight": 10},
     "ammo": {"score": 1, "grow": 0, "ghost_ticks": 0, "ammo": 2, "weight": 14},
     "turbo": {
@@ -61,7 +61,7 @@ FOOD_DEFS: dict[str, dict] = {
         "speed_ticks": SPEED_TICKS,
     },
     "slow": {
-        "score": 0,
+        "score": 1,
         "grow": 0,
         "ghost_ticks": 0,
         "ammo": 0,
