@@ -319,6 +319,19 @@ def test_countdown_to_playing(engine: SnakeEngine) -> None:
     assert any(e["type"] == "game_started" for e in events)
 
 
+def test_winner_score_limit(engine: SnakeEngine, state: dict) -> None:
+    p0, p1 = state["players"][0]["id"], state["players"][1]["id"]
+    state["snakes"][p0]["score"] = 50
+    state["snakes"][p0]["alive"] = True
+    state["snakes"][p1]["alive"] = True
+    state["snakes"][p1]["score"] = 12
+
+    assert engine._maybe_finish(state)
+    assert state["winner"] == p0
+    assert state["win_reason"] == "score_limit"
+    assert state["phase"] == "finished"
+
+
 def test_winner_last_standing(engine: SnakeEngine, state: dict) -> None:
     p0, p1 = state["players"][0]["id"], state["players"][1]["id"]
     state["snakes"][p0]["alive"] = False

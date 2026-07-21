@@ -36,6 +36,7 @@ SHOT_TTL = 28  # cells of travel before expiring
 SHOT_SPEED = 3  # cells advanced per game tick
 SHOT_SCORE_DAMAGE = 1  # score removed from a hit opponent
 SHOT_KILL_BONUS = 2
+SCORE_TO_WIN = 50
 
 # score / grow / ghost_ticks / ammo / spawn weight
 FOOD_DEFS: dict[str, dict[str, int]] = {
@@ -78,6 +79,7 @@ class SnakeEngine(GamePlugin):
             "tick_ms": 130,
             "countdown_sec": 3,
             "solo_practice": False,
+            "score_to_win": SCORE_TO_WIN,
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -90,6 +92,7 @@ class SnakeEngine(GamePlugin):
         merged["tick_ms"] = max(80, min(300, int(merged.get("tick_ms", 130))))
         merged["countdown_sec"] = max(1, min(10, int(merged.get("countdown_sec", 3))))
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
+        merged["score_to_win"] = max(5, min(200, int(merged.get("score_to_win", SCORE_TO_WIN))))
         return merged
 
     def tick_interval_ms(self) -> int:
@@ -205,6 +208,7 @@ class SnakeEngine(GamePlugin):
             "settings": settings,
             "winner": None,
             "win_reason": None,
+            "score_to_win": settings["score_to_win"],
             "last_action": None,
         }
         self._ensure_foods(state)
@@ -404,10 +408,8 @@ class SnakeEngine(GamePlugin):
 
         if action_type == "shoot":
             events.extend(self._fire_shot(state, player_id, snake))
-            if len(self._alive_snakes(state)) <= 1:
-                self._resolve_winner(state)
-                if state.get("winner"):
-                    events.append({"type": "game_over", "winner": state["winner"]})
+            if self._maybe_finish(state):
+                events.append({"type": "game_over", "winner": state["winner"]})
             return state, events
 
         if action_type != "set_direction":
@@ -447,7 +449,31 @@ class SnakeEngine(GamePlugin):
     def _alive_snakes(self, state: dict) -> list[str]:
         return [pid for pid, s in state["snakes"].items() if s.get("alive")]
 
+    def _score_to_win(self, state: dict) -> int:
+        settings = state.get("settings") or {}
+        return int(state.get("score_to_win") or settings.get("score_to_win") or SCORE_TO_WIN)
+
+    def _check_score_victory(self, state: dict) -> bool:
+        """First alive snake to reach score_to_win wins."""
+        target = self._score_to_win(state)
+        contenders = [
+            (pid, int(s.get("score", 0)))
+            for pid, s in state["snakes"].items()
+            if s.get("alive") and int(s.get("score", 0)) >= target
+        ]
+        if not contenders:
+            return False
+        max_score = max(sc for _, sc in contenders)
+        winners = [pid for pid, sc in contenders if sc == max_score]
+        state["winner"] = winners[0] if len(winners) == 1 else random.choice(winners)
+        state["win_reason"] = "score_limit"
+        state["phase"] = "finished"
+        return True
+
     def _resolve_winner(self, state: dict) -> None:
+        if self._check_score_victory(state):
+            return
+
         alive = self._alive_snakes(state)
         if len(alive) == 1:
             state["winner"] = alive[0]
@@ -462,6 +488,18 @@ class SnakeEngine(GamePlugin):
             state["winner"] = winners[0] if len(winners) == 1 else random.choice(winners)
             state["win_reason"] = "highest_score"
             state["phase"] = "finished"
+
+    def _maybe_finish(self, state: dict) -> bool:
+        """End the match on score limit or last standing. Returns True if finished."""
+        if state.get("phase") == "finished":
+            return True
+        if self._check_score_victory(state):
+            return True
+        alive = self._alive_snakes(state)
+        if len(alive) <= 1:
+            self._resolve_winner(state)
+            return state.get("phase") == "finished"
+        return False
 
     def tick(self, state: dict) -> tuple[dict, list[dict]]:
         events: list[dict] = []
@@ -612,11 +650,8 @@ class SnakeEngine(GamePlugin):
         # Projectiles move after snakes so shots lead the current facing.
         events.extend(self._advance_projectiles(state))
 
-        alive = self._alive_snakes(state)
-        if len(alive) <= 1:
-            self._resolve_winner(state)
-            if state.get("winner"):
-                events.append({"type": "game_over", "winner": state["winner"]})
+        if self._maybe_finish(state):
+            events.append({"type": "game_over", "winner": state["winner"]})
 
         state["tick"] += 1
         return state, events
@@ -636,6 +671,7 @@ class SnakeEngine(GamePlugin):
             "players": state["players"],
             "winner": state.get("winner"),
             "win_reason": state.get("win_reason"),
+            "score_to_win": self._score_to_win(state),
             "last_action": state.get("last_action"),
             "viewer_id": viewer_player["id"] if viewer_player else None,
         }

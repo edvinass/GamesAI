@@ -2,14 +2,14 @@ import type { GameRules } from '../codenames/rules'
 
 export const snakeRules: GameRules = {
   title: 'Multiplayer Snake',
-  subtitle: 'Battle on a shared grid — last snake standing',
+  subtitle: 'Race to 50 on a shared grid',
   quickStart: [
     'Join a room with 2–8 players (or add AI bots).',
     'Use arrow keys or WASD to steer your snake.',
     'Eat apples, gold, poison, ghost, or ammo pellets.',
     'Press Space to shoot when you have ammo — hits drain rival score.',
     'Pass through walls — you wrap to the opposite side.',
-    'Last snake alive wins; ties go to highest score.',
+    'First player to 50 score wins.',
   ],
   sections: [
     {
@@ -30,7 +30,7 @@ export const snakeRules: GameRules = {
     },
     {
       heading: 'Winning',
-      body: 'The last snake alive wins. If multiple snakes die on the same tick, the highest score wins.',
+      body: 'First player to reach 50 score wins. If only one snake remains before that, they win as last standing. If everyone dies on the same tick, highest score wins.',
     },
     {
       heading: 'AI & solo practice',

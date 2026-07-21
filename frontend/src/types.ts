@@ -125,6 +125,7 @@ export interface SnakeGameState {
   players: Player[]
   winner: string | null
   win_reason: string | null
+  score_to_win?: number
   last_action: Record<string, unknown> | null
   viewer_id: string | null
 }

@@ -48,6 +48,16 @@ const winnerName = computed(() => {
   return player?.nickname ?? 'Unknown'
 })
 
+const scoreToWin = computed(() => props.gameState.score_to_win ?? 50)
+
+const winReasonLabel = computed(() => {
+  const reason = props.gameState.win_reason
+  if (reason === 'score_limit') return `First to ${scoreToWin.value}`
+  if (reason === 'last_standing') return 'Last snake standing'
+  if (reason === 'highest_score') return 'Highest score'
+  return null
+})
+
 const playerRows = computed(() =>
   props.gameState.players.map((p) => ({
     ...p,
@@ -253,7 +263,7 @@ onUnmounted(() => {
       </div>
 
       <div v-else-if="isFinished" class="overlay finished">
-        <span class="overlay-label">Game over</span>
+        <span class="overlay-label">{{ winReasonLabel ?? 'Game over' }}</span>
         <span class="overlay-value win-pop">{{ winnerName }} wins!</span>
         <button v-if="isHost" type="button" class="btn-primary play-again-btn" @click="startNewGame">
           Play Again
@@ -277,7 +287,7 @@ onUnmounted(() => {
         >
           <span class="color-dot" :style="{ background: row.snake?.color ?? '#666' }" />
           <span class="name">{{ row.nickname }}</span>
-          <span class="score">{{ row.snake?.score ?? 0 }}</span>
+          <span class="score">{{ row.snake?.score ?? 0 }}<span class="score-cap">/{{ scoreToWin }}</span></span>
           <span v-if="(row.snake?.ammo ?? 0) > 0" class="ammo" title="Shots">⚡{{ row.snake?.ammo }}</span>
           <span v-if="!row.snake?.alive" class="status">out</span>
         </li>
@@ -485,6 +495,13 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   min-width: 1.25rem;
+}
+
+.score-cap {
+  font-weight: 500;
+  font-size: 0.75em;
+  opacity: 0.55;
+  margin-left: 0.05rem;
 }
 
 .ammo {

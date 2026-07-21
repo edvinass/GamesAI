@@ -39,7 +39,7 @@ const metaByGameType: Record<string, GameMeta> = {
   },
   snake: {
     name: 'Multiplayer Snake',
-    description: 'Shared-grid snake battle with food types, ammo, and shooting.',
+    description: 'Race to 50 on a shared grid — food types, ammo, and shooting.',
     emoji: '🐍',
     lobbyHint: 'Need 2–8 players. Share the link or add AI to fill seats.',
     category: 'arcade',
