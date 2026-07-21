@@ -6,10 +6,12 @@ import {
   renderFrame,
   spawnEatParticles,
   updateParticles,
+  FOOD_PARTICLE_COLORS,
   type Particle,
   type Point,
   type SnakeSnapshot,
 } from './snakeRender'
+import type { SnakeFood, SnakeFoodType } from '@/types'
 
 const props = defineProps<{
   gameState: SnakeGameState
@@ -53,6 +55,8 @@ const playerRows = computed(() =>
   })),
 )
 
+const myAmmo = computed(() => mySnake.value?.ammo ?? 0)
+
 const keyToDirection: Record<string, string> = {
   ArrowUp: 'up',
   ArrowDown: 'down',
@@ -74,6 +78,13 @@ function startNewGame() {
 
 function onKeyDown(e: KeyboardEvent) {
   if (!canControl.value) return
+  if (e.key === ' ' || e.code === 'Space') {
+    e.preventDefault()
+    if (myAmmo.value > 0) {
+      emit('action', { type: 'shoot' })
+    }
+    return
+  }
   const direction = keyToDirection[e.key]
   if (!direction) return
   e.preventDefault()
@@ -82,6 +93,7 @@ function onKeyDown(e: KeyboardEvent) {
 
 function snapshotSnakes(state: SnakeGameState): Record<string, SnakeSnapshot> {
   const out: Record<string, SnakeSnapshot> = {}
+  const tick = state.tick
   for (const [pid, snake] of Object.entries(state.snakes)) {
     out[pid] = {
       body: snake.body.map((s) => [...s]),
@@ -89,6 +101,7 @@ function snapshotSnakes(state: SnakeGameState): Record<string, SnakeSnapshot> {
       alive: snake.alive,
       color: snake.color,
       score: snake.score,
+      ghost: (snake.ghost_until_tick ?? -1) >= tick,
     }
   }
   return out
@@ -108,8 +121,7 @@ let prevSnakes: Record<string, SnakeSnapshot> = {}
 /** Bodies from the current tick — lerp target. */
 let targetSnakes: Record<string, SnakeSnapshot> = {}
 let particles: Particle[] = []
-let lastFood: [number, number] | null = null
-const lastScores: Record<string, number> = {}
+let lastFoods: SnakeFood[] = []
 
 function onStateSync() {
   const tick = props.gameState.tick
@@ -126,17 +138,17 @@ function onStateSync() {
     if (!Object.keys(prevSnakes).length) prevSnakes = snap
   }
 
-  // Eat burst when someone scores
-  for (const [pid, snake] of Object.entries(props.gameState.snakes)) {
-    const prevScore = lastScores[pid]
-    if (prevScore !== undefined && snake.score > prevScore && lastFood) {
-      particles.push(...spawnEatParticles(lastFood, snake.color))
+  const foods = props.gameState.foods ?? []
+  for (const prev of lastFoods) {
+    const stillThere = foods.some(
+      (f) => f.x === prev.x && f.y === prev.y && f.type === prev.type,
+    )
+    if (!stillThere) {
+      const foodType = (prev.type in FOOD_PARTICLE_COLORS ? prev.type : 'apple') as SnakeFoodType
+      particles.push(...spawnEatParticles([prev.x, prev.y], FOOD_PARTICLE_COLORS[foodType]))
     }
-    lastScores[pid] = snake.score
   }
-  lastFood = props.gameState.food
-    ? ([...props.gameState.food] as [number, number])
-    : null
+  lastFoods = foods.map((f) => ({ ...f }))
 }
 
 watch(() => props.gameState, onStateSync, { deep: true, immediate: true })
@@ -167,7 +179,7 @@ function paint(now: number) {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const { grid_width, grid_height, food } = props.gameState
+  const { grid_width, grid_height, foods } = props.gameState
   const tickMs =
     props.gameState.tick_ms ?? Number(props.room.settings?.tick_ms ?? 130)
 
@@ -179,7 +191,7 @@ function paint(now: number) {
 
   const rendered: Record<
     string,
-    { body: Point[]; direction: string; color: string; alive: boolean }
+    { body: Point[]; direction: string; color: string; alive: boolean; ghost?: boolean }
   > = {}
 
   for (const [pid, snake] of Object.entries(props.gameState.snakes)) {
@@ -190,13 +202,15 @@ function paint(now: number) {
       direction: target.direction,
       color: target.color,
       alive: target.alive,
+      ghost: target.ghost,
     }
   }
 
   renderFrame(ctx, displayW, displayH, {
     gridW: grid_width,
     gridH: grid_height,
-    food,
+    foods: foods ?? [],
+    projectiles: props.gameState.projectiles ?? [],
     snakes: rendered,
     playerId: props.playerId,
     particles,
@@ -264,14 +278,26 @@ onUnmounted(() => {
           <span class="color-dot" :style="{ background: row.snake?.color ?? '#666' }" />
           <span class="name">{{ row.nickname }}</span>
           <span class="score">{{ row.snake?.score ?? 0 }}</span>
+          <span v-if="(row.snake?.ammo ?? 0) > 0" class="ammo" title="Shots">⚡{{ row.snake?.ammo }}</span>
           <span v-if="!row.snake?.alive" class="status">out</span>
         </li>
       </ul>
 
       <div class="controls-hint">
-        <p v-if="canControl"><strong>Controls:</strong> Arrow keys or WASD</p>
+        <p v-if="canControl">
+          <strong>Controls:</strong> Arrow keys / WASD
+          <span v-if="myAmmo > 0"> · <strong>Space</strong> shoot ({{ myAmmo }})</span>
+          <span v-else class="muted"> · eat orange ammo to shoot</span>
+        </p>
         <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">Spectating</p>
         <p v-else class="muted">Waiting to start…</p>
+        <ul class="food-legend">
+          <li><span class="swatch apple" />Apple +1</li>
+          <li><span class="swatch golden" />Gold +3</li>
+          <li><span class="swatch poison" />Poison shrink</li>
+          <li><span class="swatch ghost" />Ghost phase</li>
+          <li><span class="swatch ammo" />Ammo shots</li>
+        </ul>
       </div>
     </aside>
   </div>
@@ -461,6 +487,13 @@ onUnmounted(() => {
   min-width: 1.25rem;
 }
 
+.ammo {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: #fb923c;
+  font-weight: 700;
+}
+
 .status {
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -473,6 +506,56 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: var(--text-muted);
   text-align: right;
+}
+
+.food-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.food-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.swatch.apple {
+  background: #ef4444;
+  color: #ef4444;
+}
+
+.swatch.golden {
+  background: #fbbf24;
+  color: #fbbf24;
+}
+
+.swatch.poison {
+  background: #84cc16;
+  color: #84cc16;
+}
+
+.swatch.ghost {
+  background: #22d3ee;
+  color: #22d3ee;
+}
+
+.swatch.ammo {
+  background: #fb923c;
+  color: #fb923c;
 }
 
 @media (max-width: 640px) {

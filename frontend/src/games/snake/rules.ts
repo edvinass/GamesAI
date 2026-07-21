@@ -6,23 +6,27 @@ export const snakeRules: GameRules = {
   quickStart: [
     'Join a room with 2–8 players (or add AI bots).',
     'Use arrow keys or WASD to steer your snake.',
-    'Eat glowing apples to grow and score.',
+    'Eat apples, gold, poison, ghost, or ammo pellets.',
+    'Press Space to shoot when you have ammo — hits shorten rivals.',
     'Pass through walls — you wrap to the opposite side.',
-    'Avoid your own body and other snakes.',
     'Last snake alive wins; ties go to highest score.',
   ],
   sections: [
     {
       heading: 'Controls',
-      body: 'Your snake moves continuously once the countdown ends. Press arrow keys or WASD to change direction. You cannot reverse 180° in one tick, but you can queue turns while moving in a straight line.',
+      body: 'Your snake moves continuously once the countdown ends. Press arrow keys or WASD to change direction. You cannot reverse 180° in one tick, but you can queue turns while moving in a straight line. Press Space to fire a shot when you have ammo.',
     },
     {
       heading: 'Battle arena',
       body: 'All snakes share one grid. Leaving one edge wraps you to the opposite side. Hitting yourself or another snake\'s body eliminates you.',
     },
     {
-      heading: 'Food',
-      body: 'One food pellet appears at a time on a random empty cell. Eating it grows your snake by one segment and adds to your score.',
+      heading: 'Food types',
+      body: 'Three pellets are on the board at once. Red apple: +1 score and grow by 1. Golden: +3 score and grow by 2. Poison (lime): shrinks you by 2 (never below length 3) and gives no score. Ghost (cyan): +1 score, grow by 1, and briefly phase through your own body. Ammo (orange): +1 score and +2 shots.',
+    },
+    {
+      heading: 'Shooting',
+      body: 'Shots travel in the direction you are facing. Hitting another snake shortens it by one segment. If a snake is reduced to length 1, it dies. Landing a kill awards bonus score.',
     },
     {
       heading: 'Winning',
@@ -36,6 +40,8 @@ export const snakeRules: GameRules = {
   tips: [
     'Use wrap-around walls to escape tight spots.',
     'Queue your next turn early — e.g. right then up then left for a quick corner.',
-    'Growing longer makes tight turns riskier.',
+    'Golden pellets are worth the detour; poison is bait near rivals.',
+    'Save ammo for long snakes — a few hits can finish them.',
+    'Ghost timing lets you cut through your own coil to escape or ambush.',
   ],
 }

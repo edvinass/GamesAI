@@ -1,3 +1,5 @@
+import type { SnakeFood, SnakeFoodType } from '@/types'
+
 export type Point = { x: number; y: number }
 
 export type SnakeSnapshot = {
@@ -6,6 +8,15 @@ export type SnakeSnapshot = {
   alive: boolean
   color: string
   score: number
+  ghost?: boolean
+}
+
+export const FOOD_PARTICLE_COLORS: Record<SnakeFoodType, string> = {
+  apple: '#ef4444',
+  golden: '#fbbf24',
+  poison: '#a3e635',
+  ghost: '#67e8f9',
+  ammo: '#fb923c',
 }
 
 export type Particle = {
@@ -243,59 +254,140 @@ function drawBoardBackground(
   ctx.fillRect(offsetX, offsetY, boardW, boardH)
 }
 
+type FoodPalette = {
+  glow: [string, string, string]
+  body: [string, string, string]
+  leaf: string
+  stem: string
+  ring?: string
+}
+
+const FOOD_PALETTES: Record<SnakeFoodType, FoodPalette> = {
+  apple: {
+    glow: ['rgba(255, 80, 90, 0.55)', 'rgba(255, 60, 80, 0.18)', 'rgba(255, 40, 60, 0)'],
+    body: ['#ff8a8a', '#ef4444', '#b91c1c'],
+    leaf: '#4ade80',
+    stem: '#5b3a1a',
+  },
+  golden: {
+    glow: ['rgba(251, 191, 36, 0.65)', 'rgba(245, 158, 11, 0.22)', 'rgba(180, 120, 0, 0)'],
+    body: ['#fde68a', '#fbbf24', '#b45309'],
+    leaf: '#86efac',
+    stem: '#78350f',
+    ring: 'rgba(255, 255, 200, 0.45)',
+  },
+  poison: {
+    glow: ['rgba(163, 230, 53, 0.55)', 'rgba(101, 163, 13, 0.2)', 'rgba(60, 100, 0, 0)'],
+    body: ['#bef264', '#84cc16', '#3f6212'],
+    leaf: '#a3e635',
+    stem: '#365314',
+    ring: 'rgba(190, 242, 100, 0.35)',
+  },
+  ghost: {
+    glow: ['rgba(103, 232, 249, 0.55)', 'rgba(34, 211, 238, 0.2)', 'rgba(8, 145, 178, 0)'],
+    body: ['#a5f3fc', '#22d3ee', '#0e7490'],
+    leaf: '#67e8f9',
+    stem: '#155e75',
+    ring: 'rgba(165, 243, 252, 0.4)',
+  },
+  ammo: {
+    glow: ['rgba(251, 146, 60, 0.65)', 'rgba(234, 88, 12, 0.22)', 'rgba(154, 52, 18, 0)'],
+    body: ['#fdba74', '#fb923c', '#c2410c'],
+    leaf: '#fbbf24',
+    stem: '#7c2d12',
+    ring: 'rgba(255, 200, 120, 0.5)',
+  },
+}
+
 function drawFood(
   ctx: CanvasRenderingContext2D,
-  food: [number, number],
+  food: SnakeFood,
   offsetX: number,
   offsetY: number,
   cell: number,
   time: number,
 ) {
-  const cx = offsetX + (food[0] + 0.5) * cell
-  const cy = offsetY + (food[1] + 0.5) * cell + Math.sin(time * 0.006) * cell * 0.08
-  const pulse = 0.85 + 0.15 * Math.sin(time * 0.008)
-  const r = cell * 0.32 * pulse
+  const type: SnakeFoodType = food.type in FOOD_PALETTES ? food.type : 'apple'
+  const palette = FOOD_PALETTES[type]
+  const bob = type === 'ghost' ? 0.012 : 0.006
+  const cx = offsetX + (food.x + 0.5) * cell
+  const cy = offsetY + (food.y + 0.5) * cell + Math.sin(time * bob + food.x) * cell * 0.08
+  const pulse = 0.85 + 0.15 * Math.sin(time * (type === 'golden' ? 0.012 : 0.008) + food.y)
+  const r = cell * (type === 'golden' ? 0.36 : 0.32) * pulse
 
-  // Glow
   const glow = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 2.4)
-  glow.addColorStop(0, 'rgba(255, 80, 90, 0.55)')
-  glow.addColorStop(0.45, 'rgba(255, 60, 80, 0.18)')
-  glow.addColorStop(1, 'rgba(255, 40, 60, 0)')
+  glow.addColorStop(0, palette.glow[0])
+  glow.addColorStop(0.45, palette.glow[1])
+  glow.addColorStop(1, palette.glow[2])
   ctx.fillStyle = glow
   ctx.beginPath()
   ctx.arc(cx, cy, r * 2.4, 0, Math.PI * 2)
   ctx.fill()
 
-  // Apple body
+  if (palette.ring) {
+    ctx.strokeStyle = palette.ring
+    ctx.lineWidth = Math.max(1, cell * 0.06)
+    ctx.beginPath()
+    ctx.arc(cx, cy, r * 1.55, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
   const body = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r)
-  body.addColorStop(0, '#ff8a8a')
-  body.addColorStop(0.45, '#ef4444')
-  body.addColorStop(1, '#b91c1c')
+  body.addColorStop(0, palette.body[0])
+  body.addColorStop(0.45, palette.body[1])
+  body.addColorStop(1, palette.body[2])
   ctx.fillStyle = body
+  ctx.globalAlpha = type === 'ghost' ? 0.75 : 1
   ctx.beginPath()
   ctx.ellipse(cx, cy + r * 0.05, r * 0.95, r, 0, 0, Math.PI * 2)
   ctx.fill()
+  ctx.globalAlpha = 1
 
-  // Highlight
+  if (type === 'poison') {
+    ctx.fillStyle = 'rgba(20, 40, 10, 0.35)'
+    for (const [ox, oy] of [
+      [-0.25, -0.1],
+      [0.2, 0.15],
+      [0.05, -0.25],
+    ] as const) {
+      ctx.beginPath()
+      ctx.arc(cx + r * ox, cy + r * oy, r * 0.12, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  if (type === 'ammo') {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)'
+    ctx.beginPath()
+    ctx.moveTo(cx - r * 0.15, cy - r * 0.45)
+    ctx.lineTo(cx + r * 0.35, cy + r * 0.05)
+    ctx.lineTo(cx + r * 0.05, cy + r * 0.1)
+    ctx.lineTo(cx + r * 0.2, cy + r * 0.45)
+    ctx.lineTo(cx - r * 0.35, cy - r * 0.05)
+    ctx.lineTo(cx - r * 0.05, cy - r * 0.1)
+    ctx.closePath()
+    ctx.fill()
+  }
+
   ctx.fillStyle = 'rgba(255,255,255,0.35)'
   ctx.beginPath()
   ctx.ellipse(cx - r * 0.28, cy - r * 0.28, r * 0.28, r * 0.18, -0.5, 0, Math.PI * 2)
   ctx.fill()
 
-  // Stem
-  ctx.strokeStyle = '#5b3a1a'
-  ctx.lineWidth = Math.max(1.5, cell * 0.08)
-  ctx.lineCap = 'round'
-  ctx.beginPath()
-  ctx.moveTo(cx, cy - r * 0.75)
-  ctx.quadraticCurveTo(cx + r * 0.15, cy - r * 1.15, cx + r * 0.05, cy - r * 1.25)
-  ctx.stroke()
+  if (type !== 'ammo') {
+    ctx.strokeStyle = palette.stem
+    ctx.lineWidth = Math.max(1.5, cell * 0.08)
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(cx, cy - r * 0.75)
+    ctx.quadraticCurveTo(cx + r * 0.15, cy - r * 1.15, cx + r * 0.05, cy - r * 1.25)
+    ctx.stroke()
 
-  // Leaf
-  ctx.fillStyle = '#4ade80'
-  ctx.beginPath()
-  ctx.ellipse(cx + r * 0.35, cy - r * 1.05, r * 0.35, r * 0.18, -0.6, 0, Math.PI * 2)
-  ctx.fill()
+    ctx.fillStyle = palette.leaf
+    ctx.beginPath()
+    ctx.ellipse(cx + r * 0.35, cy - r * 1.05, r * 0.35, r * 0.18, -0.6, 0, Math.PI * 2)
+    ctx.fill()
+  }
 }
 
 function strokeSnakeChunk(
@@ -540,9 +632,10 @@ export function drawSnake(
   gridW: number,
   gridH: number,
   time: number,
+  ghost = false,
 ) {
   if (body.length === 0) return
-  const alpha = alive ? 1 : 0.32
+  const alpha = alive ? (ghost ? 0.55 : 1) : 0.32
   const chunks = splitWrappedPath(body, gridW, gridH)
 
   chunks.forEach((chunk, idx) => {
@@ -582,10 +675,59 @@ function drawParticles(
   ctx.globalAlpha = 1
 }
 
+function drawProjectile(
+  ctx: CanvasRenderingContext2D,
+  proj: { x: number; y: number; direction: string; color?: string },
+  offsetX: number,
+  offsetY: number,
+  cell: number,
+  time: number,
+) {
+  const cx = offsetX + (proj.x + 0.5) * cell
+  const cy = offsetY + (proj.y + 0.5) * cell
+  const dir = DIR_VEC[proj.direction] ?? DIR_VEC.right
+  const ang = Math.atan2(dir.y, dir.x)
+  const color = proj.color || '#fb923c'
+  const pulse = 0.85 + 0.15 * Math.sin(time * 0.02)
+
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.rotate(ang)
+
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, cell * 0.7)
+  glow.addColorStop(0, rgba(color, 0.55))
+  glow.addColorStop(1, rgba(color, 0))
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(0, 0, cell * 0.7 * pulse, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.moveTo(cell * 0.38, 0)
+  ctx.lineTo(-cell * 0.22, cell * 0.18)
+  ctx.lineTo(-cell * 0.1, 0)
+  ctx.lineTo(-cell * 0.22, -cell * 0.18)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.fillStyle = 'rgba(255,255,255,0.7)'
+  ctx.beginPath()
+  ctx.arc(cell * 0.08, 0, cell * 0.08, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
 export type RenderFrame = {
   gridW: number
   gridH: number
-  food: [number, number] | null
+  foods: SnakeFood[]
+  projectiles?: Array<{
+    x: number
+    y: number
+    direction: string
+    color?: string
+  }>
   snakes: Record<
     string,
     {
@@ -593,6 +735,7 @@ export type RenderFrame = {
       direction: string
       color: string
       alive: boolean
+      ghost?: boolean
     }
   >
   playerId: string
@@ -606,7 +749,8 @@ export function renderFrame(
   displayH: number,
   frame: RenderFrame,
 ) {
-  const { gridW, gridH, food, snakes, playerId, particles, time } = frame
+  const { gridW, gridH, foods, snakes, playerId, particles, time } = frame
+  const projectiles = frame.projectiles ?? []
 
   ctx.clearRect(0, 0, displayW, displayH)
   ctx.fillStyle = '#0a1210'
@@ -620,8 +764,12 @@ export function renderFrame(
 
   drawBoardBackground(ctx, offsetX, offsetY, boardW, boardH, gridW, gridH, cell, time)
 
-  if (food) {
+  for (const food of foods) {
     drawFood(ctx, food, offsetX, offsetY, cell, time)
+  }
+
+  for (const proj of projectiles) {
+    drawProjectile(ctx, proj, offsetX, offsetY, cell, time)
   }
 
   // Draw dead snakes first, then alive, with local player last
@@ -646,6 +794,7 @@ export function renderFrame(
       gridW,
       gridH,
       time,
+      Boolean(snake.ghost),
     )
   }
 

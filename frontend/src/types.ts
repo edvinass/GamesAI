@@ -89,6 +89,27 @@ export interface SnakeSegment {
   alive: boolean
   score: number
   color: string
+  pending_grow?: number
+  ghost_until_tick?: number
+  ammo?: number
+}
+
+export type SnakeFoodType = 'apple' | 'golden' | 'poison' | 'ghost' | 'ammo'
+
+export interface SnakeFood {
+  x: number
+  y: number
+  type: SnakeFoodType
+}
+
+export interface SnakeProjectile {
+  id: string
+  x: number
+  y: number
+  direction: string
+  owner_id: string
+  ttl: number
+  color?: string
 }
 
 export interface SnakeGameState {
@@ -98,7 +119,8 @@ export interface SnakeGameState {
   tick_ms?: number
   grid_width: number
   grid_height: number
-  food: [number, number] | null
+  foods: SnakeFood[]
+  projectiles?: SnakeProjectile[]
   snakes: Record<string, SnakeSegment>
   players: Player[]
   winner: string | null
