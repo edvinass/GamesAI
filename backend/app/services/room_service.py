@@ -39,6 +39,25 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
+# Random names for AI players
+_AI_NAMES = [
+    "Alex", "Atlas", "Aurora", "Blaze", "Bolt", "Byte", "Chip", "Circuit",
+    "Cipher", "Cobalt", "Comet", "Dash", "Echo", "Ember", "Flux", "Frost",
+    "Ghost", "Glitch", "Hex", "Ion", "Iris", "Jade", "Jazz", "Jet",
+    "Kira", "Luna", "Mace", "Matrix", "Maverick", "Mercury", "Milo", "Neon",
+    "Neo", "Nimbus", "Nova", "Onyx", "Orbit", "Phoenix", "Pixel", "Pulse",
+    "Quantum", "Quasar", "Raven", "Rex", "Ripple", "Rocky", "Ruby", "Sage",
+    "Shadow", "Sigma", "Spark", "Spectre", "Spike", "Storm", "Strider", "Swift",
+    "Tango", "Titan", "Turbo", "Vector", "Vega", "Viper", "Volt", "Vortex",
+    "Whisper", "Wren", "Xenon", "Zara", "Zen", "Zero", "Zigzag", "Zoe",
+]
+
+
+def _generate_ai_nickname() -> str:
+    """Generate a random nickname for an AI player with bot emoji prefix."""
+    return f"🤖 {random.choice(_AI_NAMES)}"
+
+
 # Games where lobby players are not assigned red/blue teams or spymaster roles.
 _NO_TEAM_LOBBY_GAMES = frozenset(
     {
@@ -66,13 +85,21 @@ def _get_ai_lock(room_id: str) -> asyncio.Lock:
 
 
 def _ai_nickname_for_role(role: Role) -> str:
-    label = "AI Spymaster" if role == Role.SPYMASTER else "AI Operative"
-    return f"🤖 {label}"
+    """Generate a random AI nickname with role indicator for Codenames."""
+    name = random.choice(_AI_NAMES)
+    label = "Spymaster" if role == Role.SPYMASTER else "Operative"
+    return f"🤖 {name} ({label})"
 
 
 def _sync_ai_nickname(player: RoomPlayer) -> None:
     if player.is_ai and player.role:
-        player.nickname = _ai_nickname_for_role(player.role)
+        current = player.nickname
+        name_match = current.replace("🤖 ", "").split(" (")[0] if "(" in current else None
+        if name_match and name_match in _AI_NAMES:
+            label = "Spymaster" if player.role == Role.SPYMASTER else "Operative"
+            player.nickname = f"🤖 {name_match} ({label})"
+        else:
+            player.nickname = _ai_nickname_for_role(player.role)
 
 
 class RoomService:
@@ -248,11 +275,10 @@ class RoomService:
             if len(room.players) >= settings["max_players"]:
                 raise ValueError(f"Maximum {settings['max_players']} players allowed")
 
-            ai_count = sum(1 for p in room.players if p.is_ai)
             token = generate_session_token()
             player = RoomPlayer(
                 room_id=room.id,
-                nickname=f"🤖 AI Player {ai_count + 1}",
+                nickname=_generate_ai_nickname(),
                 session_token_hash=hash_session_token(token),
                 team=None,
                 role=None,
@@ -523,12 +549,12 @@ class RoomService:
                 await self.db.delete(p)
         await self.db.flush()
 
-        for i in range(2):
+        for _ in range(2):
             token = generate_session_token()
             self.db.add(
                 RoomPlayer(
                     room_id=room.id,
-                    nickname=f"🤖 AI Player {i + 1}",
+                    nickname=_generate_ai_nickname(),
                     session_token_hash=hash_session_token(token),
                     team=None,
                     role=None,
@@ -544,12 +570,12 @@ class RoomService:
                 await self.db.delete(p)
         await self.db.flush()
 
-        for i in range(2):
+        for _ in range(2):
             token = generate_session_token()
             self.db.add(
                 RoomPlayer(
                     room_id=room.id,
-                    nickname=f"🤖 AI Player {i + 1}",
+                    nickname=_generate_ai_nickname(),
                     session_token_hash=hash_session_token(token),
                     team=None,
                     role=None,
@@ -568,7 +594,7 @@ class RoomService:
         token = generate_session_token()
         ai_player = RoomPlayer(
             room_id=room.id,
-            nickname="🤖 AI Player 1",
+            nickname=_generate_ai_nickname(),
             session_token_hash=hash_session_token(token),
             team=None,
             role=None,
@@ -632,12 +658,12 @@ class RoomService:
                 await self.db.delete(p)
         await self.db.flush()
 
-        for i in range(2):
+        for _ in range(2):
             token = generate_session_token()
             self.db.add(
                 RoomPlayer(
                     room_id=room.id,
-                    nickname=f"🤖 AI Player {i + 1}",
+                    nickname=_generate_ai_nickname(),
                     session_token_hash=hash_session_token(token),
                     team=None,
                     role=None,
@@ -670,7 +696,7 @@ class RoomService:
         self.db.add(
             RoomPlayer(
                 room_id=room.id,
-                nickname="🤖 AI Opponent",
+                nickname=_generate_ai_nickname(),
                 session_token_hash=hash_session_token(token),
                 team=None,
                 role=None,
@@ -690,7 +716,7 @@ class RoomService:
         self.db.add(
             RoomPlayer(
                 room_id=room.id,
-                nickname="🤖 AI Opponent",
+                nickname=_generate_ai_nickname(),
                 session_token_hash=hash_session_token(token),
                 team=None,
                 role=None,
@@ -710,7 +736,7 @@ class RoomService:
         self.db.add(
             RoomPlayer(
                 room_id=room.id,
-                nickname="🤖 AI Opponent",
+                nickname=_generate_ai_nickname(),
                 session_token_hash=hash_session_token(token),
                 team=None,
                 role=None,
@@ -730,7 +756,7 @@ class RoomService:
         self.db.add(
             RoomPlayer(
                 room_id=room.id,
-                nickname="🤖 AI Opponent",
+                nickname=_generate_ai_nickname(),
                 session_token_hash=hash_session_token(token),
                 team=None,
                 role=None,
@@ -749,7 +775,7 @@ class RoomService:
         token = generate_session_token()
         ai_player = RoomPlayer(
             room_id=room.id,
-            nickname="🤖 AI Racer",
+            nickname=_generate_ai_nickname(),
             session_token_hash=hash_session_token(token),
             team=None,
             role=None,
@@ -775,12 +801,12 @@ class RoomService:
                 await self.db.delete(p)
         await self.db.flush()
 
-        for i in range(target_ai):
+        for _ in range(target_ai):
             token = generate_session_token()
             self.db.add(
                 RoomPlayer(
                     room_id=room.id,
-                    nickname=f"🤖 AI Player {i + 1}",
+                    nickname=_generate_ai_nickname(),
                     session_token_hash=hash_session_token(token),
                     team=None,
                     role=None,
