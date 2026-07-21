@@ -24,6 +24,7 @@ class PokerEngine(GamePlugin):
             "ai_difficulty": "medium",
             "ai_difficulties": {},
             "solo_ai_difficulties": ["medium", "medium"],
+            "show_cards_on_fold": False,
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -52,6 +53,7 @@ class PokerEngine(GamePlugin):
         merged["solo_ai_difficulties"] = [
             normalize_ai_difficulty(level) for level in solo_defaults[:2]
         ]
+        merged["show_cards_on_fold"] = bool(merged.get("show_cards_on_fold", False))
         return merged
 
     def assign_lobby_roles(self, players: list[dict], settings: dict) -> list[dict]:
@@ -240,7 +242,12 @@ class PokerEngine(GamePlugin):
 
     def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
         viewer_id = str(viewer_player["id"]) if viewer_player else None
+        settings = state.get("settings", {})
+        show_cards_on_fold = settings.get("show_cards_on_fold", False)
+        win_by_fold = state.get("win_by_fold", False)
         reveal_hands = state["phase"] in ("showdown", "hand_complete", "game_over")
+        if win_by_fold and not show_cards_on_fold:
+            reveal_hands = False
         players = []
         for pid in state["seat_order"]:
             p = state["players"][pid]
@@ -293,6 +300,7 @@ class PokerEngine(GamePlugin):
             if viewer_id
             else [],
             "raise_increment": self._raise_increment(state),
+            "win_by_fold": state.get("win_by_fold", False),
         }
 
     def check_winner(self, state: dict) -> str | None:
@@ -329,6 +337,7 @@ class PokerEngine(GamePlugin):
         state["winners"] = []
         state["last_action"] = None
         state["phase"] = "preflop"
+        state["win_by_fold"] = False
 
         for pid in state["seat_order"]:
             p = state["players"][pid]
@@ -598,6 +607,7 @@ class PokerEngine(GamePlugin):
         state["winners"] = winners
         state["phase"] = "hand_complete"
         state["current_actor_id"] = None
+        state["win_by_fold"] = False
 
         remaining = [pid for pid in state["seat_order"] if state["players"][pid]["chips"] > 0]
         if len(remaining) <= 1:
@@ -616,6 +626,7 @@ class PokerEngine(GamePlugin):
             state["players"][pid]["total_bet_hand"] = 0
         state["phase"] = "hand_complete"
         state["current_actor_id"] = None
+        state["win_by_fold"] = True
         remaining = [pid for pid in state["seat_order"] if state["players"][pid]["chips"] > 0]
         if len(remaining) <= 1:
             state["phase"] = "game_over"

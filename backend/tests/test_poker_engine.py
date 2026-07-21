@@ -288,3 +288,110 @@ def test_get_current_actor_ai_only(engine: PokerEngine, state: dict) -> None:
 
     state["players"][state["current_actor_id"]]["is_ai"] = False
     assert engine.get_current_actor(state) is None
+
+
+def test_show_cards_on_fold_setting_default_hides_cards(engine: PokerEngine) -> None:
+    """By default, winner's cards should not be revealed when everyone folds."""
+    state = engine.create_initial_state(
+        make_players(3), {"host_id": "p0", "small_blind": 5, "big_blind": 10}
+    )
+    # Fold until hand is complete
+    while state["phase"] not in ("hand_complete", "game_over"):
+        actor_id = state["current_actor_id"]
+        actor = {"id": actor_id, "nickname": "Actor", "is_ai": False}
+        state, _ = engine.apply_action(state, {"type": "fold"}, actor)
+
+    assert state["win_by_fold"] is True
+    winner_id = state["winners"][0]["player_id"]
+    loser_id = next(pid for pid in state["seat_order"] if pid != winner_id)
+
+    # Winner viewing should see their own cards
+    winner = {"id": winner_id, "nickname": "Winner", "is_ai": False}
+    public_winner = engine.get_public_state(state, winner)
+    winner_entry = next(p for p in public_winner["players"] if p["id"] == winner_id)
+    assert len(winner_entry["hole_cards"]) == 2
+
+    # Loser should NOT see winner's cards by default
+    loser = {"id": loser_id, "nickname": "Loser", "is_ai": False}
+    public_loser = engine.get_public_state(state, loser)
+    winner_from_loser = next(p for p in public_loser["players"] if p["id"] == winner_id)
+    assert winner_from_loser["hole_cards"] == []
+
+
+def test_show_cards_on_fold_setting_enabled_reveals_cards(engine: PokerEngine) -> None:
+    """When show_cards_on_fold is True, winner's cards should be revealed on fold."""
+    state = engine.create_initial_state(
+        make_players(3), {"host_id": "p0", "small_blind": 5, "big_blind": 10, "show_cards_on_fold": True}
+    )
+    # Fold until hand is complete
+    while state["phase"] not in ("hand_complete", "game_over"):
+        actor_id = state["current_actor_id"]
+        actor = {"id": actor_id, "nickname": "Actor", "is_ai": False}
+        state, _ = engine.apply_action(state, {"type": "fold"}, actor)
+
+    assert state["win_by_fold"] is True
+    winner_id = state["winners"][0]["player_id"]
+    loser_id = next(pid for pid in state["seat_order"] if pid != winner_id)
+
+    # Loser SHOULD see winner's cards when setting is enabled
+    loser = {"id": loser_id, "nickname": "Loser", "is_ai": False}
+    public_loser = engine.get_public_state(state, loser)
+    winner_from_loser = next(p for p in public_loser["players"] if p["id"] == winner_id)
+    assert len(winner_from_loser["hole_cards"]) == 2
+
+
+def test_showdown_always_reveals_cards(engine: PokerEngine) -> None:
+    """Even with show_cards_on_fold=False, showdown should always reveal cards."""
+    from app.games.poker.deck import make_card
+
+    state = {
+        "seat_order": ["a", "b"],
+        "players": {
+            "a": {
+                "id": "a",
+                "nickname": "A",
+                "is_ai": False,
+                "ai_difficulty": None,
+                "hole_cards": [make_card("K", "hearts"), make_card("K", "clubs")],
+                "status": "active",
+                "chips": 500,
+                "total_bet_hand": 100,
+                "bet_this_round": 0,
+            },
+            "b": {
+                "id": "b",
+                "nickname": "B",
+                "is_ai": False,
+                "ai_difficulty": None,
+                "hole_cards": [make_card("7", "diamonds"), make_card("7", "spades")],
+                "status": "active",
+                "chips": 500,
+                "total_bet_hand": 100,
+                "bet_this_round": 0,
+            },
+        },
+        "community_cards": [
+            make_card("K", "diamonds"),
+            make_card("7", "hearts"),
+            make_card("2", "spades"),
+            make_card("4", "clubs"),
+            make_card("9", "diamonds"),
+        ],
+        "phase": "showdown",
+        "hand_number": 1,
+        "dealer_index": 0,
+        "current_bet": 0,
+        "min_raise": 10,
+        "current_actor_id": None,
+        "last_action": None,
+        "host_id": "a",
+        "settings": {"show_cards_on_fold": False, "big_blind": 10},
+        "win_by_fold": False,
+    }
+    resolved = engine._resolve_showdown(state)
+
+    # Cards should be visible at showdown regardless of setting
+    viewer = {"id": "b", "nickname": "B", "is_ai": False}
+    public = engine.get_public_state(resolved, viewer)
+    player_a = next(p for p in public["players"] if p["id"] == "a")
+    assert len(player_a["hole_cards"]) == 2
