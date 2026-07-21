@@ -162,7 +162,19 @@ def test_winner_highest_score_on_mutual_death(engine: SnakeEngine, state: dict) 
 
 
 def test_tick_interval(engine: SnakeEngine) -> None:
-    assert engine.tick_interval_ms() == 150
+    assert engine.tick_interval_ms() == 130
+
+
+def test_default_grid_is_dense(engine: SnakeEngine) -> None:
+    settings = engine.default_settings()
+    assert settings["grid_width"] == 48
+    assert settings["grid_height"] == 32
+    state = engine.create_initial_state(make_players(2), {})
+    assert state["grid_width"] == 48
+    assert state["grid_height"] == 32
+    assert state["tick_ms"] == 130
+    public = engine.get_public_state(state, None)
+    assert public["tick_ms"] == 130
 
 
 def test_check_winner(engine: SnakeEngine, state: dict) -> None:

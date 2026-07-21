@@ -95,6 +95,7 @@ export interface SnakeGameState {
   phase: 'countdown' | 'playing' | 'finished'
   countdown_ends_at: string | null
   tick: number
+  tick_ms?: number
   grid_width: number
   grid_height: number
   food: [number, number] | null

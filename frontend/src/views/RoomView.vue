@@ -164,7 +164,11 @@ const singlePlayer = computed({
 })
 
 const tickMs = computed({
-  get: () => Number(room.value?.settings?.tick_ms ?? (room.value?.game_type === 'duel' ? 75 : 150)),
+  get: () =>
+    Number(
+      room.value?.settings?.tick_ms ??
+        (room.value?.game_type === 'duel' ? 75 : room.value?.game_type === 'snake' ? 130 : 150),
+    ),
   set: (val: number) => updateSettings({ tick_ms: val }),
 })
 

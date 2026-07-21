@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, SnakeGameState } from '@/types'
+import {
+  interpolateBody,
+  renderFrame,
+  spawnEatParticles,
+  updateParticles,
+  type Particle,
+  type Point,
+  type SnakeSnapshot,
+} from './snakeRender'
 
 const props = defineProps<{
   gameState: SnakeGameState
@@ -71,109 +80,151 @@ function onKeyDown(e: KeyboardEvent) {
   emit('action', { type: 'set_direction', direction })
 }
 
-function draw() {
+function snapshotSnakes(state: SnakeGameState): Record<string, SnakeSnapshot> {
+  const out: Record<string, SnakeSnapshot> = {}
+  for (const [pid, snake] of Object.entries(state.snakes)) {
+    out[pid] = {
+      body: snake.body.map((s) => [...s]),
+      direction: snake.direction,
+      alive: snake.alive,
+      color: snake.color,
+      score: snake.score,
+    }
+  }
+  return out
+}
+
+function easeOutCubic(t: number) {
+  return 1 - (1 - t) ** 3
+}
+
+let rafId = 0
+let resizeObserver: ResizeObserver | null = null
+let lastFrameTime = performance.now()
+let tickReceivedAt = performance.now()
+let lastTick = -1
+/** Bodies from the previous tick — lerp origin. */
+let prevSnakes: Record<string, SnakeSnapshot> = {}
+/** Bodies from the current tick — lerp target. */
+let targetSnakes: Record<string, SnakeSnapshot> = {}
+let particles: Particle[] = []
+let lastFood: [number, number] | null = null
+const lastScores: Record<string, number> = {}
+
+function onStateSync() {
+  const tick = props.gameState.tick
+  const snap = snapshotSnakes(props.gameState)
+
+  if (tick !== lastTick) {
+    prevSnakes = Object.keys(targetSnakes).length ? targetSnakes : snap
+    targetSnakes = snap
+    lastTick = tick
+    tickReceivedAt = performance.now()
+  } else {
+    // Same tick but state refreshed (e.g. direction change) — keep motion origin
+    targetSnakes = snap
+    if (!Object.keys(prevSnakes).length) prevSnakes = snap
+  }
+
+  // Eat burst when someone scores
+  for (const [pid, snake] of Object.entries(props.gameState.snakes)) {
+    const prevScore = lastScores[pid]
+    if (prevScore !== undefined && snake.score > prevScore && lastFood) {
+      particles.push(...spawnEatParticles(lastFood, snake.color))
+    }
+    lastScores[pid] = snake.score
+  }
+  lastFood = props.gameState.food
+    ? ([...props.gameState.food] as [number, number])
+    : null
+}
+
+watch(() => props.gameState, onStateSync, { deep: true, immediate: true })
+
+function paint(now: number) {
   const canvas = canvasRef.value
   const wrap = canvasWrapRef.value
   if (!canvas || !wrap) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const { grid_width, grid_height, snakes, food } = props.gameState
+  const dt = Math.min(0.05, (now - lastFrameTime) / 1000)
+  lastFrameTime = now
+  particles = updateParticles(particles, dt)
+
   const displayW = wrap.clientWidth
   const displayH = wrap.clientHeight
   if (displayW <= 0 || displayH <= 0) return
 
   const dpr = window.devicePixelRatio || 1
-  canvas.width = Math.floor(displayW * dpr)
-  canvas.height = Math.floor(displayH * dpr)
-  canvas.style.width = `${displayW}px`
-  canvas.style.height = `${displayH}px`
+  const needW = Math.floor(displayW * dpr)
+  const needH = Math.floor(displayH * dpr)
+  if (canvas.width !== needW || canvas.height !== needH) {
+    canvas.width = needW
+    canvas.height = needH
+    canvas.style.width = `${displayW}px`
+    canvas.style.height = `${displayH}px`
+  }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const cell = Math.min(displayW / grid_width, displayH / grid_height)
-  const boardW = cell * grid_width
-  const boardH = cell * grid_height
-  const offsetX = (displayW - boardW) / 2
-  const offsetY = (displayH - boardH) / 2
+  const { grid_width, grid_height, food } = props.gameState
+  const tickMs =
+    props.gameState.tick_ms ?? Number(props.room.settings?.tick_ms ?? 130)
 
-  ctx.fillStyle = '#0f1419'
-  ctx.fillRect(0, 0, displayW, displayH)
-  ctx.fillRect(offsetX, offsetY, boardW, boardH)
+  const rawT =
+    props.gameState.phase === 'playing'
+      ? Math.min(1, (now - tickReceivedAt) / Math.max(16, tickMs))
+      : 1
+  const t = easeOutCubic(rawT)
 
-  ctx.strokeStyle = '#1e293b'
-  ctx.lineWidth = 1
-  for (let x = 0; x <= grid_width; x++) {
-    ctx.beginPath()
-    ctx.moveTo(offsetX + x * cell, offsetY)
-    ctx.lineTo(offsetX + x * cell, offsetY + boardH)
-    ctx.stroke()
-  }
-  for (let y = 0; y <= grid_height; y++) {
-    ctx.beginPath()
-    ctx.moveTo(offsetX, offsetY + y * cell)
-    ctx.lineTo(offsetX + boardW, offsetY + y * cell)
-    ctx.stroke()
-  }
+  const rendered: Record<
+    string,
+    { body: Point[]; direction: string; color: string; alive: boolean }
+  > = {}
 
-  if (food) {
-    ctx.fillStyle = '#f43f5e'
-    const pad = Math.max(2, cell * 0.15)
-    ctx.beginPath()
-    ctx.arc(
-      offsetX + food[0] * cell + cell / 2,
-      offsetY + food[1] * cell + cell / 2,
-      cell / 2 - pad,
-      0,
-      Math.PI * 2,
-    )
-    ctx.fill()
+  for (const [pid, snake] of Object.entries(props.gameState.snakes)) {
+    const prev = prevSnakes[pid]
+    const target = targetSnakes[pid] ?? snake
+    rendered[pid] = {
+      body: interpolateBody(prev?.body, target.body, t, grid_width, grid_height),
+      direction: target.direction,
+      color: target.color,
+      alive: target.alive,
+    }
   }
 
-  for (const [pid, snake] of Object.entries(snakes)) {
-    const isMe = pid === props.playerId
-    const alpha = snake.alive ? 1 : 0.35
-    snake.body.forEach((seg, i) => {
-      const color = snake.color
-      ctx.globalAlpha = alpha
-      ctx.fillStyle = i === 0 ? color : color + 'cc'
-      const inset = Math.max(1, cell * 0.08)
-      ctx.fillRect(
-        offsetX + seg[0] * cell + inset,
-        offsetY + seg[1] * cell + inset,
-        cell - inset * 2,
-        cell - inset * 2,
-      )
-      if (isMe && i === 0 && snake.alive) {
-        ctx.strokeStyle = '#fff'
-        ctx.lineWidth = Math.max(1, cell * 0.08)
-        ctx.strokeRect(
-          offsetX + seg[0] * cell + 1,
-          offsetY + seg[1] * cell + 1,
-          cell - 2,
-          cell - 2,
-        )
-      }
-    })
-    ctx.globalAlpha = 1
-  }
+  renderFrame(ctx, displayW, displayH, {
+    gridW: grid_width,
+    gridH: grid_height,
+    food,
+    snakes: rendered,
+    playerId: props.playerId,
+    particles,
+    time: now,
+  })
 }
 
-let resizeObserver: ResizeObserver | null = null
-
-watch(() => props.gameState, draw, { deep: true })
+function loop(now: number) {
+  paint(now)
+  rafId = requestAnimationFrame(loop)
+}
 
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
   if (canvasWrapRef.value) {
-    resizeObserver = new ResizeObserver(() => draw())
+    resizeObserver = new ResizeObserver(() => {
+      /* next rAF paints at new size */
+    })
     resizeObserver.observe(canvasWrapRef.value)
   }
-  draw()
+  lastFrameTime = performance.now()
+  rafId = requestAnimationFrame(loop)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
   resizeObserver?.disconnect()
+  cancelAnimationFrame(rafId)
 })
 </script>
 
@@ -183,13 +234,13 @@ onUnmounted(() => {
       <canvas ref="canvasRef" class="game-canvas" />
 
       <div v-if="gameState.phase === 'countdown'" class="overlay countdown">
-        <span class="overlay-value">{{ countdownRemaining ?? '…' }}</span>
+        <span class="overlay-value pulse">{{ countdownRemaining ?? '…' }}</span>
         <span class="overlay-label">Get ready!</span>
       </div>
 
       <div v-else-if="isFinished" class="overlay finished">
         <span class="overlay-label">Game over</span>
-        <span class="overlay-value">{{ winnerName }} wins!</span>
+        <span class="overlay-value win-pop">{{ winnerName }} wins!</span>
         <button v-if="isHost" type="button" class="btn-primary play-again-btn" @click="startNewGame">
           Play Again
         </button>
@@ -243,9 +294,14 @@ onUnmounted(() => {
   min-height: 0;
   width: 100%;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(74, 222, 128, 0.22);
   border-radius: var(--radius);
-  background: #0f1419;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(34, 100, 60, 0.35), transparent 55%),
+    #0a1210;
+  box-shadow:
+    inset 0 0 40px rgba(0, 0, 0, 0.35),
+    0 0 24px rgba(34, 197, 94, 0.08);
 }
 
 .game-canvas {
@@ -261,20 +317,64 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(4, 12, 8, 0.72);
+  backdrop-filter: blur(4px);
   gap: 0.5rem;
   padding: 1rem;
   text-align: center;
+  animation: overlay-in 0.35s var(--ease-smooth);
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .overlay-value {
-  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-family: 'Outfit', 'DM Sans', system-ui, sans-serif;
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
   font-weight: 800;
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 28px rgba(74, 222, 128, 0.35);
+}
+
+.overlay-value.pulse {
+  animation: count-pulse 1s var(--ease-bounce) infinite;
+}
+
+.overlay-value.win-pop {
+  animation: win-pop 0.55s var(--ease-bounce);
+}
+
+@keyframes count-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+
+@keyframes win-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .overlay-label {
   font-size: 1.1rem;
   font-weight: 600;
+  color: #c8e6d0;
 }
 
 .overlay-hint {
@@ -293,9 +393,9 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.65rem 1rem;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(74, 222, 128, 0.18);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(22, 40, 30, 0.95), rgba(15, 24, 20, 0.98));
 }
 
 .player-scores {
@@ -312,21 +412,40 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.45rem;
   font-size: 0.9rem;
+  transition:
+    opacity 0.3s var(--ease-smooth),
+    transform 0.3s var(--ease-smooth);
 }
 
 .player-score-row.me {
   font-weight: 700;
 }
 
+.player-score-row.me .color-dot {
+  animation: me-glow 1.6s ease-in-out infinite;
+}
+
 .player-score-row.dead {
-  opacity: 0.55;
+  opacity: 0.45;
+  transform: scale(0.97);
+}
+
+@keyframes me-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(74, 222, 128, 0.7);
+  }
 }
 
 .color-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
 .name {
@@ -339,12 +458,14 @@ onUnmounted(() => {
 .score {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+  min-width: 1.25rem;
 }
 
 .status {
   font-size: 0.7rem;
   text-transform: uppercase;
   color: var(--text-muted);
+  letter-spacing: 0.04em;
 }
 
 .controls-hint {

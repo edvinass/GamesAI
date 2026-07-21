@@ -6,7 +6,7 @@ export const snakeRules: GameRules = {
   quickStart: [
     'Join a room with 2–8 players (or add AI bots).',
     'Use arrow keys or WASD to steer your snake.',
-    'Eat food to grow and score points.',
+    'Eat glowing apples to grow and score.',
     'Pass through walls — you wrap to the opposite side.',
     'Avoid your own body and other snakes.',
     'Last snake alive wins; ties go to highest score.',

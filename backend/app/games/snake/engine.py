@@ -48,9 +48,9 @@ class SnakeEngine(GamePlugin):
         return {
             "min_players": 2,
             "max_players": 8,
-            "grid_width": 30,
-            "grid_height": 20,
-            "tick_ms": 150,
+            "grid_width": 48,
+            "grid_height": 32,
+            "tick_ms": 130,
             "countdown_sec": 3,
             "solo_practice": False,
         }
@@ -60,15 +60,15 @@ class SnakeEngine(GamePlugin):
         merged = {**defaults, **(settings or {})}
         merged["min_players"] = max(2, min(8, int(merged.get("min_players", 2))))
         merged["max_players"] = max(merged["min_players"], min(8, int(merged.get("max_players", 8))))
-        merged["grid_width"] = max(10, min(50, int(merged.get("grid_width", 30))))
-        merged["grid_height"] = max(10, min(40, int(merged.get("grid_height", 20))))
-        merged["tick_ms"] = max(100, min(300, int(merged.get("tick_ms", 150))))
+        merged["grid_width"] = max(20, min(64, int(merged.get("grid_width", 48))))
+        merged["grid_height"] = max(16, min(48, int(merged.get("grid_height", 32))))
+        merged["tick_ms"] = max(80, min(300, int(merged.get("tick_ms", 130))))
         merged["countdown_sec"] = max(1, min(10, int(merged.get("countdown_sec", 3))))
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
         return merged
 
     def tick_interval_ms(self) -> int:
-        return 150
+        return 130
 
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
         settings = self.validate_settings(settings)
@@ -156,6 +156,7 @@ class SnakeEngine(GamePlugin):
             "phase": "countdown",
             "countdown_ends_at": countdown_ends_at,
             "tick": 0,
+            "tick_ms": settings["tick_ms"],
             "grid_width": grid_width,
             "grid_height": grid_height,
             "food": None,
@@ -323,10 +324,12 @@ class SnakeEngine(GamePlugin):
         return state, events
 
     def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
+        settings = state.get("settings") or {}
         return {
             "phase": state["phase"],
             "countdown_ends_at": state.get("countdown_ends_at"),
             "tick": state["tick"],
+            "tick_ms": state.get("tick_ms", settings.get("tick_ms", 130)),
             "grid_width": state["grid_width"],
             "grid_height": state["grid_height"],
             "food": state.get("food"),

@@ -20,10 +20,11 @@ const emit = defineEmits<{
 }>()
 
 const speedOptions = [
-  { label: 'Fast', value: 100 },
-  { label: 'Normal', value: 150 },
-  { label: 'Slow', value: 200 },
-  { label: 'Relaxed', value: 300 },
+  { label: 'Blitz', value: 90 },
+  { label: 'Fast', value: 110 },
+  { label: 'Normal', value: 130 },
+  { label: 'Slow', value: 180 },
+  { label: 'Relaxed', value: 260 },
 ]
 </script>
 
