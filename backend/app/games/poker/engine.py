@@ -245,9 +245,7 @@ class PokerEngine(GamePlugin):
         settings = state.get("settings", {})
         show_cards_on_fold = settings.get("show_cards_on_fold", False)
         win_by_fold = state.get("win_by_fold", False)
-        reveal_hands = state["phase"] in ("showdown", "hand_complete", "game_over")
-        if win_by_fold and not show_cards_on_fold:
-            reveal_hands = False
+        is_reveal_phase = state["phase"] in ("showdown", "hand_complete", "game_over")
         players = []
         for pid in state["seat_order"]:
             p = state["players"][pid]
@@ -261,7 +259,13 @@ class PokerEngine(GamePlugin):
                 "status": p["status"],
                 "hole_cards": [],
             }
-            if reveal_hands and p["status"] != "folded":
+            should_reveal = False
+            if is_reveal_phase and p["status"] != "folded":
+                if p["is_ai"]:
+                    should_reveal = True
+                else:
+                    should_reveal = not win_by_fold or show_cards_on_fold
+            if should_reveal:
                 entry["hole_cards"] = copy.deepcopy(p["hole_cards"])
                 all_cards = p["hole_cards"] + state["community_cards"]
                 if len(all_cards) >= 5:
