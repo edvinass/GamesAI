@@ -1,6 +1,15 @@
+import json
+
 import pytest
 
-from app.games.codenames.ai import _parse_operative_guesses
+from app.games.codenames import ai as codenames_ai
+from app.games.codenames.ai import (
+    _accept_focused_fallback,
+    _build_focused_fallback_prompt,
+    _fallback_target_groups,
+    _parse_operative_guesses,
+    fallback_clue,
+)
 
 
 def _base_state(*, team: str = "red", clue_number: int = 3, guesses_made: int = 0) -> dict:
@@ -156,3 +165,88 @@ def test_legacy_guesses_array_still_parses_current_only() -> None:
     result = _parse_operative_guesses(data, state, limit=3, clue_number=2, team="red")
 
     assert result == [1, 2]
+
+
+def test_fallback_target_groups_prefers_multi_word() -> None:
+    groups = _fallback_target_groups(["A", "B", "C", "D"])
+
+    assert groups
+    assert len(groups[0]) == 3
+    assert any(len(g) == 2 for g in groups)
+    assert any(len(g) == 1 for g in groups)
+    assert all(set(g).issubset({"A", "B", "C", "D"}) for g in groups)
+
+
+def test_fallback_target_groups_handles_few_words() -> None:
+    assert _fallback_target_groups([]) == []
+    pairs_and_singles = _fallback_target_groups(["A", "B"])
+    assert all(len(g) <= 2 for g in pairs_and_singles)
+    assert any(len(g) == 2 for g in pairs_and_singles)
+
+
+def test_focused_fallback_prompt_requires_all_targets() -> None:
+    prompt = _build_focused_fallback_prompt(
+        ["APPLE", "ORANGE"],
+        avoid=["KNIFE"],
+        other_board_words=["TABLE"],
+    )
+
+    assert "APPLE" in prompt and "ORANGE" in prompt
+    assert "number must be 2" in prompt
+    assert '"number": 2' in prompt
+    assert "KNIFE" in prompt and "TABLE" in prompt
+
+
+def test_accept_focused_fallback_rejects_single_when_multi_requested() -> None:
+    assert _accept_focused_fallback(("FRUIT", 1, ["APPLE"]), ["APPLE", "ORANGE"]) is False
+    assert _accept_focused_fallback(("FRUIT", 2, ["APPLE", "ORANGE"]), ["APPLE", "ORANGE"]) is True
+    assert _accept_focused_fallback(("FRUIT", 2, ["APPLE", "PEAR"]), ["APPLE", "ORANGE"]) is False
+    assert _accept_focused_fallback(("WATER", 1, ["APPLE"]), ["APPLE"]) is True
+
+
+@pytest.mark.asyncio
+async def test_fallback_clue_accepts_multi_target_before_singles(monkeypatch) -> None:
+    state = {
+        "cards": [
+            {"word": "APPLE", "color": "red", "revealed": False},
+            {"word": "ORANGE", "color": "red", "revealed": False},
+            {"word": "BANANA", "color": "red", "revealed": False},
+            {"word": "KNIFE", "color": "blue", "revealed": False},
+            {"word": "TABLE", "color": "neutral", "revealed": False},
+        ]
+    }
+    calls: list[str] = []
+
+    async def fake_chat(prompt: str, **_kwargs: object) -> str:
+        calls.append(prompt)
+        if "number must be 3" in prompt or "number must be 2" in prompt:
+            return json.dumps(
+                {
+                    "clue": "FRUIT",
+                    "number": 2,
+                    "targets": ["APPLE", "ORANGE"],
+                    "risky_words": [],
+                }
+            )
+        return json.dumps(
+            {
+                "clue": "PRODUCE",
+                "number": 1,
+                "targets": ["APPLE"],
+                "risky_words": [],
+            }
+        )
+
+    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+    monkeypatch.setattr(
+        codenames_ai,
+        "_fallback_target_groups",
+        lambda _targets: [["APPLE", "ORANGE", "BANANA"], ["APPLE"]],
+    )
+
+    clue, number, targets = await fallback_clue(state, "red")
+
+    assert clue == "FRUIT"
+    assert number == 2
+    assert set(targets) == {"APPLE", "ORANGE"}
+    assert len(calls) == 1

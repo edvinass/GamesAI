@@ -1,3 +1,4 @@
+import itertools
 import json
 import logging
 import random
@@ -525,6 +526,72 @@ def _parse_operative_guesses(
     return result[:limit]
 
 
+def _fallback_target_groups(targets: list[str]) -> list[list[str]]:
+    """Ordered fallback target sets: prefer triples, then pairs, then singles."""
+    words = list(targets)
+    random.shuffle(words)
+    groups: list[list[str]] = []
+
+    for size, limit in ((3, 2), (2, 3), (1, 3)):
+        if len(words) < size:
+            continue
+        if size == 1:
+            groups.extend([[word] for word in words[:limit]])
+            continue
+        combos = list(itertools.combinations(words, size))
+        random.shuffle(combos)
+        for combo in combos[:limit]:
+            groups.append(list(combo))
+
+    return groups
+
+
+def _build_focused_fallback_prompt(
+    group: list[str],
+    avoid: list[str],
+    other_board_words: list[str],
+) -> str:
+    n = len(group)
+    avoid_list = ", ".join(
+        avoid + [word for word in other_board_words if word not in group]
+    )
+    targets_json = json.dumps(group)
+
+    if n == 1:
+        intro = (
+            "Give a Codenames spymaster clue for exactly this one target word:\n"
+            f"{group[0]}"
+        )
+    else:
+        target_lines = "\n".join(f"- {word}" for word in group)
+        intro = (
+            f"Give a Codenames spymaster clue that connects ALL of these {n} "
+            f"target words (and only these):\n{target_lines}"
+        )
+
+    return f"""{intro}
+
+Do NOT suggest any of these other board words:
+{avoid_list}
+
+The clue must apply to every listed target. number must be {n}.
+Respond ONLY with JSON:
+{{"clue": "WORD", "number": {n}, "targets": {targets_json}, "risky_words": []}}"""
+
+
+def _accept_focused_fallback(
+    validated: tuple[str, int, list[str]],
+    group: list[str],
+) -> bool:
+    """Accept multi-target fallback only when the model kept a multi-word link."""
+    _, number, chosen = validated
+    if not set(chosen).issubset(set(group)):
+        return False
+    if len(group) >= 2 and number < 2:
+        return False
+    return True
+
+
 async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
     targets = _unrevealed_team_words(state["cards"], team)
     if not targets:
@@ -534,16 +601,8 @@ async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
     avoid = _avoid_clue_words(state["cards"], team)
     other_board_words = [c["word"] for c in state["cards"] if c["word"] not in targets]
 
-    for target in random.sample(targets, min(len(targets), 5)):
-        prompt = f"""Give a Codenames spymaster clue for exactly this one target word:
-{target}
-
-Do NOT suggest any of these other board words:
-{", ".join(avoid + [word for word in other_board_words if word != target])}
-
-Respond ONLY with JSON:
-{{"clue": "WORD", "number": 1, "targets": ["{target}"], "risky_words": []}}"""
-
+    for group in _fallback_target_groups(targets):
+        prompt = _build_focused_fallback_prompt(group, avoid, other_board_words)
         try:
             response = await deepseek_chat(
                 prompt,
@@ -553,10 +612,10 @@ Respond ONLY with JSON:
             )
             data = _parse_json(response)
             validated = _validate_spymaster_response(data, targets, board_words, avoid)
-            if validated:
+            if validated and _accept_focused_fallback(validated, group):
                 return validated
         except Exception as e:
-            logger.warning("Focused fallback clue failed for %s: %s", target, e)
+            logger.warning("Focused fallback clue failed for %s: %s", group, e)
 
     return _random_generic_clue(state), 1, [targets[0]] if targets else []
 
