@@ -50,6 +50,8 @@ const emit = defineEmits<{
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const canvasWrapRef = ref<HTMLElement | null>(null)
 const soundMuted = ref(isSoundMuted())
+const showTouchControls = ref(false)
+const touchDirection = ref<string | null>(null)
 
 const myBomber = computed(() => props.gameState.bombers[props.playerId])
 const isAlive = computed(() => myBomber.value?.alive ?? false)
@@ -94,6 +96,45 @@ function toggleSoundMute() {
   setSoundMuted(next)
   soundMuted.value = next
   if (!next) void unlockAudio()
+}
+
+function detectTouchControls() {
+  showTouchControls.value =
+    window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900
+}
+
+function onTouchDirectionStart(direction: string) {
+  if (!canControl.value) return
+  void unlockAudio()
+  touchDirection.value = direction
+  emit('action', { type: 'set_direction', direction })
+}
+
+function onTouchDirectionEnd(direction: string) {
+  if (touchDirection.value !== direction) return
+  touchDirection.value = null
+  emit('action', { type: 'set_direction', direction: 'stop' })
+}
+
+function onTouchBomb() {
+  if (!canControl.value) return
+  void unlockAudio()
+  const me = myBomber.value
+  const carrying = Boolean(me?.carrying_bomb_id)
+  const standingOnBomb =
+    me &&
+    (props.gameState.bombs ?? []).some(
+      (b) =>
+        b.x === me.x &&
+        b.y === me.y &&
+        b.flight !== 'throw' &&
+        b.flight !== 'kick' &&
+        b.flight !== 'carried',
+    )
+  if (!(me?.can_throw && (carrying || standingOnBomb))) {
+    playBombPlace()
+  }
+  emit('action', { type: 'place_bomb' })
 }
 
 /** Physical key codes — stable across layouts; most-recent direction wins. */
@@ -552,6 +593,8 @@ function loop(now: number) {
 }
 
 onMounted(() => {
+  detectTouchControls()
+  window.addEventListener('resize', detectTouchControls)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', onWindowBlur)
@@ -564,6 +607,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', detectTouchControls)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', onWindowBlur)
@@ -598,6 +642,78 @@ onUnmounted(() => {
         class="spectate-banner"
       >
         <span class="spectate-label">Eliminated — spectating</span>
+      </div>
+
+      <div
+        v-if="showTouchControls && canControl"
+        class="touch-controls"
+        aria-label="Touch controls"
+      >
+        <div class="touch-dpad">
+          <button
+            type="button"
+            class="touch-btn dpad-up"
+            aria-label="Move up"
+            @touchstart.prevent="onTouchDirectionStart('up')"
+            @touchend.prevent="onTouchDirectionEnd('up')"
+            @touchcancel.prevent="onTouchDirectionEnd('up')"
+            @mousedown.prevent="onTouchDirectionStart('up')"
+            @mouseup.prevent="onTouchDirectionEnd('up')"
+            @mouseleave.prevent="onTouchDirectionEnd('up')"
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            class="touch-btn dpad-left"
+            aria-label="Move left"
+            @touchstart.prevent="onTouchDirectionStart('left')"
+            @touchend.prevent="onTouchDirectionEnd('left')"
+            @touchcancel.prevent="onTouchDirectionEnd('left')"
+            @mousedown.prevent="onTouchDirectionStart('left')"
+            @mouseup.prevent="onTouchDirectionEnd('left')"
+            @mouseleave.prevent="onTouchDirectionEnd('left')"
+          >
+            ◀
+          </button>
+          <button
+            type="button"
+            class="touch-btn dpad-right"
+            aria-label="Move right"
+            @touchstart.prevent="onTouchDirectionStart('right')"
+            @touchend.prevent="onTouchDirectionEnd('right')"
+            @touchcancel.prevent="onTouchDirectionEnd('right')"
+            @mousedown.prevent="onTouchDirectionStart('right')"
+            @mouseup.prevent="onTouchDirectionEnd('right')"
+            @mouseleave.prevent="onTouchDirectionEnd('right')"
+          >
+            ▶
+          </button>
+          <button
+            type="button"
+            class="touch-btn dpad-down"
+            aria-label="Move down"
+            @touchstart.prevent="onTouchDirectionStart('down')"
+            @touchend.prevent="onTouchDirectionEnd('down')"
+            @touchcancel.prevent="onTouchDirectionEnd('down')"
+            @mousedown.prevent="onTouchDirectionStart('down')"
+            @mouseup.prevent="onTouchDirectionEnd('down')"
+            @mouseleave.prevent="onTouchDirectionEnd('down')"
+          >
+            ▼
+          </button>
+        </div>
+        <div class="touch-actions">
+          <button
+            type="button"
+            class="touch-btn touch-bomb"
+            aria-label="Place bomb"
+            @touchstart.prevent="onTouchBomb"
+            @mousedown.prevent="onTouchBomb"
+          >
+            💣
+          </button>
+        </div>
       </div>
     </div>
 
@@ -644,7 +760,14 @@ onUnmounted(() => {
         >
           {{ soundMuted ? '🔇' : '🔊' }}
         </button>
-        <p v-if="canControl">
+        <p v-if="canControl && showTouchControls">
+          <strong>Hold</strong> D-pad to move ·
+          <strong>💣</strong> bomb<span v-if="myBomber?.can_throw">
+            / {{ myBomber?.carrying_bomb_id ? 'throw' : 'pick up' }}</span>
+          <span v-if="myBomber?.can_kick"> · walk into bombs to kick</span>
+          <span class="muted">({{ myActiveBombs }}/{{ myBomber?.max_bombs ?? 1 }})</span>
+        </p>
+        <p v-else-if="canControl">
           <strong>Hold</strong> arrows / WASD ·
           <strong>Space</strong> bomb<span v-if="myBomber?.can_throw">
             / {{ myBomber?.carrying_bomb_id ? 'throw' : 'pick up' }}</span>
@@ -1011,6 +1134,85 @@ onUnmounted(() => {
 .legend-emoji {
   font-size: 0.85rem;
   line-height: 1;
+}
+
+.touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0.75rem;
+}
+
+.touch-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 0.25rem;
+  width: 9.5rem;
+  height: 9.5rem;
+  pointer-events: auto;
+}
+
+.touch-btn {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 12px;
+  border: 1px solid rgba(249, 115, 22, 0.4);
+  background: rgba(18, 14, 12, 0.88);
+  color: #fdba74;
+  font-size: 1rem;
+  font-weight: 700;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  touch-action: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.touch-btn:active {
+  transform: scale(0.95);
+  background: rgba(249, 115, 22, 0.3);
+}
+
+.dpad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.dpad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.dpad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.dpad-down {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.touch-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: auto;
+}
+
+.touch-bomb {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  font-size: 2rem;
+  border-color: rgba(239, 68, 68, 0.5);
 }
 
 @media (max-width: 720px) {

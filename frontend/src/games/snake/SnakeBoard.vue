@@ -25,6 +25,7 @@ const emit = defineEmits<{
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const canvasWrapRef = ref<HTMLElement | null>(null)
+const showTouchControls = ref(false)
 
 const mySnake = computed(() => props.gameState.snakes[props.playerId])
 const isAlive = computed(() => mySnake.value?.alive ?? false)
@@ -84,6 +85,21 @@ const keyToDirection: Record<string, string> = {
 
 function startNewGame() {
   emit('action', { type: 'start_game' })
+}
+
+function detectTouchControls() {
+  showTouchControls.value =
+    window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900
+}
+
+function onTouchDirection(direction: string) {
+  if (!canControl.value) return
+  emit('action', { type: 'set_direction', direction })
+}
+
+function onTouchShoot() {
+  if (!canControl.value || myAmmo.value <= 0) return
+  emit('action', { type: 'shoot' })
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -245,6 +261,8 @@ function loop(now: number) {
 }
 
 onMounted(() => {
+  detectTouchControls()
+  window.addEventListener('resize', detectTouchControls)
   window.addEventListener('keydown', onKeyDown)
   if (canvasWrapRef.value) {
     resizeObserver = new ResizeObserver(() => {
@@ -257,6 +275,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', detectTouchControls)
   window.removeEventListener('keydown', onKeyDown)
   resizeObserver?.disconnect()
   cancelAnimationFrame(rafId)
@@ -286,6 +305,64 @@ onUnmounted(() => {
         <span class="overlay-label">You were eliminated</span>
         <span class="overlay-hint">Watch the battle continue…</span>
       </div>
+
+      <div
+        v-if="showTouchControls && canControl"
+        class="touch-controls"
+        aria-label="Touch controls"
+      >
+        <div class="touch-dpad">
+          <button
+            type="button"
+            class="touch-btn dpad-up"
+            aria-label="Move up"
+            @touchstart.prevent="onTouchDirection('up')"
+            @mousedown.prevent="onTouchDirection('up')"
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            class="touch-btn dpad-left"
+            aria-label="Move left"
+            @touchstart.prevent="onTouchDirection('left')"
+            @mousedown.prevent="onTouchDirection('left')"
+          >
+            ◀
+          </button>
+          <button
+            type="button"
+            class="touch-btn dpad-right"
+            aria-label="Move right"
+            @touchstart.prevent="onTouchDirection('right')"
+            @mousedown.prevent="onTouchDirection('right')"
+          >
+            ▶
+          </button>
+          <button
+            type="button"
+            class="touch-btn dpad-down"
+            aria-label="Move down"
+            @touchstart.prevent="onTouchDirection('down')"
+            @mousedown.prevent="onTouchDirection('down')"
+          >
+            ▼
+          </button>
+        </div>
+        <div class="touch-actions">
+          <button
+            type="button"
+            class="touch-btn touch-shoot"
+            :class="{ disabled: myAmmo <= 0 }"
+            :disabled="myAmmo <= 0"
+            aria-label="Shoot"
+            @touchstart.prevent="onTouchShoot"
+            @mousedown.prevent="onTouchShoot"
+          >
+            ⚡
+          </button>
+        </div>
+      </div>
     </div>
 
     <aside class="player-bar">
@@ -305,7 +382,12 @@ onUnmounted(() => {
       </ul>
 
       <div class="controls-hint">
-        <p v-if="canControl">
+        <p v-if="canControl && showTouchControls">
+          <strong>Touch:</strong> D-pad to move
+          <span v-if="myAmmo > 0"> · <strong>⚡</strong> shoot ({{ myAmmo }})</span>
+          <span v-else class="muted"> · eat orange ammo to shoot</span>
+        </p>
+        <p v-else-if="canControl">
           <strong>Controls:</strong> Arrow keys / WASD
           <span v-if="myAmmo > 0"> · <strong>Space</strong> shoot ({{ myAmmo }})</span>
           <span v-else class="muted"> · eat orange ammo to shoot</span>
@@ -607,6 +689,92 @@ onUnmounted(() => {
   .controls-hint {
     text-align: left;
   }
+}
+
+.touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0.75rem;
+}
+
+.touch-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 0.25rem;
+  width: 9.5rem;
+  height: 9.5rem;
+  pointer-events: auto;
+}
+
+.touch-btn {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 12px;
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  background: rgba(10, 18, 16, 0.85);
+  color: #a7f3d0;
+  font-size: 1rem;
+  font-weight: 700;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  touch-action: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.touch-btn:active {
+  transform: scale(0.95);
+  background: rgba(74, 222, 128, 0.25);
+}
+
+.dpad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.dpad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.dpad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.dpad-down {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.touch-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: auto;
+}
+
+.touch-shoot {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  border-color: rgba(251, 146, 60, 0.5);
+  color: #fdba74;
+}
+
+.touch-shoot.disabled {
+  opacity: 0.4;
+  border-color: rgba(148, 163, 184, 0.3);
+  color: #64748b;
 }
 
 .muted {
