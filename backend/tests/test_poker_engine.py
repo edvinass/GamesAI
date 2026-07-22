@@ -288,3 +288,222 @@ def test_get_current_actor_ai_only(engine: PokerEngine, state: dict) -> None:
 
     state["players"][state["current_actor_id"]]["is_ai"] = False
     assert engine.get_current_actor(state) is None
+
+
+def test_show_cards_on_fold_setting_default_hides_cards(engine: PokerEngine) -> None:
+    """By default, winner's cards should not be revealed when everyone folds."""
+    state = engine.create_initial_state(
+        make_players(3), {"host_id": "p0", "small_blind": 5, "big_blind": 10}
+    )
+    # Fold until hand is complete
+    while state["phase"] not in ("hand_complete", "game_over"):
+        actor_id = state["current_actor_id"]
+        actor = {"id": actor_id, "nickname": "Actor", "is_ai": False}
+        state, _ = engine.apply_action(state, {"type": "fold"}, actor)
+
+    assert state["win_by_fold"] is True
+    winner_id = state["winners"][0]["player_id"]
+    loser_id = next(pid for pid in state["seat_order"] if pid != winner_id)
+
+    # Winner viewing should see their own cards
+    winner = {"id": winner_id, "nickname": "Winner", "is_ai": False}
+    public_winner = engine.get_public_state(state, winner)
+    winner_entry = next(p for p in public_winner["players"] if p["id"] == winner_id)
+    assert len(winner_entry["hole_cards"]) == 2
+
+    # Loser should NOT see winner's cards by default
+    loser = {"id": loser_id, "nickname": "Loser", "is_ai": False}
+    public_loser = engine.get_public_state(state, loser)
+    winner_from_loser = next(p for p in public_loser["players"] if p["id"] == winner_id)
+    assert winner_from_loser["hole_cards"] == []
+
+
+def test_show_cards_on_fold_setting_enabled_reveals_cards(engine: PokerEngine) -> None:
+    """When show_cards_on_fold is True, winner's cards should be revealed on fold."""
+    state = engine.create_initial_state(
+        make_players(3), {"host_id": "p0", "small_blind": 5, "big_blind": 10, "show_cards_on_fold": True}
+    )
+    # Fold until hand is complete
+    while state["phase"] not in ("hand_complete", "game_over"):
+        actor_id = state["current_actor_id"]
+        actor = {"id": actor_id, "nickname": "Actor", "is_ai": False}
+        state, _ = engine.apply_action(state, {"type": "fold"}, actor)
+
+    assert state["win_by_fold"] is True
+    winner_id = state["winners"][0]["player_id"]
+    loser_id = next(pid for pid in state["seat_order"] if pid != winner_id)
+
+    # Loser SHOULD see winner's cards when setting is enabled
+    loser = {"id": loser_id, "nickname": "Loser", "is_ai": False}
+    public_loser = engine.get_public_state(state, loser)
+    winner_from_loser = next(p for p in public_loser["players"] if p["id"] == winner_id)
+    assert len(winner_from_loser["hole_cards"]) == 2
+
+
+def test_uncalled_bet_not_counted_in_winnings(engine: PokerEngine) -> None:
+    """When winner raises and everyone folds, the uncalled portion should not count as winnings."""
+    state = engine.create_initial_state(
+        make_players(2), {"host_id": "p0", "small_blind": 5, "big_blind": 10}
+    )
+    # In heads-up: p0 is dealer/SB, p1 is BB
+    # p0 posted SB=5, p1 posted BB=10
+    # Dealer/SB acts first in heads-up preflop
+
+    p0_actor = {"id": "p0", "nickname": "P0", "is_ai": False}
+    p1_actor = {"id": "p1", "nickname": "P1", "is_ai": False}
+
+    # p0 (dealer/SB) raises to 50
+    assert state["current_actor_id"] == "p0"
+    state, _ = engine.apply_action(state, {"type": "raise", "amount": 50}, p0_actor)
+
+    # p1 (BB) raises to 200
+    assert state["current_actor_id"] == "p1"
+    state, _ = engine.apply_action(state, {"type": "raise", "amount": 200}, p1_actor)
+
+    # p0 folds - p1 wins but their raise to 200 was uncalled
+    assert state["current_actor_id"] == "p0"
+    state, _ = engine.apply_action(state, {"type": "fold"}, p0_actor)
+
+    assert state["phase"] in ("hand_complete", "game_over")
+    assert state["win_by_fold"] is True
+    assert len(state["winners"]) == 1
+
+    winner = state["winners"][0]
+    assert winner["player_id"] == "p1"
+    # p0 put in 50 total, p1 put in 200 total
+    # The contested amount (what p0 actually risked) is 50
+    # p1's winnings should be 50, not 250 (the full pot)
+    assert winner["amount"] == 50, (
+        f"Expected winnings of 50 (contested amount), got {winner['amount']}"
+    )
+
+
+def test_showdown_always_reveals_cards(engine: PokerEngine) -> None:
+    """Even with show_cards_on_fold=False, showdown should always reveal cards."""
+    from app.games.poker.deck import make_card
+
+    state = {
+        "seat_order": ["a", "b"],
+        "players": {
+            "a": {
+                "id": "a",
+                "nickname": "A",
+                "is_ai": False,
+                "ai_difficulty": None,
+                "hole_cards": [make_card("K", "hearts"), make_card("K", "clubs")],
+                "status": "active",
+                "chips": 500,
+                "total_bet_hand": 100,
+                "bet_this_round": 0,
+            },
+            "b": {
+                "id": "b",
+                "nickname": "B",
+                "is_ai": False,
+                "ai_difficulty": None,
+                "hole_cards": [make_card("7", "diamonds"), make_card("7", "spades")],
+                "status": "active",
+                "chips": 500,
+                "total_bet_hand": 100,
+                "bet_this_round": 0,
+            },
+        },
+        "community_cards": [
+            make_card("K", "diamonds"),
+            make_card("7", "hearts"),
+            make_card("2", "spades"),
+            make_card("4", "clubs"),
+            make_card("9", "diamonds"),
+        ],
+        "phase": "showdown",
+        "hand_number": 1,
+        "dealer_index": 0,
+        "current_bet": 0,
+        "min_raise": 10,
+        "current_actor_id": None,
+        "last_action": None,
+        "host_id": "a",
+        "settings": {"show_cards_on_fold": False, "big_blind": 10},
+        "win_by_fold": False,
+    }
+    resolved = engine._resolve_showdown(state)
+
+    # Cards should be visible at showdown regardless of setting
+    viewer = {"id": "b", "nickname": "B", "is_ai": False}
+    public = engine.get_public_state(resolved, viewer)
+    player_a = next(p for p in public["players"] if p["id"] == "a")
+    assert len(player_a["hole_cards"]) == 2
+
+
+def test_ai_always_shows_cards_on_fold_win(engine: PokerEngine) -> None:
+    """AI players should always reveal their cards when winning by fold, even with show_cards_on_fold=False."""
+    # Create game with 2 human players and 1 AI player
+    players = make_players(3, ai_indices={2})
+    state = engine.create_initial_state(
+        players, {"host_id": "p0", "small_blind": 5, "big_blind": 10, "show_cards_on_fold": False}
+    )
+
+    # Find the AI player
+    ai_id = "p2"
+    assert state["players"][ai_id]["is_ai"] is True
+
+    # Fold all humans so AI wins
+    while state["phase"] not in ("hand_complete", "game_over"):
+        actor_id = state["current_actor_id"]
+        actor = {"id": actor_id, "nickname": "Actor", "is_ai": state["players"][actor_id]["is_ai"]}
+        if state["players"][actor_id]["is_ai"]:
+            # AI checks/calls to keep them in the hand
+            if state["current_bet"] > state["players"][actor_id]["bet_this_round"]:
+                state, _ = engine.apply_action(state, {"type": "call"}, actor)
+            else:
+                state, _ = engine.apply_action(state, {"type": "check"}, actor)
+        else:
+            # Humans fold
+            state, _ = engine.apply_action(state, {"type": "fold"}, actor)
+
+    assert state["win_by_fold"] is True
+    winner_id = state["winners"][0]["player_id"]
+    assert winner_id == ai_id
+
+    # Human viewing should see AI's cards even with show_cards_on_fold=False
+    human_viewer = {"id": "p0", "nickname": "Human", "is_ai": False}
+    public = engine.get_public_state(state, human_viewer)
+    ai_entry = next(p for p in public["players"] if p["id"] == ai_id)
+    assert len(ai_entry["hole_cards"]) == 2, "AI should always show cards when winning by fold"
+
+
+def test_human_hides_cards_on_fold_win(engine: PokerEngine) -> None:
+    """Human players should NOT reveal cards when winning by fold (unless show_cards_on_fold is enabled)."""
+    # Create game with 1 AI player and 2 human players
+    players = make_players(3, ai_indices={0})
+    state = engine.create_initial_state(
+        players, {"host_id": "p1", "small_blind": 5, "big_blind": 10, "show_cards_on_fold": False}
+    )
+
+    # Find a human player
+    human_id = "p1"
+    assert state["players"][human_id]["is_ai"] is False
+
+    # Fold non-human-winner players so the human wins
+    while state["phase"] not in ("hand_complete", "game_over"):
+        actor_id = state["current_actor_id"]
+        actor = {"id": actor_id, "nickname": "Actor", "is_ai": state["players"][actor_id]["is_ai"]}
+        if actor_id == human_id:
+            # Human checks/calls to stay in
+            if state["current_bet"] > state["players"][actor_id]["bet_this_round"]:
+                state, _ = engine.apply_action(state, {"type": "call"}, actor)
+            else:
+                state, _ = engine.apply_action(state, {"type": "check"}, actor)
+        else:
+            # Others fold
+            state, _ = engine.apply_action(state, {"type": "fold"}, actor)
+
+    assert state["win_by_fold"] is True
+    winner_id = state["winners"][0]["player_id"]
+    assert winner_id == human_id
+
+    # Another player viewing should NOT see the human winner's cards
+    other_viewer = {"id": "p0", "nickname": "Other", "is_ai": True}
+    public = engine.get_public_state(state, other_viewer)
+    human_entry = next(p for p in public["players"] if p["id"] == human_id)
+    assert len(human_entry["hole_cards"]) == 0, "Human should not show cards when winning by fold"

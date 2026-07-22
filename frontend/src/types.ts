@@ -530,6 +530,7 @@ export interface PokerGameState {
   max_raise_to: number
   raise_options: number[]
   raise_increment: number
+  win_by_fold: boolean
 }
 
 export interface ChessPlayerState {

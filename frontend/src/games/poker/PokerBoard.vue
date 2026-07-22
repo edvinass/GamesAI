@@ -429,7 +429,7 @@ function syncHandStateFromServer() {
       if (
         player.id !== props.playerId &&
         player.status !== 'folded' &&
-        player.hole_cards.length >= 2
+        player.hole_cards && player.hole_cards.length >= 2
       ) {
         revealed.add(player.id)
       }
@@ -548,7 +548,7 @@ function runShowdownReveal() {
   showdownRevealStarted.value = true
   const contenders = dealOrder.value.filter((id) => {
     const player = props.gameState.players.find((p) => p.id === id)
-    return player && player.status !== 'folded'
+    return player && player.status !== 'folded' && player.hole_cards && player.hole_cards.length >= 2
   })
   let delay = CARD_REVEAL_MS
   for (const seatId of contenders) {
@@ -2749,6 +2749,10 @@ onUnmounted(() => {
   .seat.me .hole-cards :deep(.playing-card--small) {
     width: clamp(48px, 12vw, 80px);
     height: clamp(68px, 17vw, 114px);
+  }
+
+  .table-felt :deep(.corner__suit) {
+    display: none;
   }
 
   .phase-banner {

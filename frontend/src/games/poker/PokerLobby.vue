@@ -18,6 +18,7 @@ const smallBlind = defineModel<number>('smallBlind', { required: true })
 const bigBlind = defineModel<number>('bigBlind', { required: true })
 const aiDifficulty = defineModel<string>('aiDifficulty', { required: true })
 const soloAiDifficulties = defineModel<string[]>('soloAiDifficulties', { required: true })
+const showCardsOnFold = defineModel<boolean>('showCardsOnFold', { required: true })
 
 const emit = defineEmits<{
   addAi: []
@@ -257,6 +258,26 @@ function seatInitial(nickname: string): string {
           </button>
         </div>
         <p class="default-ai-note">New AI players start at this level. Override per seat below.</p>
+      </div>
+
+      <div class="rules-section">
+        <h2 class="section-title">Table rules</h2>
+        <label class="toggle-row">
+          <span class="toggle-label">
+            <span class="toggle-title">Show cards on fold</span>
+            <span class="toggle-desc">Reveal winner's cards when everyone folds</span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            class="toggle-switch"
+            :class="{ active: showCardsOnFold }"
+            :aria-checked="showCardsOnFold"
+            @click="showCardsOnFold = !showCardsOnFold"
+          >
+            <span class="toggle-knob" />
+          </button>
+        </label>
       </div>
     </section>
 
@@ -908,6 +929,83 @@ function seatInitial(nickname: string): string {
 .default-ai-note {
   font-size: 0.78rem;
   color: var(--text-muted);
+}
+
+.rules-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.toggle-row:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.toggle-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.toggle-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 2.75rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.toggle-switch.active {
+  background: #2a8f4e;
+  border-color: #2a8f4e;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s var(--ease-smooth);
+}
+
+.toggle-switch.active .toggle-knob {
+  transform: translateX(1.25rem);
 }
 
 .solo-ai-grid {

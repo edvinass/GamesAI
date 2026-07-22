@@ -38,9 +38,6 @@ function setRole(player: Player, role: 'spymaster' | 'operative') {
 }
 
 function displayName(player: Player) {
-  if (player.is_ai && player.role) {
-    return player.role === 'spymaster' ? '🤖 AI Spymaster' : '🤖 AI Operative'
-  }
   return player.nickname
 }
 </script>

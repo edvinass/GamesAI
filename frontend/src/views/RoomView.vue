@@ -258,6 +258,11 @@ const soloAiDifficulties = computed({
   },
 })
 
+const showCardsOnFold = computed({
+  get: () => Boolean(room.value?.settings?.show_cards_on_fold),
+  set: (val: boolean) => updateSettings({ show_cards_on_fold: val }),
+})
+
 async function handleJoin() {
   if (!joinNickname.value.trim()) return
   const result = await joinRoom(roomRef.value, joinNickname.value.trim())
@@ -455,6 +460,7 @@ function startGame() {
         v-model:big-blind="bigBlind"
         v-model:ai-difficulty="aiDifficulty"
         v-model:solo-ai-difficulties="soloAiDifficulties"
+        v-model:show-cards-on-fold="showCardsOnFold"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"
