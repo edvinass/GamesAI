@@ -1,3 +1,5 @@
+from collections import deque
+
 from app.games.pacman.engine import PacmanEngine
 from app.games.pacman.maps import (
     MAPS,
@@ -6,6 +8,31 @@ from app.games.pacman.maps import (
     list_maps,
     pellet_count,
 )
+
+
+def _reachable_from_spawns(built: dict) -> set[tuple[int, int]]:
+    grid = built["grid"]
+    width = built["width"]
+    height = built["height"]
+    seen: set[tuple[int, int]] = set()
+    q: deque[tuple[int, int]] = deque(built["pac_spawns"])
+    for spawn in built["pac_spawns"]:
+        seen.add(spawn)
+    while q:
+        x, y = q.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if ny < 0 or ny >= height:
+                continue
+            if nx < 0:
+                nx = width - 1
+            elif nx >= width:
+                nx = 0
+            if (nx, ny) in seen or grid[ny][nx] != TILE_PATH:
+                continue
+            seen.add((nx, ny))
+            q.append((nx, ny))
+    return seen
 
 
 def test_list_maps_covers_all() -> None:
@@ -34,6 +61,20 @@ def test_every_map_builds() -> None:
 def test_classic_has_tunnels() -> None:
     built = build_map("classic")
     assert len(built["tunnels"]) >= 1
+
+
+def test_all_pellets_reachable() -> None:
+    for map_id in MAPS:
+        built = build_map(map_id)
+        reachable = _reachable_from_spawns(built)
+        for y, row in enumerate(built["pellets"]):
+            for x, has in enumerate(row):
+                if has:
+                    assert (x, y) in reachable, f"{map_id}: pellet at {(x, y)} unreachable"
+        for y, row in enumerate(built["power_pellets"]):
+            for x, has in enumerate(row):
+                if has:
+                    assert (x, y) in reachable, f"{map_id}: power at {(x, y)} unreachable"
 
 
 def test_engine_uses_selected_map() -> None:

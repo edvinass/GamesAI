@@ -258,6 +258,27 @@ function isWallCell(grid: number[][], x: number, y: number, gridW: number, gridH
   return grid[y]![x] === TILE_WALL
 }
 
+/** Stroke the minor (≤180°) arc from a0 → a1. */
+function minorArc(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  a0: number,
+  a1: number,
+) {
+  // Canvas angles increase clockwise on screen. anticlockwise=false sweeps
+  // increasing angles; true sweeps decreasing. Pick the short sweep.
+  let d = a1 - a0
+  while (d <= -Math.PI) d += Math.PI * 2
+  while (d > Math.PI) d -= Math.PI * 2
+  ctx.arc(cx, cy, radius, a0, a1, d < 0)
+}
+
+/**
+ * Classic maze outlines from PATH cells.
+ * Continuous runs + minor-arc corners (never ¾-circles).
+ */
 function strokeMazeOutlines(
   ctx: CanvasRenderingContext2D,
   grid: number[][],
@@ -267,9 +288,10 @@ function strokeMazeOutlines(
   gridW: number,
   gridH: number,
   inset: number,
-  radius: number,
 ) {
-  const r = Math.min(radius, Math.max(0.5, cs * 0.5 - inset - 0.5))
+  const r = Math.max(0.75, inset)
+
+  ctx.beginPath()
 
   for (let y = 0; y < gridH; y++) {
     for (let x = 0; x < gridW; x++) {
@@ -284,95 +306,88 @@ function strokeMazeOutlines(
       const sw = isWallCell(grid, x - 1, y + 1, gridW, gridH)
       const se = isWallCell(grid, x + 1, y + 1, gridW, gridH)
 
-      const left = ox + x * cs + inset
-      const right = ox + (x + 1) * cs - inset
-      const top = oy + y * cs + inset
-      const bottom = oy + (y + 1) * cs - inset
+      const cellL = ox + x * cs
+      const cellR = ox + (x + 1) * cs
+      const cellT = oy + y * cs
+      const cellB = oy + (y + 1) * cs
+      const iL = cellL + inset
+      const iR = cellR - inset
+      const iT = cellT + inset
+      const iB = cellB - inset
 
+      // Straights join at cell edges between adjacent path cells.
       if (n) {
-        const x0 = w ? left + r : left
-        const x1 = e ? right - r : right
-        if (x1 > x0) {
-          ctx.beginPath()
-          ctx.moveTo(x0, top)
-          ctx.lineTo(x1, top)
-          ctx.stroke()
+        const x0 = w ? iL + r : cellL
+        const x1 = e ? iR - r : cellR
+        if (x1 > x0 + 0.01) {
+          ctx.moveTo(x0, iT)
+          ctx.lineTo(x1, iT)
         }
       }
       if (s) {
-        const x0 = w ? left + r : left
-        const x1 = e ? right - r : right
-        if (x1 > x0) {
-          ctx.beginPath()
-          ctx.moveTo(x0, bottom)
-          ctx.lineTo(x1, bottom)
-          ctx.stroke()
+        const x0 = w ? iL + r : cellL
+        const x1 = e ? iR - r : cellR
+        if (x1 > x0 + 0.01) {
+          ctx.moveTo(x0, iB)
+          ctx.lineTo(x1, iB)
         }
       }
       if (w) {
-        const y0 = n ? top + r : top
-        const y1 = s ? bottom - r : bottom
-        if (y1 > y0) {
-          ctx.beginPath()
-          ctx.moveTo(left, y0)
-          ctx.lineTo(left, y1)
-          ctx.stroke()
+        const y0 = n ? iT + r : cellT
+        const y1 = s ? iB - r : cellB
+        if (y1 > y0 + 0.01) {
+          ctx.moveTo(iL, y0)
+          ctx.lineTo(iL, y1)
         }
       }
       if (e) {
-        const y0 = n ? top + r : top
-        const y1 = s ? bottom - r : bottom
-        if (y1 > y0) {
-          ctx.beginPath()
-          ctx.moveTo(right, y0)
-          ctx.lineTo(right, y1)
-          ctx.stroke()
+        const y0 = n ? iT + r : cellT
+        const y1 = s ? iB - r : cellB
+        if (y1 > y0 + 0.01) {
+          ctx.moveTo(iR, y0)
+          ctx.lineTo(iR, y1)
         }
       }
 
+      // Inner corners (corridor L-turns): fillet cuts off the wall tip.
       if (n && w) {
-        ctx.beginPath()
-        ctx.arc(left + r, top + r, r, Math.PI, Math.PI * 1.5)
-        ctx.stroke()
+        ctx.moveTo(iL + r, iT)
+        minorArc(ctx, iL + r, iT + r, r, -Math.PI / 2, Math.PI)
       }
       if (n && e) {
-        ctx.beginPath()
-        ctx.arc(right - r, top + r, r, Math.PI * 1.5, 0)
-        ctx.stroke()
-      }
-      if (s && w) {
-        ctx.beginPath()
-        ctx.arc(left + r, bottom - r, r, Math.PI * 0.5, Math.PI)
-        ctx.stroke()
+        ctx.moveTo(iR - r, iT)
+        minorArc(ctx, iR - r, iT + r, r, -Math.PI / 2, 0)
       }
       if (s && e) {
-        ctx.beginPath()
-        ctx.arc(right - r, bottom - r, r, 0, Math.PI * 0.5)
-        ctx.stroke()
+        ctx.moveTo(iR, iB - r)
+        minorArc(ctx, iR - r, iB - r, r, 0, Math.PI / 2)
+      }
+      if (s && w) {
+        ctx.moveTo(iL + r, iB)
+        minorArc(ctx, iL + r, iB - r, r, Math.PI / 2, Math.PI)
       }
 
+      // Outer corners (wall pillars): round the outside of the wall block.
       if (!n && !w && nw) {
-        ctx.beginPath()
-        ctx.arc(left, top, r, 0, Math.PI * 0.5)
-        ctx.stroke()
+        ctx.moveTo(cellL + r, cellT)
+        minorArc(ctx, cellL, cellT, r, 0, Math.PI / 2)
       }
       if (!n && !e && ne) {
-        ctx.beginPath()
-        ctx.arc(right, top, r, Math.PI * 0.5, Math.PI)
-        ctx.stroke()
+        ctx.moveTo(cellR, cellT + r)
+        minorArc(ctx, cellR, cellT, r, Math.PI / 2, Math.PI)
       }
       if (!s && !w && sw) {
-        ctx.beginPath()
-        ctx.arc(left, bottom, r, Math.PI * 1.5, 0)
-        ctx.stroke()
+        ctx.moveTo(cellL, cellB - r)
+        minorArc(ctx, cellL, cellB, r, -Math.PI / 2, 0)
       }
       if (!s && !e && se) {
-        ctx.beginPath()
-        ctx.arc(right, bottom, r, Math.PI, Math.PI * 1.5)
-        ctx.stroke()
+        ctx.moveTo(cellR - r, cellB)
+        minorArc(ctx, cellR, cellB, r, Math.PI, Math.PI * 1.5)
       }
     }
   }
+
+  ctx.stroke()
 }
 
 function drawClassicMazeWalls(
@@ -384,35 +399,30 @@ function drawClassicMazeWalls(
   gridW: number,
   gridH: number,
 ) {
-  const inset = cs * 0.2
-  const radius = Math.min(cs * 0.34, inset + cs * 0.1)
-  const lineW = Math.max(2.2, cs * 0.17)
+  // Small inset = wider corridors (classic Pac-Man keeps outlines near wall faces).
+  const inset = Math.max(1.75, cs * 0.1)
+  const lineW = Math.max(1.75, cs * 0.1)
 
   ctx.fillStyle = CLASSIC.floor
-  for (let y = 0; y < gridH; y++) {
-    for (let x = 0; x < gridW; x++) {
-      if (grid[y]![x] === TILE_WALL) continue
-      ctx.fillRect(ox + x * cs, oy + y * cs, cs + 0.6, cs + 0.6)
-    }
-  }
+  ctx.fillRect(ox, oy, cs * gridW, cs * gridH)
 
-  ctx.lineCap = 'round'
+  ctx.lineCap = 'butt'
   ctx.lineJoin = 'round'
 
   ctx.strokeStyle = CLASSIC.wallGlow
-  ctx.lineWidth = lineW + 2.5
-  strokeMazeOutlines(ctx, grid, ox, oy, cs, gridW, gridH, inset, radius)
+  ctx.lineWidth = lineW + 2
+  strokeMazeOutlines(ctx, grid, ox, oy, cs, gridW, gridH, inset)
 
   ctx.strokeStyle = CLASSIC.wall
   ctx.lineWidth = lineW
-  strokeMazeOutlines(ctx, grid, ox, oy, cs, gridW, gridH, inset, radius)
+  strokeMazeOutlines(ctx, grid, ox, oy, cs, gridW, gridH, inset)
 
-  const innerInset = inset + lineW * 0.5
-  const innerRadius = Math.max(1, radius - lineW * 0.4)
-  if (innerInset + 1 < cs * 0.45) {
+  // Tight double-rim so the inner stroke doesn't swallow corridor width.
+  const innerInset = inset + Math.max(1.25, lineW * 0.55)
+  if (innerInset * 2 + 2 < cs * 0.85) {
     ctx.strokeStyle = CLASSIC.wallHi
-    ctx.lineWidth = Math.max(1, lineW * 0.32)
-    strokeMazeOutlines(ctx, grid, ox, oy, cs, gridW, gridH, innerInset, innerRadius)
+    ctx.lineWidth = Math.max(1, lineW * 0.35)
+    strokeMazeOutlines(ctx, grid, ox, oy, cs, gridW, gridH, innerInset)
   }
 }
 
