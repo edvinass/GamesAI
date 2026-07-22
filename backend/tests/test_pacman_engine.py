@@ -43,6 +43,20 @@ def test_lobby_validation(engine: PacmanEngine) -> None:
     assert engine.validate_lobby(make_players(5), {}) is not None
     assert engine.validate_lobby(make_players(1), {"solo_practice": True}) is None
     assert engine.validate_lobby(make_players(2), {"solo_practice": True}) is not None
+    assert engine.validate_lobby(make_players(1), {"single_player": True}) is None
+    assert engine.validate_lobby(make_players(2), {"single_player": True}) is not None
+    assert (
+        engine.validate_lobby(make_players(2, ai_from=1), {"single_player": True})
+        is not None
+    )
+
+
+def test_single_player_settings_disable_solo_practice(engine: PacmanEngine) -> None:
+    settings = engine.validate_settings(
+        {"single_player": True, "solo_practice": True}
+    )
+    assert settings["single_player"] is True
+    assert settings["solo_practice"] is False
 
 
 def test_initial_state(engine: PacmanEngine) -> None:
@@ -255,6 +269,54 @@ def test_last_standing_wins(engine: PacmanEngine, state: dict) -> None:
     assert state["phase"] == "finished"
     assert state["winner"] == a
     assert state["win_reason"] == "last_standing"
+    assert any(e["type"] == "game_over" for e in events)
+
+
+def test_single_player_does_not_end_while_alive(engine: PacmanEngine) -> None:
+    players = make_players(1)
+    state = engine.create_initial_state(
+        players, {"countdown_sec": 0, "single_player": True}
+    )
+    state["phase"] = "playing"
+    events = engine._maybe_finish(state)
+    assert state["phase"] == "playing"
+    assert events == []
+
+
+def test_single_player_ends_out_of_lives(engine: PacmanEngine) -> None:
+    players = make_players(1)
+    state = engine.create_initial_state(
+        players, {"countdown_sec": 0, "single_player": True}
+    )
+    state["phase"] = "playing"
+    pid = players[0]["id"]
+    state["pacmen"][pid]["alive"] = False
+    state["pacmen"][pid]["lives"] = 0
+    state["pacmen"][pid]["score"] = 420
+    events = engine._maybe_finish(state)
+    assert state["phase"] == "finished"
+    assert state["winner"] == pid
+    assert state["win_reason"] == "out_of_lives"
+    assert any(e["type"] == "game_over" for e in events)
+
+
+def test_single_player_maze_clear(engine: PacmanEngine) -> None:
+    players = make_players(1)
+    state = engine.create_initial_state(
+        players, {"countdown_sec": 0, "single_player": True}
+    )
+    state["phase"] = "playing"
+    pid = players[0]["id"]
+    state["pacmen"][pid]["score"] = 999
+    state["pellets_remaining"] = 0
+    for y in range(state["grid_height"]):
+        for x in range(state["grid_width"]):
+            state["pellets"][y][x] = False
+            state["power_pellets"][y][x] = False
+    events = engine._maybe_finish(state)
+    assert state["phase"] == "finished"
+    assert state["winner"] == pid
+    assert state["win_reason"] == "maze_clear"
     assert any(e["type"] == "game_over" for e in events)
 
 

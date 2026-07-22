@@ -70,6 +70,7 @@ const winReasonLabel = computed(() => {
   if (reason === 'last_standing') return 'Last Pac-Man standing'
   if (reason === 'maze_clear') return 'Maze cleared — highest score'
   if (reason === 'highest_score') return 'Highest score'
+  if (reason === 'out_of_lives') return 'Out of lives'
   return null
 })
 

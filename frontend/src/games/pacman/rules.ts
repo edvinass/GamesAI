@@ -4,7 +4,7 @@ export const pacmanRules: GameRules = {
   title: 'Pac-Man',
   subtitle: 'Race for pellets in a shared maze',
   quickStart: [
-    'Join with 2–4 players (or enable solo practice vs AI).',
+    'Pick multiplayer (2–4), solo practice vs AI, or single player (no AI rivals).',
     'Use arrow keys or WASD to steer your Pac-Man.',
     'Eat pellets for points. Power pellets let you eat ghosts — and rivals.',
     'Last Pac-Man with lives wins. Clear the maze and highest score wins.',
@@ -24,11 +24,11 @@ export const pacmanRules: GameRules = {
     },
     {
       heading: 'Winning',
-      body: 'Eliminate every other Pac-Man (last standing). If the maze is cleared while multiple players still have lives, the highest score among the living wins.',
+      body: 'Eliminate every other Pac-Man (last standing). If the maze is cleared while multiple players still have lives, the highest score among the living wins. In single player, clear the maze or survive for a high score until you run out of lives.',
     },
     {
-      heading: 'AI & solo practice',
-      body: 'The host can add AI Pac-Men in the lobby, or enable solo practice for a 3-player game (you + 2 AI).',
+      heading: 'Modes',
+      body: 'Multiplayer supports 2–4 Pac-Men (humans or AI). Solo practice auto-adds 2 AI rivals. Single player is just you and the ghosts — no AI Pac-Men.',
     },
   ],
   tips: [

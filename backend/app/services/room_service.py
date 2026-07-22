@@ -467,8 +467,11 @@ class RoomService:
             elif room.game_type == "connect4":
                 await self._setup_connect4_solo(room)
             await self.db.refresh(room, ["players"])
-        elif settings.get("single_player") and room.game_type == "tetris":
-            await self._setup_tetris_single_player(room)
+        elif settings.get("single_player") and room.game_type in ("tetris", "pacman"):
+            if room.game_type == "tetris":
+                await self._setup_tetris_single_player(room)
+            else:
+                await self._setup_pacman_single_player(room)
             await self.db.refresh(room, ["players"])
         elif room.game_type == "gravity_master":
             await self._setup_gravity_master_single_player(room)
@@ -689,6 +692,12 @@ class RoomService:
         return room, False
 
     async def _setup_tetris_single_player(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+    async def _setup_pacman_single_player(self, room: Room) -> None:
         for p in list(room.players):
             if p.is_ai:
                 await self.db.delete(p)

@@ -22,6 +22,7 @@ const props = defineProps<{
 }>()
 
 const soloPractice = defineModel<boolean>('soloPractice', { required: true })
+const singlePlayer = defineModel<boolean>('singlePlayer', { required: true })
 const tickMs = defineModel<number>('tickMs', { required: true })
 const mapId = defineModel<string>('mapId', { required: true })
 const lives = defineModel<number>('lives', { required: true })
@@ -30,6 +31,8 @@ const emit = defineEmits<{
   addAi: []
   remove: [id: string]
 }>()
+
+type GameMode = 'multiplayer' | 'solo_practice' | 'single_player'
 
 const speedOptions = [
   { label: 'Blitz', value: 70 },
@@ -40,6 +43,41 @@ const speedOptions = [
 ]
 
 const livesOptions = [1, 2, 3, 4, 5]
+
+const gameModes: { id: GameMode; label: string; description: string; icon: string }[] = [
+  {
+    id: 'multiplayer',
+    label: 'Multiplayer',
+    description: '2–4 Pac-Men racing for pellets',
+    icon: '👥',
+  },
+  {
+    id: 'solo_practice',
+    label: 'Solo practice',
+    description: 'You vs 2 AI Pac-Men',
+    icon: '🤖',
+  },
+  {
+    id: 'single_player',
+    label: 'Single player',
+    description: 'Just you and the ghosts — high score',
+    icon: '🏆',
+  },
+]
+
+const gameMode = computed<GameMode>({
+  get() {
+    if (singlePlayer.value) return 'single_player'
+    if (soloPractice.value) return 'solo_practice'
+    return 'multiplayer'
+  },
+  set(mode) {
+    singlePlayer.value = mode === 'single_player'
+    soloPractice.value = mode === 'solo_practice'
+  },
+})
+
+const activeMode = computed(() => gameModes.find((mode) => mode.id === gameMode.value) ?? gameModes[0])
 
 const FALLBACK_MAPS: MapOption[] = [
   {
@@ -72,6 +110,12 @@ const selectedMap = computed(
   () => mapOptions.value.find((m) => m.id === mapId.value) ?? mapOptions.value[0] ?? null,
 )
 
+const maxPlayers = computed(() => Number(props.room.settings?.max_players ?? 4))
+const playerCount = computed(() => props.room.players.length)
+const canAddAi = computed(
+  () => props.isHost && gameMode.value === 'multiplayer' && playerCount.value < maxPlayers.value,
+)
+
 const difficultyClass = (difficulty: string) => {
   if (difficulty === 'brutal') return 'diff-brutal'
   if (difficulty === 'hard') return 'diff-hard'
@@ -81,11 +125,27 @@ const difficultyClass = (difficulty: string) => {
 
 <template>
   <div class="pacman-lobby">
-    <div v-if="isHost" class="settings-block card">
-      <label class="checkbox-label">
-        <input v-model="soloPractice" type="checkbox" />
-        Solo practice (play against 2 AI)
-      </label>
+    <section v-if="isHost" class="settings-block card">
+      <h2 class="section-title">Game mode</h2>
+      <div class="mode-selector" role="radiogroup" aria-label="Game mode">
+        <button
+          v-for="mode in gameModes"
+          :key="mode.id"
+          type="button"
+          class="mode-option"
+          :class="{ active: gameMode === mode.id }"
+          role="radio"
+          :aria-checked="gameMode === mode.id"
+          @click="gameMode = mode.id"
+        >
+          <span class="mode-icon" aria-hidden="true">{{ mode.icon }}</span>
+          <span class="mode-copy">
+            <span class="mode-label">{{ mode.label }}</span>
+            <span class="mode-desc">{{ mode.description }}</span>
+          </span>
+        </button>
+      </div>
+
       <div class="speed-setting">
         <span class="setting-label">Game speed</span>
         <select v-model.number="tickMs" class="speed-select">
@@ -100,7 +160,15 @@ const difficultyClass = (difficulty: string) => {
           <option v-for="n in livesOptions" :key="n" :value="n">{{ n }}</option>
         </select>
       </div>
-    </div>
+    </section>
+
+    <section v-else class="mode-summary card">
+      <span class="mode-icon" aria-hidden="true">{{ activeMode.icon }}</span>
+      <div>
+        <p class="mode-summary-label">{{ activeMode.label }}</p>
+        <p class="mode-summary-desc">{{ activeMode.description }}</p>
+      </div>
+    </section>
 
     <div class="map-block card">
       <div class="map-header">
@@ -131,7 +199,11 @@ const difficultyClass = (difficulty: string) => {
       </div>
     </div>
 
-    <div v-if="soloPractice" class="solo-notice card">
+    <div v-if="gameMode === 'single_player'" class="solo-notice card">
+      <p>Play alone against the ghosts. Clear the maze or rack up points before you run out of lives.</p>
+    </div>
+
+    <div v-else-if="gameMode === 'solo_practice'" class="solo-notice card">
       <p>Solo practice auto-adds 2 AI Pac-Men when you start. Race for pellets and outlast the ghosts.</p>
     </div>
 
@@ -159,7 +231,12 @@ const difficultyClass = (difficulty: string) => {
         </div>
       </div>
 
-      <button v-if="isHost" type="button" class="btn-secondary add-ai-btn" @click="emit('addAi')">
+      <button
+        v-if="canAddAi"
+        type="button"
+        class="btn-secondary add-ai-btn"
+        @click="emit('addAi')"
+      >
         + Add AI player
       </button>
 
@@ -176,6 +253,20 @@ const difficultyClass = (difficulty: string) => {
         </div>
       </div>
     </template>
+
+    <div
+      v-if="gameMode !== 'multiplayer'"
+      class="validation-banner card"
+      :class="{ valid: validationValid, invalid: !validationValid }"
+    >
+      <span class="validation-icon">{{ validationValid ? '✓' : '!' }}</span>
+      <div>
+        <p class="validation-message">{{ validationMessage }}</p>
+        <ul v-if="!validationValid && validationIssues.length > 1" class="validation-issues">
+          <li v-for="issue in validationIssues" :key="issue">{{ issue }}</li>
+        </ul>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -191,6 +282,87 @@ const difficultyClass = (difficulty: string) => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.mode-selector {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.mode-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(250, 204, 21, 0.18);
+  background: rgba(12, 18, 40, 0.55);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.mode-option:hover {
+  border-color: rgba(250, 204, 21, 0.45);
+  transform: translateY(-1px);
+}
+
+.mode-option.active {
+  border-color: rgba(250, 204, 21, 0.75);
+  background: rgba(250, 204, 21, 0.1);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.25);
+}
+
+.mode-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.mode-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.mode-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.mode-desc {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.mode-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.mode-summary-label {
+  margin: 0;
+  font-weight: 600;
+}
+
+.mode-summary-desc {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .speed-setting {
@@ -211,13 +383,6 @@ const difficultyClass = (difficulty: string) => {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.95rem;
 }
 
 .map-header {
@@ -418,5 +583,11 @@ const difficultyClass = (difficulty: string) => {
   padding-left: 1.1rem;
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+
+@media (max-width: 720px) {
+  .mode-selector {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

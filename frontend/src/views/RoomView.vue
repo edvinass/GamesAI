@@ -440,6 +440,7 @@ function startGame() {
       <PacmanLobby
         v-else-if="isPacman"
         v-model:solo-practice="soloPractice"
+        v-model:single-player="singlePlayer"
         v-model:tick-ms="tickMs"
         v-model:map-id="mapId"
         v-model:lives="lives"

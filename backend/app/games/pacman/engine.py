@@ -55,6 +55,7 @@ class PacmanEngine(GamePlugin):
             "countdown_sec": 3,
             "lives": 3,
             "solo_practice": False,
+            "single_player": False,
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -78,6 +79,9 @@ class PacmanEngine(GamePlugin):
         merged["countdown_sec"] = max(1, min(10, int(merged.get("countdown_sec", 3))))
         merged["lives"] = max(1, min(5, int(merged.get("lives", 3))))
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
+        merged["single_player"] = bool(merged.get("single_player", False))
+        if merged["single_player"]:
+            merged["solo_practice"] = False
         return merged
 
     def tick_interval_ms(self) -> int:
@@ -85,6 +89,14 @@ class PacmanEngine(GamePlugin):
 
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
         settings = self.validate_settings(settings)
+        if settings.get("single_player"):
+            humans = [p for p in players if not p.get("is_ai")]
+            if len(humans) != 1:
+                return "Single player requires exactly one human player"
+            if any(p.get("is_ai") for p in players):
+                return "Remove AI players for single player mode"
+            return None
+
         if settings.get("solo_practice"):
             humans = [p for p in players if not p.get("is_ai")]
             if len(humans) != 1:
@@ -657,6 +669,27 @@ class PacmanEngine(GamePlugin):
             return events
 
         alive = self._alive_pacmen(state)
+        single_player = bool((state.get("settings") or {}).get("single_player"))
+
+        if single_player:
+            if self._maze_cleared(state):
+                pid = next(iter(state["pacmen"]), None)
+                state["winner"] = alive[0] if alive else pid
+                state["win_reason"] = "maze_clear"
+                state["phase"] = "finished"
+                events.append({"type": "game_over", "winner": state["winner"]})
+                return events
+            if len(alive) == 0:
+                scores = {
+                    pid: int(p.get("score", 0)) for pid, p in state["pacmen"].items()
+                }
+                max_score = max(scores.values()) if scores else 0
+                winners = [pid for pid, sc in scores.items() if sc == max_score]
+                state["winner"] = winners[0] if winners else None
+                state["win_reason"] = "out_of_lives"
+                state["phase"] = "finished"
+                events.append({"type": "game_over", "winner": state["winner"]})
+            return events
 
         if len(alive) <= 1:
             if len(alive) == 1:

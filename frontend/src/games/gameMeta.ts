@@ -77,9 +77,9 @@ const metaByGameType: Record<string, GameMeta> = {
     name: 'Pac-Man',
     description: 'Race for pellets in a shared maze — dodge ghosts or eat your rivals.',
     emoji: '🟡',
-    lobbyHint: 'Need 2–4 players. Share the link or add AI to fill seats.',
+    lobbyHint: 'Multiplayer, solo practice vs AI, or single player against the ghosts.',
     category: 'arcade',
-    players: '2–4',
+    players: '1–4',
     accent: '#facc15',
   },
   gravity_master: {

@@ -11,6 +11,21 @@ export function validateLobby(room: Room): LobbyValidation {
   const minPlayers = Number(room.settings?.min_players ?? 2)
   const maxPlayers = Number(room.settings?.max_players ?? 4)
 
+  if (room.settings?.single_player) {
+    const humans = room.players.filter((p) => !p.is_ai)
+    if (humans.length !== 1) {
+      issues.push('Single player requires exactly one human player')
+    }
+    if (room.players.some((p) => p.is_ai)) {
+      issues.push('Remove AI players for single player mode')
+    }
+    return {
+      valid: issues.length === 0,
+      message: issues[0] ?? 'Ready for single player — clear the maze or chase a high score',
+      issues,
+    }
+  }
+
   if (room.settings?.solo_practice) {
     const humans = room.players.filter((p) => !p.is_ai)
     if (humans.length !== 1) {
