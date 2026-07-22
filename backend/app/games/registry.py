@@ -6,6 +6,7 @@ from app.games.connect4.engine import Connect4Engine
 from app.games.duel.engine import DuelEngine
 from app.games.go.engine import GoEngine
 from app.games.gravity_master.engine import GravityMasterEngine
+from app.games.pacman.engine import PacmanEngine
 from app.games.roborally.engine import RoboRallyEngine
 from app.games.snake.engine import SnakeEngine
 from app.games.poker.engine import PokerEngine
@@ -22,6 +23,7 @@ _REGISTRY: dict[str, GamePlugin] = {
     "duel": DuelEngine(),
     "tetris": TetrisEngine(),
     "bomberman": BombermanEngine(),
+    "pacman": PacmanEngine(),
     "gravity_master": GravityMasterEngine(),
     "poker": PokerEngine(),
     "chess": ChessEngine(),
@@ -47,6 +49,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "duel": {"name": "Side Duel", "description": "Best-of rounds with HP, cover, power-ups, and mutators"},
     "tetris": {"name": "Multiplier Tetris", "description": "Each player stacks alone — speed rises, last board standing wins"},
     "bomberman": {"name": "Bomberman", "description": "Plant bombs, break walls, and be the last bomber standing"},
+    "pacman": {"name": "Pac-Man", "description": "Race for pellets in a shared maze — dodge ghosts or eat your rivals"},
     "gravity_master": {"name": "Gravity Master", "description": "Draw shapes that fall and become walls — guide the ball to the target"},
     "poker": {"name": "Poker", "description": "Texas Hold'em — bluff, bet, and beat your friends (or AI)"},
     "chess": {"name": "Chess", "description": "Classic chess — play a friend or challenge the AI"},

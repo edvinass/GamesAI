@@ -864,7 +864,67 @@ export interface SolitaireGameState {
   hint?: SolitaireHint | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState
+export interface PacmanPac {
+  x: number
+  y: number
+  spawn_x?: number
+  spawn_y?: number
+  direction: string
+  next_direction: string
+  facing?: string
+  alive: boolean
+  lives: number
+  score: number
+  color: string
+  powered_ticks: number
+  ghost_combo?: number
+  move_credit?: number
+  respawn_ticks?: number
+  invuln_ticks?: number
+}
+
+export interface PacmanGhost {
+  id: string
+  name: string
+  color: string
+  x: number
+  y: number
+  home?: number[]
+  direction: string
+  mode: string
+  frightened_ticks: number
+  eaten: boolean
+  move_credit?: number
+}
+
+export interface PacmanGameState {
+  phase: 'countdown' | 'playing' | 'finished'
+  countdown_ends_at: string | null
+  tick: number
+  tick_ms?: number
+  grid_width: number
+  grid_height: number
+  grid: number[][]
+  pellets: boolean[][]
+  power_pellets: boolean[][]
+  map_id?: string
+  map_name?: string
+  tunnels?: Array<{ y: number; left_x: number; right_x: number }>
+  ghost_homes?: number[][]
+  gate?: number[]
+  pacmen: Record<string, PacmanPac>
+  ghosts: PacmanGhost[]
+  mode?: string
+  mode_ticks?: number
+  players: Player[]
+  winner: string | null
+  win_reason: string | null
+  last_action: Record<string, unknown> | null
+  pellets_remaining?: number
+  viewer_id: string | null
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | PacmanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -880,6 +940,10 @@ export function isSnakeState(state: GameState): state is SnakeGameState {
 
 export function isBombermanState(state: GameState): state is BombermanGameState {
   return 'bombers' in state && 'bombs' in state && 'grid' in state && Array.isArray((state as BombermanGameState).grid)
+}
+
+export function isPacmanState(state: GameState): state is PacmanGameState {
+  return 'pacmen' in state && 'ghosts' in state && 'pellets' in state
 }
 
 export function isDuelState(state: GameState): state is DuelGameState {

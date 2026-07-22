@@ -8,6 +8,7 @@ import CodenamesBoard from '@/games/codenames/CodenamesBoard.vue'
 import SpyfallBoard from '@/games/spyfall/SpyfallBoard.vue'
 import SnakeBoard from '@/games/snake/SnakeBoard.vue'
 import BombermanBoard from '@/games/bomberman/BombermanBoard.vue'
+import PacmanBoard from '@/games/pacman/PacmanBoard.vue'
 import DuelBoard from '@/games/duel/DuelBoard.vue'
 import TetrisBoard from '@/games/tetris/TetrisBoard.vue'
 import GravityMasterBoard from '@/games/gravity_master/GravityMasterBoard.vue'
@@ -23,8 +24,8 @@ import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
 import { pokerReactionSet } from '@/games/poker/reactions'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,6 +49,7 @@ const gameTitle = computed(() => {
   if (type === 'codenames') return 'Codenames'
   if (type === 'snake') return 'Multiplayer Snake'
   if (type === 'bomberman') return 'Bomberman'
+  if (type === 'pacman') return 'Pac-Man'
   if (type === 'duel') return 'Side Duel'
   if (type === 'tetris') return 'Multiplier Tetris'
   if (type === 'gravity_master') return 'Gravity Master'
@@ -75,6 +77,10 @@ const snakeState = computed(() =>
 
 const bombermanState = computed(() =>
   gameState.value && isBombermanState(gameState.value) ? gameState.value as BombermanGameState : null,
+)
+
+const pacmanState = computed(() =>
+  gameState.value && isPacmanState(gameState.value) ? gameState.value as PacmanGameState : null,
 )
 
 const duelState = computed(() =>
@@ -126,7 +132,7 @@ const isPoker = computed(() => room.value?.game_type === 'poker')
 const isRoboRally = computed(() => room.value?.game_type === 'roborally')
 
 const isFullscreenGame = computed(() =>
-  Boolean(snakeState.value || bombermanState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value || roborallyState.value || connect4State.value || battleshipState.value || solitaireState.value),
+  Boolean(snakeState.value || bombermanState.value || pacmanState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value || roborallyState.value || connect4State.value || battleshipState.value || solitaireState.value),
 )
 
 const loadingMessage = computed(() => {
@@ -264,6 +270,14 @@ function backToLobby() {
     <BombermanBoard
       v-else-if="bombermanState && room"
       :game-state="bombermanState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <PacmanBoard
+      v-else-if="pacmanState && room"
+      :game-state="pacmanState"
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"

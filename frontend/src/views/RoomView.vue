@@ -12,6 +12,7 @@ import LobbyTeamPanel from '@/components/lobby/LobbyTeamPanel.vue'
 import SpyfallLobby from '@/games/spyfall/SpyfallLobby.vue'
 import SnakeLobby from '@/games/snake/SnakeLobby.vue'
 import BombermanLobby from '@/games/bomberman/BombermanLobby.vue'
+import PacmanLobby from '@/games/pacman/PacmanLobby.vue'
 import DuelLobby from '@/games/duel/DuelLobby.vue'
 import TetrisLobby from '@/games/tetris/TetrisLobby.vue'
 import GravityMasterLobby from '@/games/gravity_master/GravityMasterLobby.vue'
@@ -26,6 +27,7 @@ import { validateLobby as validateCodenamesLobby, teamOperatives, teamSpymaster 
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
 import { validateLobby as validateBombermanLobby } from '@/games/bomberman/lobbyValidation'
+import { validateLobby as validatePacmanLobby } from '@/games/pacman/lobbyValidation'
 import { validateLobby as validateDuelLobby } from '@/games/duel/lobbyValidation'
 import { validateLobby as validateTetrisLobby } from '@/games/tetris/lobbyValidation'
 import { validateLobby as validateGravityMasterLobby } from '@/games/gravity_master/lobbyValidation'
@@ -107,7 +109,7 @@ watch(
       })
       return
     }
-    if (r.game_type === 'bomberman') {
+    if (r.game_type === 'bomberman' || r.game_type === 'pacman') {
       const maps = r.settings?.available_maps
       if (Array.isArray(maps) && maps.length > 0) return
       send({
@@ -123,6 +125,7 @@ const isHost = computed(() => room.value?.host_player_id === playerStore.playerI
 const isSpyfall = computed(() => room.value?.game_type === 'spyfall')
 const isSnake = computed(() => room.value?.game_type === 'snake')
 const isBomberman = computed(() => room.value?.game_type === 'bomberman')
+const isPacman = computed(() => room.value?.game_type === 'pacman')
 const isDuel = computed(() => room.value?.game_type === 'duel')
 const isTetris = computed(() => room.value?.game_type === 'tetris')
 const isGravityMaster = computed(() => room.value?.game_type === 'gravity_master')
@@ -142,6 +145,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'spyfall') return validateSpyfallLobby(room.value)
   if (room.value.game_type === 'snake') return validateSnakeLobby(room.value)
   if (room.value.game_type === 'bomberman') return validateBombermanLobby(room.value)
+  if (room.value.game_type === 'pacman') return validatePacmanLobby(room.value)
   if (room.value.game_type === 'duel') return validateDuelLobby(room.value)
   if (room.value.game_type === 'tetris') return validateTetrisLobby(room.value)
   if (room.value.game_type === 'gravity_master') return validateGravityMasterLobby(room.value)
@@ -182,9 +186,22 @@ const tickMs = computed({
   get: () =>
     Number(
       room.value?.settings?.tick_ms ??
-        (room.value?.game_type === 'duel' ? 75 : room.value?.game_type === 'snake' ? 130 : room.value?.game_type === 'bomberman' ? 150 : 150),
+        (room.value?.game_type === 'duel'
+          ? 75
+          : room.value?.game_type === 'snake'
+            ? 130
+            : room.value?.game_type === 'pacman'
+              ? 110
+              : room.value?.game_type === 'bomberman'
+                ? 150
+                : 150),
     ),
   set: (val: number) => updateSettings({ tick_ms: val }),
+})
+
+const lives = computed({
+  get: () => Number(room.value?.settings?.lives ?? 3),
+  set: (val: number) => updateSettings({ lives: val }),
 })
 
 const duelMatchFormat = computed({
@@ -221,7 +238,9 @@ const mapId = computed({
   get: () =>
     String(
       room.value?.settings?.map_id ??
-        (room.value?.game_type === 'bomberman' ? 'classic' : 'factory_floor'),
+        (room.value?.game_type === 'bomberman' || room.value?.game_type === 'pacman'
+          ? 'classic'
+          : 'factory_floor'),
     ),
   set: (val: string) => updateSettings({ map_id: val }),
 })
@@ -407,6 +426,23 @@ function startGame() {
         v-model:solo-practice="soloPractice"
         v-model:tick-ms="tickMs"
         v-model:map-id="mapId"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+      />
+
+      <PacmanLobby
+        v-else-if="isPacman"
+        v-model:solo-practice="soloPractice"
+        v-model:tick-ms="tickMs"
+        v-model:map-id="mapId"
+        v-model:lives="lives"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

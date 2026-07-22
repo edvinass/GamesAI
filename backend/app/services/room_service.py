@@ -66,6 +66,7 @@ _NO_TEAM_LOBBY_GAMES = frozenset(
         "duel",
         "tetris",
         "bomberman",
+        "pacman",
         "poker",
         "gravity_master",
         "chess",
@@ -447,6 +448,8 @@ class RoomService:
                 await self._setup_snake_solo(room)
             elif room.game_type == "bomberman":
                 await self._setup_bomberman_solo(room)
+            elif room.game_type == "pacman":
+                await self._setup_pacman_solo(room)
             elif room.game_type == "duel":
                 await self._setup_duel_solo(room)
             elif room.game_type == "tetris":
@@ -589,6 +592,27 @@ class RoomService:
         await self.db.flush()
 
     async def _setup_bomberman_solo(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+        for i in range(2):
+            token = generate_session_token()
+            self.db.add(
+                RoomPlayer(
+                    room_id=room.id,
+                    nickname=f"🤖 AI Player {i + 1}",
+                    session_token_hash=hash_session_token(token),
+                    team=None,
+                    role=None,
+                    is_ai=True,
+                    is_connected=True,
+                )
+            )
+        await self.db.flush()
+
+    async def _setup_pacman_solo(self, room: Room) -> None:
         for p in list(room.players):
             if p.is_ai:
                 await self.db.delete(p)

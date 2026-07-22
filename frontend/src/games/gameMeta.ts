@@ -73,6 +73,15 @@ const metaByGameType: Record<string, GameMeta> = {
     players: '2–8',
     accent: '#f97316',
   },
+  pacman: {
+    name: 'Pac-Man',
+    description: 'Race for pellets in a shared maze — dodge ghosts or eat your rivals.',
+    emoji: '🟡',
+    lobbyHint: 'Need 2–4 players. Share the link or add AI to fill seats.',
+    category: 'arcade',
+    players: '2–4',
+    accent: '#facc15',
+  },
   gravity_master: {
     name: 'Gravity Master',
     description: 'Draw shapes that fall and become walls — guide the ball to the target.',
