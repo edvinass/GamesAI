@@ -7,21 +7,21 @@ export const bombermanRules: GameRules = {
     'Join a room with 2–8 players (or add AI bots).',
     'Use arrow keys or WASD to move. Release to stop.',
     'Press Space to plant a bomb under your feet.',
-    'Blast soft walls for power-ups — bombs, range, and speed.',
+    'Blast soft walls for power-ups — bombs, range, speed, and throw.',
     'Don’t get caught in the explosion. Last player alive wins.',
   ],
   sections: [
     {
       heading: 'Controls',
-      body: 'Hold arrow keys or WASD to walk. Release the key to stop. Press Space to place a bomb (limited by your bomb count). You can walk off a bomb you just placed, but you cannot walk back onto it.',
+      body: 'Hold arrow keys or WASD to walk. Release the key to stop. Press Space to place a bomb (limited by your bomb count). You can walk off a bomb you just placed, but you cannot walk back onto it. With the Throw power-up, press Space while standing on a bomb to hurl it in the direction you are facing.',
     },
     {
       heading: 'Arena',
-      body: 'The grid has indestructible hard walls and breakable soft walls. Explosions travel in four directions and stop at hard walls. Soft walls are destroyed and may drop power-ups.',
+      body: 'Each lobby picks an arena layout (Classic, Fortress, Islands, The Narrows, and more). Hard walls are permanent; soft walls break and may drop power-ups. Explosions travel in four directions and stop at hard walls.',
     },
     {
       heading: 'Power-ups',
-      body: 'Bomb (+): carry more bombs at once. Range (+): longer explosions. Speed (+): move faster. Power-ups in a blast are destroyed.',
+      body: 'Bomb (+): carry more bombs at once. Range (+): longer explosions. Speed (+): move faster. Throw (T): stand on a bomb and press Space to throw it — it slides until it hits a wall, soft block, or another bomb. Power-ups in a blast are destroyed.',
     },
     {
       heading: 'Winning',
@@ -37,5 +37,6 @@ export const bombermanRules: GameRules = {
     'Chain bombs to clear large areas of soft walls.',
     'Corner rivals with soft walls still up — traps cut off exits.',
     'Speed power-ups help you outrun your own fuses.',
+    'Throw a bomb into a corridor to extend your reach without walking in.',
   ],
 }

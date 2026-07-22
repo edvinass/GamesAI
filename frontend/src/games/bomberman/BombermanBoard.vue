@@ -5,7 +5,13 @@ import {
   interpolateBombers,
   renderFrame,
   snapshotBombers,
+  spawnDebrisParticles,
+  spawnDeathParticles,
+  spawnExplosionParticles,
+  spawnPowerupParticles,
+  updateParticles,
   type BomberSnapshot,
+  type Particle,
 } from './bombermanRender'
 import {
   isSoundMuted,
@@ -163,16 +169,26 @@ function onWindowBlur() {
   clearMovementInput()
 }
 
-function easeLinear(t: number) {
-  return t
+function easeOutQuad(t: number) {
+  return 1 - (1 - t) * (1 - t)
 }
 
 let rafId = 0
 let resizeObserver: ResizeObserver | null = null
 let tickReceivedAt = performance.now()
+let lastFrameTime = performance.now()
 let lastTick = -1
 let prevBombers: Record<string, BomberSnapshot> = {}
 let targetBombers: Record<string, BomberSnapshot> = {}
+let particles: Particle[] = []
+let shake = 0
+
+const POWERUP_COLORS: Record<string, string> = {
+  bomb: '#f97316',
+  range: '#38bdf8',
+  speed: '#a3e635',
+  throw: '#fbbf24',
+}
 
 /** Snapshot used to detect gameplay events for SFX. */
 let prevSoundSnap: {
@@ -183,7 +199,9 @@ let prevSoundSnap: {
   softCount: number
   alive: Record<string, boolean>
   countdownSec: number | null
-  myStats: { maxBombs: number; bombRange: number; speedLevel: number } | null
+  myStats: { maxBombs: number; bombRange: number; speedLevel: number; canThrow: boolean } | null
+  softCells: Set<string>
+  explosionKeys: Set<string>
 } | null = null
 let soundBootstrapped = false
 
@@ -197,10 +215,27 @@ function countSoftBlocks(grid: number[][]): number {
   return n
 }
 
+function softCellKeys(grid: number[][]): Set<string> {
+  const keys = new Set<string>()
+  for (let y = 0; y < grid.length; y++) {
+    const row = grid[y] ?? []
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] === 2) keys.add(`${x},${y}`)
+    }
+  }
+  return keys
+}
+
+function explosionKeys(state: BombermanGameState): Set<string> {
+  return new Set((state.explosions ?? []).map((e) => `${e.x},${e.y}`))
+}
+
 function playStateSounds(state: BombermanGameState) {
   const bombIds = new Set((state.bombs ?? []).map((b) => b.id))
   const explosionCount = (state.explosions ?? []).length
   const softCount = countSoftBlocks(state.grid)
+  const softCells = softCellKeys(state.grid)
+  const explKeys = explosionKeys(state)
   const alive: Record<string, boolean> = {}
   for (const [pid, b] of Object.entries(state.bombers)) {
     alive[pid] = Boolean(b.alive)
@@ -222,8 +257,15 @@ function playStateSounds(state: BombermanGameState) {
       alive: { ...alive },
       countdownSec,
       myStats: me
-        ? { maxBombs: me.max_bombs, bombRange: me.bomb_range, speedLevel: me.speed_level }
+        ? {
+            maxBombs: me.max_bombs,
+            bombRange: me.bomb_range,
+            speedLevel: me.speed_level,
+            canThrow: Boolean(me.can_throw),
+          }
         : null,
+      softCells,
+      explosionKeys: explKeys,
     }
     return
   }
@@ -246,17 +288,39 @@ function playStateSounds(state: BombermanGameState) {
     }
   }
 
-  // Explosions
+  // Bomb throw started (sliding flag flipped on)
+  for (const bomb of state.bombs ?? []) {
+    const prevBomb = prev.bombs.find((b) => b.id === bomb.id)
+    if (prevBomb && bomb.sliding && !prevBomb.sliding) {
+      playBombPlace()
+      break
+    }
+  }
+
+  // Explosions + particles / shake
+  const newBlasts: string[] = []
+  for (const key of explKeys) {
+    if (!prev.explosionKeys.has(key)) newBlasts.push(key)
+  }
   const bombsLost = prev.bombs.length - (state.bombs ?? []).length
-  if (bombsLost > 0 && explosionCount > 0) {
+  if (newBlasts.length > 0 || (bombsLost > 0 && explosionCount > 0)) {
     playExplosion()
-  } else if (explosionCount > prev.explosionCount) {
-    playExplosion()
+    shake = Math.min(1, shake + 0.55 + newBlasts.length * 0.08)
+    for (const key of newBlasts.length ? newBlasts : [...explKeys].slice(0, 6)) {
+      const [sx, sy] = key.split(',').map(Number)
+      particles.push(...spawnExplosionParticles(sx!, sy!, 10))
+    }
   }
 
   // Soft walls destroyed
   if (softCount < prev.softCount) {
     playSoftDestroy()
+    for (const key of prev.softCells) {
+      if (!softCells.has(key)) {
+        const [sx, sy] = key.split(',').map(Number)
+        particles.push(...spawnDebrisParticles(sx!, sy!, 7))
+      }
+    }
   }
 
   // Power-up pickup (detect via our bomber stats rising)
@@ -266,16 +330,33 @@ function playStateSounds(state: BombermanGameState) {
     prevMeStats &&
     (me.max_bombs > prevMeStats.maxBombs ||
       me.bomb_range > prevMeStats.bombRange ||
-      me.speed_level > prevMeStats.speedLevel)
+      me.speed_level > prevMeStats.speedLevel ||
+      (Boolean(me.can_throw) && !prevMeStats.canThrow))
   ) {
     playPowerup()
+    const kind =
+      me.max_bombs > prevMeStats.maxBombs
+        ? 'bomb'
+        : me.bomb_range > prevMeStats.bombRange
+          ? 'range'
+          : me.speed_level > prevMeStats.speedLevel
+            ? 'speed'
+            : 'throw'
+    particles.push(
+      ...spawnPowerupParticles(me.x, me.y, POWERUP_COLORS[kind] ?? '#fff'),
+    )
   }
 
   // Deaths
   for (const [pid, wasAlive] of Object.entries(prev.alive)) {
     if (wasAlive && alive[pid] === false) {
+      const dead = state.bombers[pid]
       if (pid === props.playerId) playDeath()
       else playSoftDestroy()
+      if (dead) {
+        particles.push(...spawnDeathParticles(dead.x, dead.y, dead.color))
+        shake = Math.min(1, shake + 0.35)
+      }
     }
   }
 
@@ -294,8 +375,15 @@ function playStateSounds(state: BombermanGameState) {
     alive: { ...alive },
     countdownSec,
     myStats: me
-      ? { maxBombs: me.max_bombs, bombRange: me.bomb_range, speedLevel: me.speed_level }
+      ? {
+          maxBombs: me.max_bombs,
+          bombRange: me.bomb_range,
+          speedLevel: me.speed_level,
+          canThrow: Boolean(me.can_throw),
+        }
       : null,
+    softCells,
+    explosionKeys: explKeys,
   }
 }
 
@@ -340,6 +428,11 @@ function paint(now: number) {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
+  const dt = Math.min(0.05, (now - lastFrameTime) / 1000)
+  lastFrameTime = now
+  particles = updateParticles(particles, dt)
+  shake = Math.max(0, shake - dt * 2.8)
+
   const displayW = wrap.clientWidth
   const displayH = wrap.clientHeight
   if (displayW <= 0 || displayH <= 0) return
@@ -361,7 +454,7 @@ function paint(now: number) {
     props.gameState.phase === 'playing'
       ? Math.min(1, (now - tickReceivedAt) / Math.max(16, tickMs))
       : 1
-  const t = easeLinear(rawT)
+  const t = easeOutQuad(rawT)
   const rendered = interpolateBombers(prevBombers, targetBombers, t)
 
   renderFrame(ctx, displayW, displayH, {
@@ -374,6 +467,8 @@ function paint(now: number) {
     powerups: props.gameState.powerups ?? [],
     playerId: props.playerId,
     time: now,
+    particles,
+    shake,
   })
 }
 
@@ -390,6 +485,7 @@ onMounted(() => {
     resizeObserver = new ResizeObserver(() => {})
     resizeObserver.observe(canvasWrapRef.value)
   }
+  lastFrameTime = performance.now()
   rafId = requestAnimationFrame(loop)
 })
 
@@ -405,15 +501,17 @@ onUnmounted(() => {
 <template>
   <div class="bomberman-board">
     <div ref="canvasWrapRef" class="canvas-wrap">
+      <div class="arena-glow" aria-hidden="true" />
       <canvas ref="canvasRef" class="game-canvas" />
 
       <div v-if="gameState.phase === 'countdown'" class="overlay countdown">
+        <span class="overlay-kicker">{{ gameState.map_name ?? 'Arena' }}</span>
         <span class="overlay-value pulse">{{ countdownRemaining ?? '…' }}</span>
         <span class="overlay-label">Get ready!</span>
       </div>
 
       <div v-else-if="isFinished" class="overlay finished">
-        <span class="overlay-label">{{ winReasonLabel ?? 'Game over' }}</span>
+        <span class="overlay-kicker">{{ winReasonLabel ?? 'Game over' }}</span>
         <span class="overlay-value win-pop">{{ winnerName }} wins!</span>
         <button v-if="isHost" type="button" class="btn-primary play-again-btn" @click="startNewGame">
           Play Again
@@ -422,30 +520,43 @@ onUnmounted(() => {
       </div>
 
       <div v-else-if="!isAlive" class="overlay eliminated">
+        <span class="overlay-kicker">Boom</span>
         <span class="overlay-label">You were eliminated</span>
         <span class="overlay-hint">Spectating the rest of the match…</span>
       </div>
     </div>
 
     <aside class="player-bar">
-      <ul class="player-scores">
-        <li
-          v-for="row in playerRows"
-          :key="row.id"
-          class="player-score-row"
-          :class="{ me: row.id === playerId, dead: !row.bomber?.alive }"
-        >
-          <span class="color-dot" :style="{ background: row.bomber?.color ?? '#666' }" />
-          <span class="name">{{ row.nickname }}</span>
-          <span class="stats" title="Bombs / Range / Speed">
-            💣{{ row.bomber?.max_bombs ?? 1 }}
-            · 🔥{{ row.bomber?.bomb_range ?? 1 }}
-            · ⚡{{ row.bomber?.speed_level ?? 0 }}
-          </span>
-          <span v-if="(row.bomber?.kills ?? 0) > 0" class="kills">×{{ row.bomber?.kills }}</span>
-          <span v-if="!row.bomber?.alive" class="status">out</span>
-        </li>
-      </ul>
+      <div class="bar-left">
+        <span v-if="gameState.map_name" class="map-chip" :title="gameState.map_id">
+          {{ gameState.map_name }}
+        </span>
+        <ul class="player-scores">
+          <li
+            v-for="row in playerRows"
+            :key="row.id"
+            class="player-score-row"
+            :class="{ me: row.id === playerId, dead: !row.bomber?.alive }"
+          >
+            <span
+              class="color-dot"
+              :style="{
+                background: row.bomber?.color ?? '#666',
+                boxShadow: row.id === playerId ? `0 0 10px ${row.bomber?.color ?? '#f97316'}` : undefined,
+              }"
+            />
+            <span class="name">{{ row.nickname }}</span>
+            <span class="stat-pills" title="Bombs / Range / Speed / Throw">
+              <span class="pill bomb">B{{ row.bomber?.max_bombs ?? 1 }}</span>
+              <span class="pill range">R{{ row.bomber?.bomb_range ?? 1 }}</span>
+              <span class="pill speed">S{{ row.bomber?.speed_level ?? 0 }}</span>
+              <span v-if="row.bomber?.can_throw" class="pill throw" title="Throw">T</span>
+            </span>
+            <span v-if="(row.bomber?.kills ?? 0) > 0" class="kills">×{{ row.bomber?.kills }}</span>
+            <span v-if="!row.bomber?.alive" class="status">out</span>
+          </li>
+        </ul>
+      </div>
 
       <div class="controls-hint">
         <button
@@ -458,8 +569,8 @@ onUnmounted(() => {
           {{ soundMuted ? '🔇' : '🔊' }}
         </button>
         <p v-if="canControl">
-          <strong>Controls:</strong> Hold arrows / WASD ·
-          <strong>Space</strong> bomb
+          <strong>Hold</strong> arrows / WASD ·
+          <strong>Space</strong> bomb<span v-if="myBomber?.can_throw"> / throw</span>
           <span class="muted">({{ myActiveBombs }}/{{ myBomber?.max_bombs ?? 1 }})</span>
         </p>
         <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">Spectating</p>
@@ -468,6 +579,7 @@ onUnmounted(() => {
           <li><span class="swatch bomb" />Bomb+</li>
           <li><span class="swatch range" />Range+</li>
           <li><span class="swatch speed" />Speed+</li>
+          <li><span class="swatch throw" />Throw</li>
         </ul>
       </div>
     </aside>
@@ -481,7 +593,7 @@ onUnmounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.55rem;
   padding: 0 0.5rem 0.5rem;
 }
 
@@ -491,17 +603,40 @@ onUnmounted(() => {
   min-height: 0;
   width: 100%;
   overflow: hidden;
-  border: 1px solid rgba(249, 115, 22, 0.28);
-  border-radius: var(--radius);
+  border: 1px solid rgba(249, 115, 22, 0.32);
+  border-radius: calc(var(--radius) + 2px);
   background:
-    radial-gradient(ellipse at 50% 20%, rgba(180, 70, 20, 0.25), transparent 55%),
-    #0c1218;
+    radial-gradient(ellipse at 50% 0%, rgba(255, 120, 40, 0.16), transparent 45%),
+    radial-gradient(ellipse at 80% 100%, rgba(40, 80, 140, 0.18), transparent 40%),
+    linear-gradient(180deg, #101820 0%, #0a0e14 100%);
   box-shadow:
-    inset 0 0 40px rgba(0, 0, 0, 0.4),
-    0 0 24px rgba(249, 115, 22, 0.08);
+    inset 0 0 60px rgba(0, 0, 0, 0.45),
+    0 0 32px rgba(249, 115, 22, 0.1);
+}
+
+.arena-glow {
+  pointer-events: none;
+  position: absolute;
+  inset: -20%;
+  background: radial-gradient(circle at 50% 40%, rgba(249, 115, 22, 0.08), transparent 55%);
+  animation: arena-breathe 5.5s ease-in-out infinite;
+}
+
+@keyframes arena-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
 }
 
 .game-canvas {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   height: 100%;
@@ -510,31 +645,52 @@ onUnmounted(() => {
 .overlay {
   position: absolute;
   inset: 0;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 10, 14, 0.72);
-  backdrop-filter: blur(4px);
-  gap: 0.5rem;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(40, 18, 8, 0.35), transparent 55%),
+    rgba(6, 8, 12, 0.72);
+  backdrop-filter: blur(6px);
+  gap: 0.4rem;
   padding: 1rem;
   text-align: center;
+  animation: overlay-in 0.35s ease-out;
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.overlay-kicker {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(249, 180, 120, 0.75);
 }
 
 .overlay-value {
   font-family: 'Outfit', 'DM Sans', system-ui, sans-serif;
-  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  font-size: clamp(2rem, 5vw, 3.25rem);
   font-weight: 800;
-  letter-spacing: -0.02em;
-  text-shadow: 0 0 28px rgba(249, 115, 22, 0.4);
+  letter-spacing: -0.03em;
+  text-shadow: 0 0 32px rgba(249, 115, 22, 0.5);
 }
 
 .overlay-value.pulse {
-  animation: count-pulse 1s ease-in-out infinite;
+  animation: count-pulse 1s cubic-bezier(0.34, 1.4, 0.64, 1) infinite;
 }
 
 .overlay-value.win-pop {
-  animation: win-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: win-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 @keyframes count-pulse {
@@ -543,13 +699,13 @@ onUnmounted(() => {
     transform: scale(1);
   }
   50% {
-    transform: scale(1.12);
+    transform: scale(1.14);
   }
 }
 
 @keyframes win-pop {
   0% {
-    transform: scale(0.6);
+    transform: scale(0.55);
     opacity: 0;
   }
   100% {
@@ -559,9 +715,9 @@ onUnmounted(() => {
 }
 
 .overlay-label {
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 600;
-  color: #f3d5b5;
+  color: #f6d7b8;
 }
 
 .overlay-hint {
@@ -570,7 +726,8 @@ onUnmounted(() => {
 }
 
 .play-again-btn {
-  margin-top: 0.5rem;
+  margin-top: 0.65rem;
+  animation: win-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s both;
 }
 
 .player-bar {
@@ -579,11 +736,35 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.65rem 1rem;
-  border: 1px solid rgba(249, 115, 22, 0.2);
-  border-radius: var(--radius);
-  background: linear-gradient(180deg, rgba(40, 28, 18, 0.95), rgba(18, 14, 12, 0.98));
+  padding: 0.7rem 1rem;
+  border: 1px solid rgba(249, 115, 22, 0.22);
+  border-radius: calc(var(--radius) + 2px);
+  background:
+    linear-gradient(135deg, rgba(60, 32, 16, 0.55), transparent 40%),
+    linear-gradient(180deg, rgba(28, 20, 14, 0.98), rgba(12, 10, 9, 0.99));
+  box-shadow: inset 0 1px 0 rgba(255, 180, 100, 0.06);
   flex-wrap: wrap;
+}
+
+.bar-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  min-width: 0;
+}
+
+.map-chip {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  color: #fdba74;
+  background: rgba(249, 115, 22, 0.14);
+  border: 1px solid rgba(249, 115, 22, 0.28);
 }
 
 .player-scores {
@@ -592,7 +773,7 @@ onUnmounted(() => {
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
+  gap: 0.45rem 0.85rem;
 }
 
 .player-score-row {
@@ -600,21 +781,30 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.4rem;
   font-size: 0.85rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  transition:
+    opacity 0.25s ease,
+    background 0.25s ease,
+    transform 0.2s ease;
 }
 
 .player-score-row.me {
   font-weight: 700;
+  background: rgba(249, 115, 22, 0.12);
 }
 
 .player-score-row.dead {
-  opacity: 0.45;
+  opacity: 0.4;
+  filter: grayscale(0.6);
 }
 
 .color-dot {
-  width: 0.65rem;
-  height: 0.65rem;
+  width: 0.7rem;
+  height: 0.7rem;
   border-radius: 50%;
   flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
 .name {
@@ -624,18 +814,51 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.stats {
-  font-size: 0.75rem;
-  color: var(--text-muted);
+.stat-pills {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.pill {
+  min-width: 1.15rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.pill.bomb {
+  background: rgba(249, 115, 22, 0.22);
+  color: #fdba74;
+}
+
+.pill.range {
+  background: rgba(56, 189, 248, 0.2);
+  color: #7dd3fc;
+}
+
+.pill.speed {
+  background: rgba(163, 230, 53, 0.18);
+  color: #bef264;
+}
+
+.pill.throw {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fcd34d;
 }
 
 .kills {
   font-size: 0.75rem;
-  color: #f97316;
+  font-weight: 700;
+  color: #fb923c;
 }
 
 .status {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -662,7 +885,7 @@ onUnmounted(() => {
 
 .power-legend {
   list-style: none;
-  margin: 0.35rem 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   gap: 0.75rem;
@@ -679,18 +902,27 @@ onUnmounted(() => {
   width: 0.7rem;
   height: 0.7rem;
   border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
 }
 
 .swatch.bomb {
   background: #f97316;
+  color: #f97316;
 }
 
 .swatch.range {
   background: #38bdf8;
+  color: #38bdf8;
 }
 
 .swatch.speed {
   background: #a3e635;
+  color: #a3e635;
+}
+
+.swatch.throw {
+  background: #fbbf24;
+  color: #fbbf24;
 }
 
 @media (max-width: 720px) {

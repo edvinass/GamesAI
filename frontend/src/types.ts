@@ -133,18 +133,20 @@ export interface SnakeGameState {
   viewer_id: string | null
 }
 
-export type BombermanPowerupType = 'bomb' | 'range' | 'speed'
+export type BombermanPowerupType = 'bomb' | 'range' | 'speed' | 'throw'
 
 export interface BombermanBomber {
   x: number
   y: number
   direction: string
   next_direction: string
+  facing?: string
   alive: boolean
   color: string
   max_bombs: number
   bomb_range: number
   speed_level: number
+  can_throw?: boolean
   move_credit?: number
   kills: number
   passable_bomb_ids?: string[]
@@ -157,6 +159,8 @@ export interface BombermanBomb {
   owner_id: string
   range: number
   fuse: number
+  sliding?: boolean
+  slide_dir?: string | null
 }
 
 export interface BombermanExplosion {
@@ -180,6 +184,8 @@ export interface BombermanGameState {
   grid_height: number
   /** 0 empty, 1 hard wall, 2 soft wall */
   grid: number[][]
+  map_id?: string
+  map_name?: string
   bombers: Record<string, BombermanBomber>
   bombs: BombermanBomb[]
   explosions: BombermanExplosion[]

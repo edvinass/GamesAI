@@ -7,6 +7,14 @@ from datetime import datetime, timedelta, timezone
 
 from app.games.base import GamePlugin
 from app.games.bomberman.ai import choose_ai_action
+from app.games.bomberman.maps import (
+    TILE_EMPTY,
+    TILE_HARD,
+    TILE_SOFT,
+    build_map_grid,
+    get_map,
+    list_maps,
+)
 
 DIRECTIONS = {
     "up": (0, -1),
@@ -14,10 +22,6 @@ DIRECTIONS = {
     "left": (-1, 0),
     "right": (1, 0),
 }
-
-TILE_EMPTY = 0
-TILE_HARD = 1
-TILE_SOFT = 2
 
 BOMBER_COLORS = [
     "#ef4444",
@@ -39,6 +43,8 @@ SPEED_BONUS = 0.28
 MAX_BOMBS_CAP = 8
 MAX_RANGE_CAP = 8
 MAX_SPEED_LEVEL = 5
+POWERUP_TYPES = ("bomb", "range", "speed", "throw")
+POWERUP_WEIGHTS = (30, 30, 25, 15)
 
 
 class BombermanEngine(GamePlugin):
@@ -48,6 +54,8 @@ class BombermanEngine(GamePlugin):
         return {
             "min_players": 2,
             "max_players": 8,
+            "map_id": "classic",
+            "available_maps": list_maps(),
             "grid_width": 15,
             "grid_height": 13,
             "tick_ms": 150,
@@ -63,9 +71,17 @@ class BombermanEngine(GamePlugin):
         merged["max_players"] = max(
             merged["min_players"], min(8, int(merged.get("max_players", 8)))
         )
-        # Odd sizes keep the classic pillar pattern centered.
-        w = max(11, min(21, int(merged.get("grid_width", 15))))
-        h = max(9, min(17, int(merged.get("grid_height", 13))))
+        map_id = str(merged.get("map_id", "classic"))
+        try:
+            meta = get_map(map_id)
+        except ValueError:
+            map_id = "classic"
+            meta = get_map(map_id)
+        merged["map_id"] = map_id
+        merged["available_maps"] = list_maps()
+        # Map owns arena size; keep odd dimensions for clean patterns.
+        w = int(meta["width"])
+        h = int(meta["height"])
         if w % 2 == 0:
             w += 1
         if h % 2 == 0:
@@ -75,7 +91,12 @@ class BombermanEngine(GamePlugin):
         merged["tick_ms"] = max(80, min(300, int(merged.get("tick_ms", 150))))
         merged["countdown_sec"] = max(1, min(10, int(merged.get("countdown_sec", 3))))
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
-        merged["soft_fill"] = max(0.2, min(0.85, float(merged.get("soft_fill", SOFT_FILL))))
+        default_fill = float(meta.get("soft_fill", SOFT_FILL))
+        # Allow host override, but default to the map's intended density.
+        if "soft_fill" in (settings or {}):
+            merged["soft_fill"] = max(0.2, min(0.85, float(merged.get("soft_fill", default_fill))))
+        else:
+            merged["soft_fill"] = default_fill
         return merged
 
     def tick_interval_ms(self) -> int:
@@ -96,82 +117,32 @@ class BombermanEngine(GamePlugin):
             return f"Maximum {settings['max_players']} players allowed"
         return None
 
-    def _spawn_points(self, width: int, height: int) -> list[tuple[int, int]]:
-        """Corner + mid-edge spawns on walkable cells (inside the border)."""
-        return [
-            (1, 1),
-            (width - 2, 1),
-            (1, height - 2),
-            (width - 2, height - 2),
-            (width // 2, 1),
-            (width // 2, height - 2),
-            (1, height // 2),
-            (width - 2, height // 2),
-        ]
-
-    def _clear_spawn_zone(self, grid: list[list[int]], sx: int, sy: int) -> None:
-        """Keep a small clear area so players aren't trapped at spawn."""
-        height = len(grid)
-        width = len(grid[0])
-        for dy in range(-1, 2):
-            for dx in range(-1, 2):
-                x, y = sx + dx, sy + dy
-                if 0 < x < width - 1 and 0 < y < height - 1:
-                    if grid[y][x] != TILE_HARD:
-                        grid[y][x] = TILE_EMPTY
-        # Guarantee spawn cell + one step toward center are empty.
-        grid[sy][sx] = TILE_EMPTY
-        cx, cy = width // 2, height // 2
-        step_x = 0 if sx == cx else (1 if sx < cx else -1)
-        step_y = 0 if sy == cy else (1 if sy < cy else -1)
-        if step_x and grid[sy][sx + step_x] != TILE_HARD:
-            grid[sy][sx + step_x] = TILE_EMPTY
-        if step_y and grid[sy + step_y][sx] != TILE_HARD:
-            grid[sy + step_y][sx] = TILE_EMPTY
-
-    def _build_grid(
-        self, width: int, height: int, soft_fill: float, spawns: list[tuple[int, int]]
-    ) -> list[list[int]]:
-        grid = [[TILE_EMPTY for _ in range(width)] for _ in range(height)]
-        for x in range(width):
-            grid[0][x] = TILE_HARD
-            grid[height - 1][x] = TILE_HARD
-        for y in range(height):
-            grid[y][0] = TILE_HARD
-            grid[y][width - 1] = TILE_HARD
-
-        for y in range(1, height - 1):
-            for x in range(1, width - 1):
-                if x % 2 == 0 and y % 2 == 0:
-                    grid[y][x] = TILE_HARD
-                elif random.random() < soft_fill:
-                    grid[y][x] = TILE_SOFT
-
-        for sx, sy in spawns:
-            self._clear_spawn_zone(grid, sx, sy)
-        return grid
-
     def create_initial_state(self, players: list[dict], settings: dict) -> dict:
         settings = self.validate_settings(settings)
-        width = settings["grid_width"]
-        height = settings["grid_height"]
-        spawn_pool = self._spawn_points(width, height)
+        grid, spawn_pool, map_meta = build_map_grid(
+            settings["map_id"], soft_fill=settings["soft_fill"]
+        )
+        width = len(grid[0])
+        height = len(grid)
         spawns = spawn_pool[: len(players)]
-        grid = self._build_grid(width, height, settings["soft_fill"], spawns)
 
         bombers: dict[str, dict] = {}
         for i, player in enumerate(players):
             sx, sy = spawns[i]
+            is_ai = bool(player.get("is_ai"))
             bombers[player["id"]] = {
                 "x": sx,
                 "y": sy,
                 "direction": "stop",
                 "next_direction": "stop",
+                "facing": "down",
                 "alive": True,
                 "color": BOMBER_COLORS[i % len(BOMBER_COLORS)],
-                "max_bombs": 1,
-                "bomb_range": 1,
-                "speed_level": 0,
+                # AI seats get a mild head start so they stay competitive.
+                "max_bombs": 2 if is_ai else 1,
+                "bomb_range": 2 if is_ai else 1,
+                "speed_level": 1 if is_ai else 0,
+                "can_throw": False,
                 "move_credit": 0.0,
                 "kills": 0,
                 "passable_bomb_ids": [],
@@ -190,6 +161,8 @@ class BombermanEngine(GamePlugin):
             "grid_width": width,
             "grid_height": height,
             "grid": grid,
+            "map_id": settings["map_id"],
+            "map_name": map_meta["name"],
             "bombers": bombers,
             "bombs": [],
             "explosions": [],
@@ -241,10 +214,15 @@ class BombermanEngine(GamePlugin):
         events: list[dict] = []
         if not bomber.get("alive"):
             return events
-        if self._active_bomb_count(state, player_id) >= int(bomber.get("max_bombs", 1)):
-            return events
+
         x, y = bomber["x"], bomber["y"]
-        if self._bomb_at(state, x, y) is not None:
+        bomb_here = self._bomb_at(state, x, y)
+        if bomb_here is not None:
+            if bomber.get("can_throw"):
+                return self._throw_bomb(state, player_id, bomber, bomb_here)
+            return events
+
+        if self._active_bomb_count(state, player_id) >= int(bomber.get("max_bombs", 1)):
             return events
 
         bomb = {
@@ -254,6 +232,8 @@ class BombermanEngine(GamePlugin):
             "owner_id": player_id,
             "range": int(bomber.get("bomb_range", 1)),
             "fuse": DEFAULT_FUSE,
+            "sliding": False,
+            "slide_dir": None,
         }
         state.setdefault("bombs", []).append(bomb)
         passable = list(bomber.get("passable_bomb_ids") or [])
@@ -270,6 +250,118 @@ class BombermanEngine(GamePlugin):
                 "y": y,
             }
         )
+        return events
+
+    def _throw_facing(self, bomber: dict) -> str:
+        for key in ("direction", "next_direction", "facing"):
+            value = bomber.get(key)
+            if value in DIRECTIONS:
+                return value
+        return "right"
+
+    def _slide_blocked(self, state: dict, x: int, y: int) -> bool:
+        width = state["grid_width"]
+        height = state["grid_height"]
+        if not (0 <= x < width and 0 <= y < height):
+            return True
+        if state["grid"][y][x] != TILE_EMPTY:
+            return True
+        if self._bomb_at(state, x, y) is not None:
+            return True
+        return False
+
+    def _grant_passable_on_cell(self, state: dict, bomb_id: str, x: int, y: int) -> None:
+        for bomber in state["bombers"].values():
+            if not bomber.get("alive"):
+                continue
+            if bomber["x"] == x and bomber["y"] == y:
+                passable = list(bomber.get("passable_bomb_ids") or [])
+                if bomb_id not in passable:
+                    passable.append(bomb_id)
+                bomber["passable_bomb_ids"] = passable
+
+    def _throw_bomb(
+        self, state: dict, player_id: str, bomber: dict, bomb: dict
+    ) -> list[dict]:
+        events: list[dict] = []
+        if bomb.get("sliding"):
+            return events
+
+        facing = self._throw_facing(bomber)
+        bomber["facing"] = facing
+        dx, dy = DIRECTIONS[facing]
+        nx, ny = bomb["x"] + dx, bomb["y"] + dy
+        if self._slide_blocked(state, nx, ny):
+            return events
+
+        bomb["sliding"] = True
+        bomb["slide_dir"] = facing
+        bomb["x"], bomb["y"] = nx, ny
+        self._grant_passable_on_cell(state, bomb["id"], nx, ny)
+
+        # Thrower is no longer standing on this bomb.
+        passable = [
+            bid
+            for bid in (bomber.get("passable_bomb_ids") or [])
+            if bid != bomb["id"]
+        ]
+        bomber["passable_bomb_ids"] = passable
+
+        state["last_action"] = {
+            "type": "bomb_thrown",
+            "player_id": player_id,
+            "bomb_id": bomb["id"],
+            "direction": facing,
+            "x": nx,
+            "y": ny,
+        }
+        events.append(
+            {
+                "type": "bomb_thrown",
+                "player_id": player_id,
+                "bomb_id": bomb["id"],
+                "direction": facing,
+                "x": nx,
+                "y": ny,
+            }
+        )
+        return events
+
+    def _tick_sliding_bombs(self, state: dict) -> list[dict]:
+        events: list[dict] = []
+        for bomb in state.get("bombs") or []:
+            if not bomb.get("sliding"):
+                continue
+            direction = bomb.get("slide_dir")
+            if direction not in DIRECTIONS:
+                bomb["sliding"] = False
+                bomb["slide_dir"] = None
+                continue
+            dx, dy = DIRECTIONS[direction]
+            nx, ny = bomb["x"] + dx, bomb["y"] + dy
+            if self._slide_blocked(state, nx, ny):
+                bomb["sliding"] = False
+                bomb["slide_dir"] = None
+                events.append(
+                    {
+                        "type": "bomb_stopped",
+                        "bomb_id": bomb["id"],
+                        "x": bomb["x"],
+                        "y": bomb["y"],
+                    }
+                )
+                continue
+            bomb["x"], bomb["y"] = nx, ny
+            self._grant_passable_on_cell(state, bomb["id"], nx, ny)
+            events.append(
+                {
+                    "type": "bomb_slid",
+                    "bomb_id": bomb["id"],
+                    "x": nx,
+                    "y": ny,
+                    "direction": direction,
+                }
+            )
         return events
 
     def apply_action(
@@ -297,6 +389,8 @@ class BombermanEngine(GamePlugin):
             return state, events
 
         bomber["next_direction"] = direction
+        if direction in DIRECTIONS:
+            bomber["facing"] = direction
         state["last_action"] = {
             "type": "set_direction",
             "player_id": player_id,
@@ -338,6 +432,8 @@ class BombermanEngine(GamePlugin):
             bomber["speed_level"] = min(
                 MAX_SPEED_LEVEL, int(bomber.get("speed_level", 0)) + 1
             )
+        elif ptype == "throw":
+            bomber["can_throw"] = True
         else:
             return events
 
@@ -412,6 +508,7 @@ class BombermanEngine(GamePlugin):
             bomber["direction"] = direction
             bomber["x"] = nx
             bomber["y"] = ny
+            bomber["facing"] = direction
             moved.add(pid)
             events.extend(self._pickup_powerup(state, bomber, nx, ny))
 
@@ -491,7 +588,7 @@ class BombermanEngine(GamePlugin):
         ]
         for x, y in destroyed_soft:
             if random.random() < POWERUP_CHANCE:
-                ptype = random.choice(["bomb", "range", "speed"])
+                ptype = random.choices(POWERUP_TYPES, weights=POWERUP_WEIGHTS, k=1)[0]
                 state.setdefault("powerups", []).append({"x": x, "y": y, "type": ptype})
                 events.append({"type": "powerup_spawned", "x": x, "y": y, "powerup_type": ptype})
 
@@ -564,6 +661,9 @@ class BombermanEngine(GamePlugin):
                         "by": None,
                     }
                 )
+
+        # Thrown bombs keep sliding until they hit a wall / soft / another bomb.
+        events.extend(self._tick_sliding_bombs(state))
 
         # Tick fuses
         to_detonate: set[str] = set()
@@ -700,6 +800,8 @@ class BombermanEngine(GamePlugin):
             "grid_width": state["grid_width"],
             "grid_height": state["grid_height"],
             "grid": state["grid"],
+            "map_id": state.get("map_id", settings.get("map_id", "classic")),
+            "map_name": state.get("map_name", "Classic"),
             "bombers": state["bombers"],
             "bombs": state.get("bombs") or [],
             "explosions": state.get("explosions") or [],

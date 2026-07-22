@@ -92,18 +92,29 @@ watch(lastMessage, (msg) => {
   }
 })
 
-// Refresh RoboRally map catalog for lobbies created before available_maps existed.
+// Refresh map catalogs for lobbies created before available_maps existed.
 watch(
   () => [room.value, connected.value] as const,
   ([r, isConnected]) => {
-    if (!isConnected || !r || r.game_type !== 'roborally' || r.status !== 'lobby') return
+    if (!isConnected || !r || r.status !== 'lobby') return
     if (r.host_player_id !== playerStore.playerId) return
-    const maps = r.settings?.available_maps
-    if (Array.isArray(maps) && maps.length > 0) return
-    send({
-      type: 'update_settings',
-      settings: { map_id: String(r.settings?.map_id ?? 'factory_floor') },
-    })
+    if (r.game_type === 'roborally') {
+      const maps = r.settings?.available_maps
+      if (Array.isArray(maps) && maps.length > 0) return
+      send({
+        type: 'update_settings',
+        settings: { map_id: String(r.settings?.map_id ?? 'factory_floor') },
+      })
+      return
+    }
+    if (r.game_type === 'bomberman') {
+      const maps = r.settings?.available_maps
+      if (Array.isArray(maps) && maps.length > 0) return
+      send({
+        type: 'update_settings',
+        settings: { map_id: String(r.settings?.map_id ?? 'classic') },
+      })
+    }
   },
 )
 
@@ -207,7 +218,11 @@ const aiDifficulty = computed({
 })
 
 const mapId = computed({
-  get: () => String(room.value?.settings?.map_id ?? 'factory_floor'),
+  get: () =>
+    String(
+      room.value?.settings?.map_id ??
+        (room.value?.game_type === 'bomberman' ? 'classic' : 'factory_floor'),
+    ),
   set: (val: string) => updateSettings({ map_id: val }),
 })
 
@@ -386,6 +401,7 @@ function startGame() {
         v-else-if="isBomberman"
         v-model:solo-practice="soloPractice"
         v-model:tick-ms="tickMs"
+        v-model:map-id="mapId"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

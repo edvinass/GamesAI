@@ -249,5 +249,71 @@ def test_powerup_pickup(engine: BombermanEngine, state: dict) -> None:
     assert any(e["type"] == "powerup_taken" for e in events)
 
 
+def test_throw_powerup_pickup_and_throw(engine: BombermanEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    bomber = state["bombers"][pid]
+    other = state["players"][1]["id"]
+    # Keep both alive so the match does not end mid-test.
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["next_direction"] = "stop"
+
+    for y in range(1, 4):
+        for x in range(1, 8):
+            if state["grid"][y][x] != TILE_HARD:
+                state["grid"][y][x] = TILE_EMPTY
+
+    bomber["x"], bomber["y"] = 1, 1
+    bomber["next_direction"] = "right"
+    bomber["facing"] = "right"
+    bomber["move_credit"] = 0.0
+    bomber["can_throw"] = False
+    state["powerups"] = [{"x": 2, "y": 1, "type": "throw"}]
+    state["bombs"] = []
+    state["explosions"] = []
+
+    state, events = engine.tick(state)
+    assert state["phase"] == "playing"
+    assert state["bombers"][pid]["x"] == 2
+    assert state["bombers"][pid]["can_throw"] is True
+    assert any(e["type"] == "powerup_taken" and e.get("powerup_type") == "throw" for e in events)
+
+    # Plant, then throw while standing on it
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert any(e["type"] == "bomb_placed" for e in events)
+    bomb = state["bombs"][0]
+    assert bomb["x"] == 2 and bomb["y"] == 1
+
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert any(e["type"] == "bomb_thrown" for e in events)
+    assert bomb["sliding"] is True
+    assert bomb["slide_dir"] == "right"
+    assert bomb["x"] == 3 and bomb["y"] == 1
+
+    # Continues sliding each tick until blocked
+    state, _ = engine.tick(state)
+    assert bomb["x"] == 4 and bomb["y"] == 1
+    assert bomb["sliding"] is True
+
+
+def test_throw_blocked_without_powerup(engine: BombermanEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    bomber = state["bombers"][pid]
+    other = state["players"][1]["id"]
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    bomber["can_throw"] = False
+    bomber["x"], bomber["y"] = 1, 1
+    for x in range(1, 4):
+        if state["grid"][1][x] != TILE_HARD:
+            state["grid"][1][x] = TILE_EMPTY
+
+    state, _ = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert len(state["bombs"]) == 1
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert not any(e["type"] == "bomb_thrown" for e in events)
+    assert state["bombs"][0]["x"] == bomber["x"]
+
+
 def test_tick_interval(engine: BombermanEngine) -> None:
     assert engine.tick_interval_ms() == 150

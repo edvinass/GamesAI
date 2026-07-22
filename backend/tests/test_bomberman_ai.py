@@ -126,6 +126,61 @@ def test_ai_does_not_bomb_without_escape() -> None:
         assert place is False
 
 
+def test_ai_bombs_when_enemy_in_range_with_escape() -> None:
+    state = _empty_corridor_state()
+    bomber = state["bombers"]["ai"]
+    human = state["bombers"]["human"]
+    for y in range(1, 6):
+        for x in range(1, 8):
+            if state["grid"][y][x] != TILE_HARD:
+                state["grid"][y][x] = TILE_EMPTY
+    # Open pocket with side escape
+    bomber["x"], bomber["y"] = 2, 2
+    bomber["bomb_range"] = 2
+    bomber["max_bombs"] = 1
+    human["x"], human["y"] = 4, 2
+    human["alive"] = True
+    state["grid"][2][3] = TILE_EMPTY
+    state["grid"][2][4] = TILE_EMPTY
+    state["grid"][3][2] = TILE_EMPTY  # escape south
+    state["grid"][4][2] = TILE_EMPTY
+
+    placed = 0
+    for _ in range(30):
+        _direction, place = choose_ai_action(state, "ai", bomber)
+        if place:
+            placed += 1
+    assert placed >= 10  # should bomb aggressively when escape exists
+
+
+def test_ai_starts_with_stat_boost() -> None:
+    engine = BombermanEngine()
+    players = [
+        {
+            "id": "h",
+            "nickname": "H",
+            "team": None,
+            "role": None,
+            "is_ai": False,
+            "is_connected": True,
+        },
+        {
+            "id": "a",
+            "nickname": "A",
+            "team": None,
+            "role": None,
+            "is_ai": True,
+            "is_connected": True,
+        },
+    ]
+    state = engine.create_initial_state(players, {})
+    assert state["bombers"]["h"]["bomb_range"] == 1
+    assert state["bombers"]["h"]["max_bombs"] == 1
+    assert state["bombers"]["a"]["bomb_range"] == 2
+    assert state["bombers"]["a"]["max_bombs"] == 2
+    assert state["bombers"]["a"]["speed_level"] == 1
+
+
 def test_danger_times_marks_blast_lane() -> None:
     state = _empty_corridor_state()
     for y in range(1, 4):
