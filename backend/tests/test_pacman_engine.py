@@ -45,10 +45,8 @@ def test_lobby_validation(engine: PacmanEngine) -> None:
     assert engine.validate_lobby(make_players(2), {"solo_practice": True}) is not None
     assert engine.validate_lobby(make_players(1), {"single_player": True}) is None
     assert engine.validate_lobby(make_players(2), {"single_player": True}) is not None
-    assert (
-        engine.validate_lobby(make_players(2, ai_from=1), {"single_player": True})
-        is not None
-    )
+    # Leftover AI is allowed in lobby validation — removed when enabling mode / on start.
+    assert engine.validate_lobby(make_players(2, ai_from=1), {"single_player": True}) is None
 
 
 def test_single_player_settings_disable_solo_practice(engine: PacmanEngine) -> None:
@@ -349,7 +347,7 @@ def test_countdown_starts_game(engine: PacmanEngine) -> None:
 
 
 def test_tick_interval(engine: PacmanEngine) -> None:
-    assert engine.tick_interval_ms() == 90
+    assert engine.tick_interval_ms() == 120
 
 
 def test_public_state_hides_private_fields(engine: PacmanEngine, state: dict) -> None:

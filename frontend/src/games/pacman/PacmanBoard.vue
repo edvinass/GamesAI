@@ -281,7 +281,7 @@ function paint(now: number) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
   const tickMs =
-    props.gameState.tick_ms ?? Number(props.room.settings?.tick_ms ?? 90)
+    props.gameState.tick_ms ?? Number(props.room.settings?.tick_ms ?? 120)
   const rawT =
     props.gameState.phase === 'playing'
       ? (now - tickReceivedAt) / Math.max(16, tickMs)

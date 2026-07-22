@@ -247,6 +247,16 @@ class RoomService:
 
         game = get_game(room.game_type)
         room.settings = game.validate_settings({**room.settings, **settings})
+        # Single-player modes strip seat AI immediately so the lobby stays valid.
+        if room.settings.get("single_player") and room.game_type in (
+            "tetris",
+            "pacman",
+            "gravity_master",
+        ):
+            for p in list(room.players):
+                if p.is_ai:
+                    await self.db.delete(p)
+            await self.db.flush()
         await self.db.commit()
         await self.db.refresh(room, ["players"])
         return room
@@ -271,6 +281,12 @@ class RoomService:
 
         if room.game_type == "spyfall" and bool((room.settings or {}).get("same_room")):
             raise ValueError("Same-room Spyfall does not allow AI players")
+
+        if bool((room.settings or {}).get("single_player")) and room.game_type in (
+            "tetris",
+            "pacman",
+        ):
+            raise ValueError("Single player mode does not allow AI players")
 
         if room.game_type in _NO_TEAM_LOBBY_GAMES:
             settings = get_game(room.game_type).validate_settings(room.settings)

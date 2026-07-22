@@ -35,11 +35,11 @@ const emit = defineEmits<{
 type GameMode = 'multiplayer' | 'solo_practice' | 'single_player'
 
 const speedOptions = [
-  { label: 'Blitz', value: 70 },
-  { label: 'Fast', value: 80 },
-  { label: 'Normal', value: 90 },
-  { label: 'Slow', value: 120 },
-  { label: 'Relaxed', value: 160 },
+  { label: 'Blitz', value: 80 },
+  { label: 'Fast', value: 90 },
+  { label: 'Normal', value: 120 },
+  { label: 'Slow', value: 160 },
+  { label: 'Relaxed', value: 200 },
 ]
 
 const livesOptions = [1, 2, 3, 4, 5]

@@ -51,7 +51,7 @@ class PacmanEngine(GamePlugin):
             "max_players": 4,
             "map_id": "classic",
             "available_maps": list_maps(),
-            "tick_ms": 90,
+            "tick_ms": 120,
             "countdown_sec": 3,
             "lives": 3,
             "solo_practice": False,
@@ -75,7 +75,7 @@ class PacmanEngine(GamePlugin):
         merged["available_maps"] = list_maps()
         merged["grid_width"] = int(meta["width"])
         merged["grid_height"] = int(meta["height"])
-        merged["tick_ms"] = max(70, min(250, int(merged.get("tick_ms", 90))))
+        merged["tick_ms"] = max(80, min(250, int(merged.get("tick_ms", 120))))
         merged["countdown_sec"] = max(1, min(10, int(merged.get("countdown_sec", 3))))
         merged["lives"] = max(1, min(5, int(merged.get("lives", 3))))
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
@@ -85,7 +85,7 @@ class PacmanEngine(GamePlugin):
         return merged
 
     def tick_interval_ms(self) -> int:
-        return 90
+        return 120
 
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
         settings = self.validate_settings(settings)
@@ -93,8 +93,7 @@ class PacmanEngine(GamePlugin):
             humans = [p for p in players if not p.get("is_ai")]
             if len(humans) != 1:
                 return "Single player requires exactly one human player"
-            if any(p.get("is_ai") for p in players):
-                return "Remove AI players for single player mode"
+            # Any leftover AI seats are stripped on start / when enabling the mode.
             return None
 
         if settings.get("solo_practice"):

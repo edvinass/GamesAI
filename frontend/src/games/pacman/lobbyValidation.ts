@@ -16,9 +16,6 @@ export function validateLobby(room: Room): LobbyValidation {
     if (humans.length !== 1) {
       issues.push('Single player requires exactly one human player')
     }
-    if (room.players.some((p) => p.is_ai)) {
-      issues.push('Remove AI players for single player mode')
-    }
     return {
       valid: issues.length === 0,
       message: issues[0] ?? 'Ready for single player — clear the maze or chase a high score',
