@@ -287,7 +287,7 @@ def test_countdown_starts_game(engine: PacmanEngine) -> None:
 
 
 def test_tick_interval(engine: PacmanEngine) -> None:
-    assert engine.tick_interval_ms() == 110
+    assert engine.tick_interval_ms() == 90
 
 
 def test_public_state_hides_private_fields(engine: PacmanEngine, state: dict) -> None:

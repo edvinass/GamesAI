@@ -19,12 +19,12 @@ from app.games.pacman.maps import (
     wrap_through_tunnel,
 )
 
-PAC_COLORS = ["#facc15", "#38bdf8", "#f472b6", "#a3e635"]
+PAC_COLORS = ["#ffff00", "#00ffff", "#ffb8ff", "#ffb852"]
 GHOST_DEFS = [
-    {"id": "blinky", "name": "blinky", "color": "#ef4444"},
-    {"id": "pinky", "name": "pinky", "color": "#f9a8d4"},
-    {"id": "inky", "name": "inky", "color": "#22d3ee"},
-    {"id": "clyde", "name": "clyde", "color": "#fb923c"},
+    {"id": "blinky", "name": "blinky", "color": "#ff0000"},
+    {"id": "pinky", "name": "pinky", "color": "#ffb8ff"},
+    {"id": "inky", "name": "inky", "color": "#00ffff"},
+    {"id": "clyde", "name": "clyde", "color": "#ffb852"},
 ]
 
 PELLET_SCORE = 10
@@ -35,9 +35,9 @@ POWERED_TICKS = 45
 SCATTER_DURATION = 60
 CHASE_DURATION = 180
 BASE_MOVE_RATE = 1.0
-GHOST_MOVE_RATE = 0.95
-FRIGHTENED_GHOST_RATE = 0.55
-EATEN_GHOST_RATE = 1.6
+GHOST_MOVE_RATE = 0.92
+FRIGHTENED_GHOST_RATE = 0.5
+EATEN_GHOST_RATE = 1.7
 RESPAWN_TICKS = 12
 INVULN_TICKS = 8
 
@@ -51,7 +51,7 @@ class PacmanEngine(GamePlugin):
             "max_players": 4,
             "map_id": "classic",
             "available_maps": list_maps(),
-            "tick_ms": 110,
+            "tick_ms": 90,
             "countdown_sec": 3,
             "lives": 3,
             "solo_practice": False,
@@ -74,14 +74,14 @@ class PacmanEngine(GamePlugin):
         merged["available_maps"] = list_maps()
         merged["grid_width"] = int(meta["width"])
         merged["grid_height"] = int(meta["height"])
-        merged["tick_ms"] = max(80, min(250, int(merged.get("tick_ms", 110))))
+        merged["tick_ms"] = max(70, min(250, int(merged.get("tick_ms", 90))))
         merged["countdown_sec"] = max(1, min(10, int(merged.get("countdown_sec", 3))))
         merged["lives"] = max(1, min(5, int(merged.get("lives", 3))))
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
         return merged
 
     def tick_interval_ms(self) -> int:
-        return 110
+        return 90
 
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
         settings = self.validate_settings(settings)

@@ -191,7 +191,7 @@ const tickMs = computed({
           : room.value?.game_type === 'snake'
             ? 130
             : room.value?.game_type === 'pacman'
-              ? 110
+              ? 90
               : room.value?.game_type === 'bomberman'
                 ? 150
                 : 150),

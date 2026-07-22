@@ -2,23 +2,28 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { PacmanGameState, Room } from '@/types'
 import {
+  lerpEntities,
+  lerpGhostList,
   renderFrame,
-  smoothEntities,
-  smoothGhostList,
   snapshotEntities,
   spawnChompParticles,
   updateParticles,
+  type EntitySnapshot,
   type Particle,
   type SmoothEntity,
 } from './pacmanRender'
 import {
   isSoundMuted,
+  playCountdownGo,
+  playCountdownTick,
   playDeath,
   playGhostEat,
   playLose,
+  playPacEat,
   playPellet,
   playPower,
   playWin,
+  setSirenMode,
   setSoundMuted,
   unlockAudio,
 } from './sounds'
@@ -79,7 +84,10 @@ function toggleSoundMute() {
   const next = !soundMuted.value
   setSoundMuted(next)
   soundMuted.value = next
-  if (!next) void unlockAudio()
+  if (!next) {
+    void unlockAudio()
+    syncSiren()
+  }
 }
 
 const codeToDirection: Record<string, string> = {
@@ -142,34 +150,70 @@ let rafId = 0
 let resizeObserver: ResizeObserver | null = null
 let lastFrameTime = performance.now()
 let lastTick = -1
-let smoothPac: Record<string, SmoothEntity> = {}
-let smoothGhosts: SmoothEntity[] = []
+let tickReceivedAt = performance.now()
+let prevPac: Record<string, EntitySnapshot> = {}
+let targetPac: Record<string, EntitySnapshot> = {}
+let prevGhosts: EntitySnapshot[] = []
+let targetGhosts: EntitySnapshot[] = []
 let particles: Particle[] = []
 let lastPelletCount = -1
 let lastScores: Record<string, number> = {}
 let lastLives: Record<string, number> = {}
-let lastGhostEaten = 0
 let finishedSoundPlayed = false
+let lastCountdownSec: number | null = null
+let wasCountdown = false
+
+function syncSiren() {
+  const gs = props.gameState
+  if (soundMuted.value || gs.phase !== 'playing') {
+    setSirenMode('off')
+    return
+  }
+  const fright = (gs.ghosts ?? []).some(
+    (g) => !g.eaten && ((g.frightened_ticks ?? 0) > 0 || g.mode === 'frightened'),
+  )
+  setSirenMode(fright ? 'fright' : 'normal')
+}
 
 function onStateSync() {
   const gs = props.gameState
   const snap = snapshotEntities(gs.pacmen, gs.ghosts)
-  if (gs.tick !== lastTick || !Object.keys(smoothPac).length) {
-    smoothPac = smoothEntities(smoothPac, snap.pacmen, 1, 40)
-    smoothGhosts = smoothGhostList(smoothGhosts, snap.ghosts, 1, 40)
+
+  if (gs.tick !== lastTick) {
+    // Use last rendered targets as origin so motion never snaps backward.
+    prevPac = Object.keys(targetPac).length ? { ...targetPac } : snap.pacmen
+    prevGhosts = targetGhosts.length ? targetGhosts.map((g) => ({ ...g })) : snap.ghosts
+    targetPac = snap.pacmen
+    targetGhosts = snap.ghosts
     lastTick = gs.tick
+    tickReceivedAt = performance.now()
+  } else {
+    targetPac = snap.pacmen
+    targetGhosts = snap.ghosts
+    if (!Object.keys(prevPac).length) prevPac = snap.pacmen
+    if (!prevGhosts.length) prevGhosts = snap.ghosts
+  }
+
+  // Countdown SFX
+  if (gs.phase === 'countdown') {
+    wasCountdown = true
+    const sec = countdownRemaining.value
+    if (sec != null && sec !== lastCountdownSec) {
+      lastCountdownSec = sec
+      if (sec > 0) playCountdownTick()
+    }
+  } else if (wasCountdown && gs.phase === 'playing') {
+    wasCountdown = false
+    playCountdownGo()
   }
 
   const remaining = gs.pellets_remaining ?? 0
   if (lastPelletCount >= 0 && remaining < lastPelletCount) {
     const me = gs.pacmen[props.playerId]
-    if (me && (me.powered_ticks ?? 0) > 0 && remaining === lastPelletCount - 1) {
-      /* power vs pellet distinguished below via score jumps */
-    }
     const scoreDelta = (me?.score ?? 0) - (lastScores[props.playerId] ?? me?.score ?? 0)
     if (scoreDelta >= 50) {
       playPower()
-      if (me) particles.push(...spawnChompParticles(me.x, me.y, '#fde047'))
+      if (me) particles.push(...spawnChompParticles(me.x, me.y, '#ffb897'))
     } else if (scoreDelta > 0) {
       playPellet()
     }
@@ -179,14 +223,18 @@ function onStateSync() {
   for (const [pid, pac] of Object.entries(gs.pacmen)) {
     const prevScore = lastScores[pid] ?? pac.score
     const delta = pac.score - prevScore
-    if (delta >= 200 && pid === props.playerId) {
-      playGhostEat()
-      lastGhostEaten = gs.tick
-      particles.push(...spawnChompParticles(pac.x, pac.y, '#94a3b8'))
+    if (pid === props.playerId) {
+      if (delta >= 500) {
+        playPacEat()
+        particles.push(...spawnChompParticles(pac.x, pac.y, '#f472b6'))
+      } else if (delta >= 200) {
+        playGhostEat()
+        particles.push(...spawnChompParticles(pac.x, pac.y, '#94a3b8'))
+      }
     }
     const prevLives = lastLives[pid]
-    if (prevLives !== undefined && pac.lives < prevLives) {
-      if (pid === props.playerId) playDeath()
+    if (prevLives !== undefined && pac.lives < prevLives && pid === props.playerId) {
+      playDeath()
     }
     lastScores[pid] = pac.score
     lastLives[pid] = pac.lives
@@ -194,12 +242,13 @@ function onStateSync() {
 
   if (gs.phase === 'finished' && !finishedSoundPlayed) {
     finishedSoundPlayed = true
+    setSirenMode('off')
     if (gs.winner === props.playerId) playWin()
     else playLose()
   }
   if (gs.phase !== 'finished') finishedSoundPlayed = false
 
-  void lastGhostEaten
+  syncSiren()
 }
 
 watch(() => props.gameState, onStateSync, { deep: true, immediate: true })
@@ -230,12 +279,24 @@ function paint(now: number) {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const snap = snapshotEntities(props.gameState.pacmen, props.gameState.ghosts)
-  smoothPac = smoothEntities(smoothPac, snap.pacmen, dt)
-  smoothGhosts = smoothGhostList(smoothGhosts, snap.ghosts, dt)
+  const tickMs =
+    props.gameState.tick_ms ?? Number(props.room.settings?.tick_ms ?? 90)
+  const rawT =
+    props.gameState.phase === 'playing'
+      ? (now - tickReceivedAt) / Math.max(16, tickMs)
+      : 1
+
+  const gridW = props.gameState.grid_width
+  const smoothPac: Record<string, SmoothEntity> = lerpEntities(
+    prevPac,
+    targetPac,
+    rawT,
+    gridW,
+  )
+  const smoothGhosts = lerpGhostList(prevGhosts, targetGhosts, rawT, gridW)
 
   renderFrame(ctx, displayW, displayH, {
-    gridW: props.gameState.grid_width,
+    gridW,
     gridH: props.gameState.grid_height,
     grid: props.gameState.grid,
     pellets: props.gameState.pellets,
@@ -246,6 +307,7 @@ function paint(now: number) {
     time: now,
     particles,
     mode: props.gameState.mode,
+    gate: props.gameState.gate,
   })
 }
 
@@ -272,6 +334,7 @@ onUnmounted(() => {
   window.removeEventListener('keyup', onKeyUp)
   resizeObserver?.disconnect()
   cancelAnimationFrame(rafId)
+  setSirenMode('off')
 })
 </script>
 
@@ -286,7 +349,7 @@ onUnmounted(() => {
 
       <div v-if="gameState.phase === 'countdown'" class="overlay countdown">
         <span class="overlay-value pulse">{{ countdownRemaining ?? '…' }}</span>
-        <span class="overlay-label">Get ready!</span>
+        <span class="overlay-label">READY!</span>
       </div>
 
       <div v-else-if="isFinished" class="overlay finished">
@@ -299,15 +362,12 @@ onUnmounted(() => {
       </div>
 
       <div v-else-if="!isAlive" class="overlay eliminated">
-        <span class="overlay-label">Out of lives</span>
+        <span class="overlay-label">GAME OVER</span>
         <span class="overlay-hint">Spectating the maze…</span>
       </div>
 
-      <div
-        v-else-if="(myPac?.respawn_ticks ?? 0) > 0"
-        class="overlay respawn"
-      >
-        <span class="overlay-label">Respawning…</span>
+      <div v-else-if="(myPac?.respawn_ticks ?? 0) > 0" class="overlay respawn">
+        <span class="overlay-label">READY!</span>
       </div>
     </div>
 
@@ -321,8 +381,10 @@ onUnmounted(() => {
         >
           <span class="color-dot" :style="{ background: row.pac?.color ?? '#666' }" />
           <span class="name">{{ row.nickname }}</span>
-          <span class="score">{{ row.pac?.score ?? 0 }}</span>
-          <span class="lives" title="Lives">♥{{ row.pac?.lives ?? 0 }}</span>
+          <span class="score">{{ String(row.pac?.score ?? 0).padStart(4, '0') }}</span>
+          <span class="lives" title="Lives">
+            <span v-for="n in row.pac?.lives ?? 0" :key="n" class="life-icon">ᗧ</span>
+          </span>
           <span v-if="(row.pac?.powered_ticks ?? 0) > 0" class="powered">PWR</span>
           <span v-if="!row.pac?.alive" class="status">out</span>
         </li>
@@ -330,13 +392,13 @@ onUnmounted(() => {
 
       <div class="controls-hint">
         <p v-if="canControl">
-          <strong>Controls:</strong> Arrow keys / WASD · pellets left
-          {{ gameState.pellets_remaining ?? 0 }}
+          <strong>↑↓←→ / WASD</strong>
+          · {{ gameState.pellets_remaining ?? 0 }} dots
         </p>
         <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">Spectating</p>
-        <p v-else class="muted">Waiting to start…</p>
+        <p v-else class="muted">Waiting…</p>
         <p class="mode-line muted">
-          Mode: {{ gameState.mode ?? '—' }}
+          {{ (gameState.mode ?? 'chase').toUpperCase() }}
           <span v-if="gameState.map_name"> · {{ gameState.map_name }}</span>
         </p>
       </div>
@@ -353,6 +415,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0 0.5rem 0.5rem;
+  font-family: 'Outfit', 'DM Sans', system-ui, sans-serif;
 }
 
 .canvas-wrap {
@@ -361,14 +424,10 @@ onUnmounted(() => {
   min-height: 0;
   width: 100%;
   overflow: hidden;
-  border: 1px solid rgba(96, 165, 250, 0.28);
-  border-radius: var(--radius);
-  background:
-    radial-gradient(ellipse at 50% 30%, rgba(30, 64, 175, 0.35), transparent 55%),
-    #050914;
-  box-shadow:
-    inset 0 0 40px rgba(0, 0, 0, 0.35),
-    0 0 24px rgba(37, 99, 235, 0.12);
+  border: 2px solid #2121de;
+  border-radius: 4px;
+  background: #000;
+  box-shadow: 0 0 0 1px #3b5bff, inset 0 0 40px rgba(0, 0, 0, 0.8);
 }
 
 .game-canvas {
@@ -379,15 +438,16 @@ onUnmounted(() => {
 
 .mute-btn {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: 0.45rem;
+  right: 0.45rem;
   z-index: 2;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  background: rgba(15, 23, 42, 0.75);
-  color: #e2e8f0;
-  border-radius: 8px;
+  border: 1px solid #2121de;
+  background: rgba(0, 0, 0, 0.75);
+  color: #ffb897;
+  border-radius: 4px;
   padding: 0.25rem 0.45rem;
   cursor: pointer;
+  font-size: 0.85rem;
 }
 
 .overlay {
@@ -397,52 +457,54 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(5, 9, 20, 0.72);
-  backdrop-filter: blur(4px);
-  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.72);
+  gap: 0.55rem;
   padding: 1rem;
   text-align: center;
 }
 
 .overlay.respawn {
-  background: rgba(5, 9, 20, 0.35);
+  background: rgba(0, 0, 0, 0.28);
 }
 
 .overlay-value {
-  font-family: 'Outfit', 'DM Sans', system-ui, sans-serif;
-  font-size: clamp(1.75rem, 4vw, 2.75rem);
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  text-shadow: 0 0 28px rgba(250, 204, 21, 0.35);
+  font-size: clamp(1.4rem, 3.5vw, 2.4rem);
+  font-weight: 700;
+  color: #ffff00;
+  text-shadow: 0 0 20px rgba(255, 255, 0, 0.35);
+  letter-spacing: 0.04em;
 }
 
 .overlay-value.pulse {
-  animation: count-pulse 1s ease-in-out infinite;
+  animation: count-pulse 1s steps(2, end) infinite;
 }
 
 @keyframes count-pulse {
   0%,
   100% {
-    transform: scale(1);
+    opacity: 1;
   }
   50% {
-    transform: scale(1.12);
+    opacity: 0.55;
   }
 }
 
 .overlay-label {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #c7d2fe;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #ffb8ff;
+  letter-spacing: 0.08em;
 }
 
 .overlay-hint {
-  font-size: 0.9rem;
-  color: var(--text-muted);
+  font-size: 0.65rem;
+  color: #ffb897;
+  font-family: 'DM Sans', system-ui, sans-serif;
 }
 
 .play-again-btn {
   margin-top: 0.5rem;
+  font-family: 'DM Sans', system-ui, sans-serif;
 }
 
 .player-bar {
@@ -451,10 +513,10 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.65rem 1rem;
-  border: 1px solid rgba(96, 165, 250, 0.22);
-  border-radius: var(--radius);
-  background: linear-gradient(180deg, rgba(15, 23, 48, 0.95), rgba(8, 12, 28, 0.98));
+  padding: 0.7rem 1rem;
+  border: 2px solid #2121de;
+  border-radius: 4px;
+  background: #000;
 }
 
 .player-scores {
@@ -463,7 +525,8 @@ onUnmounted(() => {
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem 1rem;
+  gap: 0.7rem 1.1rem;
+  font-family: 'DM Sans', system-ui, sans-serif;
 }
 
 .player-score-row {
@@ -471,14 +534,16 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.85rem;
+  color: #ffb897;
 }
 
 .player-score-row.me {
   font-weight: 700;
+  color: #ffff00;
 }
 
 .player-score-row.dead {
-  opacity: 0.45;
+  opacity: 0.4;
 }
 
 .color-dot {
@@ -489,33 +554,43 @@ onUnmounted(() => {
 
 .score {
   font-variant-numeric: tabular-nums;
-  color: #fde047;
+  color: #ffffff;
+  min-width: 2.8rem;
 }
 
 .lives {
-  color: #f87171;
-  font-size: 0.8rem;
+  display: inline-flex;
+  gap: 0.1rem;
+  color: #ffff00;
+  font-size: 0.85rem;
+  letter-spacing: -0.05em;
+}
+
+.life-icon {
+  display: inline-block;
+  transform: scaleX(-1);
 }
 
 .powered {
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   font-weight: 800;
-  color: #fef08a;
-  background: rgba(250, 204, 21, 0.15);
+  color: #2121de;
+  background: #ffb8ff;
   padding: 0.05rem 0.3rem;
-  border-radius: 4px;
+  border-radius: 2px;
 }
 
 .status {
-  font-size: 0.7rem;
-  color: var(--text-muted);
+  font-size: 0.65rem;
+  color: #ff0000;
   text-transform: uppercase;
 }
 
 .controls-hint {
-  font-size: 0.8rem;
-  color: #cbd5e1;
+  font-size: 0.72rem;
+  color: #ffb897;
   text-align: right;
+  font-family: 'DM Sans', system-ui, sans-serif;
 }
 
 .controls-hint p {
@@ -523,12 +598,14 @@ onUnmounted(() => {
 }
 
 .muted {
-  color: var(--text-muted);
+  color: #888;
 }
 
 .mode-line {
   margin-top: 0.2rem !important;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
+  color: #5b8cff;
+  letter-spacing: 0.06em;
 }
 
 @media (max-width: 720px) {

@@ -32,11 +32,11 @@ const emit = defineEmits<{
 }>()
 
 const speedOptions = [
-  { label: 'Blitz', value: 80 },
-  { label: 'Fast', value: 95 },
-  { label: 'Normal', value: 110 },
-  { label: 'Slow', value: 150 },
-  { label: 'Relaxed', value: 200 },
+  { label: 'Blitz', value: 70 },
+  { label: 'Fast', value: 80 },
+  { label: 'Normal', value: 90 },
+  { label: 'Slow', value: 120 },
+  { label: 'Relaxed', value: 160 },
 ]
 
 const livesOptions = [1, 2, 3, 4, 5]
