@@ -128,6 +128,7 @@ const prevBoardSnapshots = ref<
 >({})
 const prevPhase = ref(props.gameState.phase)
 const soundMuted = ref(isSoundMuted())
+const showTouchControls = ref(false)
 
 function toggleSoundMute() {
   const next = !soundMuted.value
@@ -137,6 +138,33 @@ function toggleSoundMute() {
     void unlockAudio()
     startBackgroundMusic()
   }
+}
+
+function detectTouchControls() {
+  showTouchControls.value =
+    window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900
+}
+
+function onTouchMove(direction: 'left' | 'right' | 'down') {
+  if (!canControl.value) return
+  void unlockAudio()
+  if (direction === 'down') playSoftDrop()
+  else playMove()
+  emit('action', { type: 'move', direction })
+}
+
+function onTouchRotate(direction: 'cw' | 'ccw') {
+  if (!canControl.value) return
+  void unlockAudio()
+  playRotate()
+  emit('action', { type: 'rotate', direction })
+}
+
+function onTouchHardDrop() {
+  if (!canControl.value) return
+  void unlockAudio()
+  playHardDrop()
+  emit('action', { type: 'hard_drop' })
 }
 
 function nextPieceType(board: TetrisBoardState | undefined): string | null {
@@ -419,6 +447,8 @@ function animationLoop(now: number) {
 }
 
 onMounted(() => {
+  detectTouchControls()
+  window.addEventListener('resize', detectTouchControls)
   window.addEventListener('keydown', onKeyDown)
   if (gridRef.value) {
     resizeObserver = new ResizeObserver((entries) => {
@@ -447,6 +477,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', detectTouchControls)
   window.removeEventListener('keydown', onKeyDown)
   resizeObserver?.disconnect()
   cancelAnimationFrame(animationFrame)
@@ -536,6 +567,71 @@ onUnmounted(() => {
           </template>
         </div>
       </Transition>
+
+      <div
+        v-if="showTouchControls && canControl"
+        class="touch-controls"
+        aria-label="Touch controls"
+      >
+        <div class="touch-move">
+          <button
+            type="button"
+            class="touch-btn"
+            aria-label="Move left"
+            @touchstart.prevent="onTouchMove('left')"
+            @mousedown.prevent="onTouchMove('left')"
+          >
+            ◀
+          </button>
+          <button
+            type="button"
+            class="touch-btn"
+            aria-label="Move down"
+            @touchstart.prevent="onTouchMove('down')"
+            @mousedown.prevent="onTouchMove('down')"
+          >
+            ▼
+          </button>
+          <button
+            type="button"
+            class="touch-btn"
+            aria-label="Move right"
+            @touchstart.prevent="onTouchMove('right')"
+            @mousedown.prevent="onTouchMove('right')"
+          >
+            ▶
+          </button>
+        </div>
+        <div class="touch-actions">
+          <button
+            type="button"
+            class="touch-btn touch-rotate"
+            aria-label="Rotate counter-clockwise"
+            @touchstart.prevent="onTouchRotate('ccw')"
+            @mousedown.prevent="onTouchRotate('ccw')"
+          >
+            ↺
+          </button>
+          <button
+            type="button"
+            class="touch-btn touch-rotate"
+            aria-label="Rotate clockwise"
+            @touchstart.prevent="onTouchRotate('cw')"
+            @mousedown.prevent="onTouchRotate('cw')"
+          >
+            ↻
+          </button>
+          <button
+            type="button"
+            class="touch-btn touch-drop"
+            aria-label="Hard drop"
+            @touchstart.prevent="onTouchHardDrop"
+            @mousedown.prevent="onTouchHardDrop"
+          >
+            ⬇
+          </button>
+        </div>
+      </div>
     </div>
 
     <aside class="player-bar">
@@ -564,7 +660,8 @@ onUnmounted(() => {
         >
           {{ soundMuted ? '🔇' : '🔊' }}
         </button>
-        <p v-if="canControl"><strong>Controls:</strong> Arrows · Z/X rotate · Space drop</p>
+        <p v-if="canControl && showTouchControls"><strong>Touch:</strong> ◀▼▶ move · ↺↻ rotate · ⬇ drop</p>
+        <p v-else-if="canControl"><strong>Controls:</strong> Arrows · Z/X rotate · Space drop</p>
         <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">Spectating</p>
         <p v-else class="muted">Waiting to start…</p>
       </div>
@@ -948,6 +1045,67 @@ onUnmounted(() => {
 
 .muted {
   color: var(--text-muted);
+}
+
+.touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0.75rem;
+}
+
+.touch-move {
+  display: flex;
+  gap: 0.4rem;
+  pointer-events: auto;
+}
+
+.touch-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  pointer-events: auto;
+}
+
+.touch-btn {
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 12px;
+  border: 1px solid rgba(91, 156, 255, 0.35);
+  background: rgba(15, 20, 25, 0.88);
+  color: #93c5fd;
+  font-size: 1.1rem;
+  font-weight: 700;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  touch-action: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.touch-btn:active {
+  transform: scale(0.95);
+  background: rgba(91, 156, 255, 0.25);
+}
+
+.touch-rotate {
+  font-size: 1.4rem;
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #c4b5fd;
+}
+
+.touch-drop {
+  width: 3.2rem;
+  height: 3.2rem;
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fde68a;
+  font-size: 1.3rem;
 }
 
 @media (max-width: 640px) {

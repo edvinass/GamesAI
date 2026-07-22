@@ -41,6 +41,8 @@ const emit = defineEmits<{
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const canvasWrapRef = ref<HTMLElement | null>(null)
 const soundMuted = ref(isSoundMuted())
+const showTouchControls = ref(false)
+const touchDirection = ref<string | null>(null)
 
 const myPac = computed(() => props.gameState.pacmen[props.playerId])
 const isAlive = computed(() => myPac.value?.alive ?? false)
@@ -89,6 +91,24 @@ function toggleSoundMute() {
     void unlockAudio()
     syncSiren()
   }
+}
+
+function detectTouchControls() {
+  showTouchControls.value =
+    window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 900
+}
+
+function onTouchDirectionStart(direction: string) {
+  if (!canControl.value) return
+  void unlockAudio()
+  touchDirection.value = direction
+  currentDirection = direction
+  emit('action', { type: 'set_direction', direction })
+}
+
+function onTouchDirectionEnd(direction: string) {
+  if (touchDirection.value !== direction) return
+  touchDirection.value = null
 }
 
 const codeToDirection: Record<string, string> = {
@@ -318,6 +338,8 @@ function loop(now: number) {
 }
 
 onMounted(() => {
+  detectTouchControls()
+  window.addEventListener('resize', detectTouchControls)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   if (canvasWrapRef.value) {
@@ -331,6 +353,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', detectTouchControls)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   resizeObserver?.disconnect()
@@ -370,6 +393,67 @@ onUnmounted(() => {
       <div v-else-if="(myPac?.respawn_ticks ?? 0) > 0" class="overlay respawn">
         <span class="overlay-label">READY!</span>
       </div>
+
+      <div
+        v-if="showTouchControls && canControl"
+        class="touch-controls"
+        aria-label="Touch controls"
+      >
+        <div class="touch-dpad">
+          <button
+            type="button"
+            class="touch-btn dpad-up"
+            aria-label="Move up"
+            @touchstart.prevent="onTouchDirectionStart('up')"
+            @touchend.prevent="onTouchDirectionEnd('up')"
+            @touchcancel.prevent="onTouchDirectionEnd('up')"
+            @mousedown.prevent="onTouchDirectionStart('up')"
+            @mouseup.prevent="onTouchDirectionEnd('up')"
+            @mouseleave.prevent="onTouchDirectionEnd('up')"
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            class="touch-btn dpad-left"
+            aria-label="Move left"
+            @touchstart.prevent="onTouchDirectionStart('left')"
+            @touchend.prevent="onTouchDirectionEnd('left')"
+            @touchcancel.prevent="onTouchDirectionEnd('left')"
+            @mousedown.prevent="onTouchDirectionStart('left')"
+            @mouseup.prevent="onTouchDirectionEnd('left')"
+            @mouseleave.prevent="onTouchDirectionEnd('left')"
+          >
+            ◀
+          </button>
+          <button
+            type="button"
+            class="touch-btn dpad-right"
+            aria-label="Move right"
+            @touchstart.prevent="onTouchDirectionStart('right')"
+            @touchend.prevent="onTouchDirectionEnd('right')"
+            @touchcancel.prevent="onTouchDirectionEnd('right')"
+            @mousedown.prevent="onTouchDirectionStart('right')"
+            @mouseup.prevent="onTouchDirectionEnd('right')"
+            @mouseleave.prevent="onTouchDirectionEnd('right')"
+          >
+            ▶
+          </button>
+          <button
+            type="button"
+            class="touch-btn dpad-down"
+            aria-label="Move down"
+            @touchstart.prevent="onTouchDirectionStart('down')"
+            @touchend.prevent="onTouchDirectionEnd('down')"
+            @touchcancel.prevent="onTouchDirectionEnd('down')"
+            @mousedown.prevent="onTouchDirectionStart('down')"
+            @mouseup.prevent="onTouchDirectionEnd('down')"
+            @mouseleave.prevent="onTouchDirectionEnd('down')"
+          >
+            ▼
+          </button>
+        </div>
+      </div>
     </div>
 
     <aside class="player-bar">
@@ -392,7 +476,11 @@ onUnmounted(() => {
       </ul>
 
       <div class="controls-hint">
-        <p v-if="canControl">
+        <p v-if="canControl && showTouchControls">
+          <strong>D-pad</strong> to move
+          · {{ gameState.pellets_remaining ?? 0 }} dots
+        </p>
+        <p v-else-if="canControl">
           <strong>↑↓←→ / WASD</strong>
           · {{ gameState.pellets_remaining ?? 0 }} dots
         </p>
@@ -607,6 +695,69 @@ onUnmounted(() => {
   font-size: 0.7rem;
   color: #5b8cff;
   letter-spacing: 0.06em;
+}
+
+.touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0.75rem;
+}
+
+.touch-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 0.25rem;
+  width: 9.5rem;
+  height: 9.5rem;
+  pointer-events: auto;
+}
+
+.touch-btn {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 8px;
+  border: 2px solid #2121de;
+  background: rgba(0, 0, 0, 0.85);
+  color: #ffff00;
+  font-size: 1rem;
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(33, 33, 222, 0.5);
+  touch-action: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.touch-btn:active {
+  transform: scale(0.95);
+  background: rgba(33, 33, 222, 0.4);
+}
+
+.dpad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.dpad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.dpad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.dpad-down {
+  grid-column: 2;
+  grid-row: 3;
 }
 
 @media (max-width: 720px) {

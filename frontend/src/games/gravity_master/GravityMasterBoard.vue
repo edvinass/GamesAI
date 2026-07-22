@@ -100,7 +100,7 @@ const levelLabel = computed(
   () => `Level ${props.gameState.level_index + 1} / ${props.gameState.levels_total}`,
 )
 
-function canvasPoint(e: MouseEvent): { x: number; y: number } | null {
+function canvasPoint(e: PointerEvent): { x: number; y: number } | null {
   const canvas = canvasRef.value
   if (!canvas) return null
   const rect = canvas.getBoundingClientRect()
@@ -110,15 +110,19 @@ function canvasPoint(e: MouseEvent): { x: number; y: number } | null {
   }
 }
 
-function startStroke(e: MouseEvent) {
+function startStroke(e: PointerEvent) {
   if (!canDraw.value) return
   const pt = canvasPoint(e)
   if (!pt) return
+  const canvas = canvasRef.value
+  if (canvas) {
+    canvas.setPointerCapture(e.pointerId)
+  }
   isDrawing.value = true
   currentStroke.value = [pt]
 }
 
-function moveStroke(e: MouseEvent) {
+function moveStroke(e: PointerEvent) {
   if (!isDrawing.value || !canDraw.value) return
   const pt = canvasPoint(e)
   if (!pt) return
@@ -127,6 +131,14 @@ function moveStroke(e: MouseEvent) {
   if (delta < 3 * layoutScale.value) return
   currentStroke.value.push(pt)
   drawFrame()
+}
+
+function endStrokePointer(e: PointerEvent) {
+  const canvas = canvasRef.value
+  if (canvas && canvas.hasPointerCapture(e.pointerId)) {
+    canvas.releasePointerCapture(e.pointerId)
+  }
+  endStroke()
 }
 
 function endStroke() {
@@ -595,10 +607,11 @@ onUnmounted(() => {
         ref="canvasRef"
         class="game-canvas"
         :class="{ drawing: canDraw }"
-        @mousedown="startStroke"
-        @mousemove="moveStroke"
-        @mouseup="endStroke"
-        @mouseleave="endStroke"
+        @pointerdown="startStroke"
+        @pointermove="moveStroke"
+        @pointerup="endStrokePointer"
+        @pointerleave="endStrokePointer"
+        @pointercancel="endStrokePointer"
       />
     </div>
   </div>
@@ -708,6 +721,7 @@ onUnmounted(() => {
   display: block;
   flex-shrink: 0;
   border-radius: var(--radius);
+  touch-action: none;
 }
 
 .game-canvas.drawing {
