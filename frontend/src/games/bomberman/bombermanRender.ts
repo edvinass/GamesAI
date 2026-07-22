@@ -319,6 +319,7 @@ function drawBomb(
   time: number,
   sliding = false,
   slideDir: string | null = null,
+  flight: string | null = null,
 ) {
   const dirOff: Record<string, [number, number]> = {
     up: [0, -0.12],
@@ -326,8 +327,10 @@ function drawBomb(
     left: [-0.12, 0],
     right: [0.12, 0],
   }
+  const airborne = flight === 'throw' || (sliding && flight !== 'kick')
+  const kicking = flight === 'kick'
   const [ox, oy] = sliding && slideDir ? (dirOff[slideDir] ?? [0, 0]) : [0, 0]
-  const lift = sliding ? s * 0.12 : 0
+  const lift = airborne ? s * 0.14 : kicking ? s * 0.04 : 0
   const cx = x + s / 2 + ox * s
   const cy = y + s / 2 + oy * s - lift
   const urgent = fuse <= 5
@@ -346,8 +349,16 @@ function drawBomb(
 
   // Shadow
   ctx.beginPath()
-  ctx.ellipse(cx, cy + r * 0.95 + lift, r * (sliding ? 0.55 : 0.75), r * 0.28, 0, 0, Math.PI * 2)
-  ctx.fillStyle = sliding ? 'rgba(0,0,0,0.22)' : 'rgba(0,0,0,0.35)'
+  ctx.ellipse(
+    cx,
+    cy + r * 0.95 + lift,
+    r * (airborne ? 0.5 : kicking ? 0.65 : 0.75),
+    r * 0.28,
+    0,
+    0,
+    Math.PI * 2,
+  )
+  ctx.fillStyle = airborne || kicking ? 'rgba(0,0,0,0.22)' : 'rgba(0,0,0,0.35)'
   ctx.fill()
 
   const body = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.25, r * 0.1, cx, cy, r)
@@ -358,7 +369,11 @@ function drawBomb(
   ctx.arc(cx, cy + s * 0.02, r, 0, Math.PI * 2)
   ctx.fillStyle = body
   ctx.fill()
-  ctx.strokeStyle = sliding ? 'rgba(251, 191, 36, 0.45)' : 'rgba(255,255,255,0.12)'
+  ctx.strokeStyle = airborne
+    ? 'rgba(251, 191, 36, 0.5)'
+    : kicking
+      ? 'rgba(244, 114, 182, 0.55)'
+      : 'rgba(255,255,255,0.12)'
   ctx.lineWidth = sliding ? Math.max(1.5, s * 0.045) : 1
   ctx.stroke()
 
@@ -449,12 +464,14 @@ function drawPowerup(
     range: '#38bdf8',
     speed: '#a3e635',
     throw: '#fbbf24',
+    kick: '#f472b6',
   }
   const labels: Record<string, string> = {
-    bomb: 'B',
-    range: 'R',
-    speed: 'S',
-    throw: 'T',
+    bomb: '💣',
+    range: '🔥',
+    speed: '⚡',
+    throw: '🧤',
+    kick: '🦵',
   }
   const color = colors[type] ?? '#fff'
 
@@ -486,11 +503,10 @@ function drawPowerup(
   ctx.lineWidth = Math.max(1.5, s * 0.045)
   ctx.stroke()
 
-  ctx.fillStyle = '#0c1018'
-  ctx.font = `800 ${Math.floor(s * 0.3)}px Outfit, system-ui, sans-serif`
+  ctx.font = `${Math.floor(s * 0.42)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(labels[type] ?? '?', cx, cy + 1)
+  ctx.fillText(labels[type] ?? '❓', cx, cy + 1)
 }
 
 function drawBomber(
@@ -710,8 +726,9 @@ export function renderFrame(
       s,
       b.fuse,
       time,
-      Boolean(b.sliding),
+      Boolean(b.sliding || b.flight),
       b.slide_dir ?? null,
+      b.flight ?? null,
     )
   }
 

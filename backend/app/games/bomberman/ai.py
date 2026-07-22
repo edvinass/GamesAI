@@ -145,12 +145,44 @@ def _walkable(
     bombs = _bomb_cells(state)
     if (x, y) in bombs:
         bomb = bombs[(x, y)]
+        # Airborne thrown bombs do not block the floor.
+        if bomb.get("flight") == "throw":
+            return True
+        if bomber.get("can_throw"):
+            return True
+        # Kick holders can path through bombs (they'll push them when adjacent).
+        if bomber.get("can_kick") and not bomb.get("flight"):
+            return True
         passable = set(bomber.get("passable_bomb_ids") or [])
         if passable_extra:
             passable |= passable_extra
         if bomb["id"] not in passable:
             return False
     return True
+
+
+def _throw_landing(
+    state: dict, start_x: int, start_y: int, direction: str
+) -> tuple[int, int] | None:
+    """Match engine Power Glove landing: over walls, last empty before edge/bomb."""
+    if direction not in DIRECTIONS:
+        return None
+    dx, dy = DIRECTIONS[direction]
+    width = state["grid_width"]
+    height = state["grid_height"]
+    bombs = _bomb_cells(state)
+    last_empty: tuple[int, int] | None = None
+    x, y = start_x, start_y
+    while True:
+        x, y = x + dx, y + dy
+        if not (0 <= x < width and 0 <= y < height):
+            break
+        other = bombs.get((x, y))
+        if other is not None and other.get("flight") != "throw":
+            break
+        if state["grid"][y][x] == TILE_EMPTY:
+            last_empty = (x, y)
+    return last_empty
 
 
 def _exit_count(
@@ -546,7 +578,7 @@ def choose_ai_action(
     #    If standing on a bomb with throw power, hurl it away from the escape path.
     if here_lethal is not None:
         bomb_here = _bomb_cells(state).get(pos)
-        if bomb_here and bomber.get("can_throw") and not bomb_here.get("sliding"):
+        if bomb_here and bomber.get("can_throw") and not bomb_here.get("flight"):
             flee_dir, _ = _find_escape(
                 state, bomber, danger, max_steps=MAX_ESCAPE_STEPS + 3
             )
@@ -562,13 +594,7 @@ def choose_ai_action(
                 if d not in preferred:
                     preferred.append(d)
             for throw_dir in preferred:
-                dx, dy = DIRECTIONS[throw_dir]
-                nx, ny = pos[0] + dx, pos[1] + dy
-                if not (0 <= nx < state["grid_width"] and 0 <= ny < state["grid_height"]):
-                    continue
-                if state["grid"][ny][nx] != TILE_EMPTY:
-                    continue
-                if _bomb_cells(state).get((nx, ny)) is not None:
+                if _throw_landing(state, pos[0], pos[1], throw_dir) is None:
                     continue
                 return throw_dir, True
         flee_dir, _ = _find_escape(

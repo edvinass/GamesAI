@@ -133,7 +133,7 @@ export interface SnakeGameState {
   viewer_id: string | null
 }
 
-export type BombermanPowerupType = 'bomb' | 'range' | 'speed' | 'throw'
+export type BombermanPowerupType = 'bomb' | 'range' | 'speed' | 'throw' | 'kick'
 
 export interface BombermanBomber {
   x: number
@@ -147,6 +147,7 @@ export interface BombermanBomber {
   bomb_range: number
   speed_level: number
   can_throw?: boolean
+  can_kick?: boolean
   move_credit?: number
   kills: number
   passable_bomb_ids?: string[]
@@ -159,8 +160,11 @@ export interface BombermanBomb {
   owner_id: string
   range: number
   fuse: number
+  flight?: 'throw' | 'kick' | null
   sliding?: boolean
   slide_dir?: string | null
+  land_x?: number | null
+  land_y?: number | null
 }
 
 export interface BombermanExplosion {

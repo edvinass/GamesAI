@@ -15,17 +15,24 @@ import {
 } from './bombermanRender'
 import {
   isSoundMuted,
+  playBombKick,
   playBombPlace,
+  playBombFuse,
+  playBombStop,
+  playBombThrow,
   playCountdownGo,
   playCountdownTick,
   playDeath,
+  playEnemyDeath,
   playExplosion,
   playLose,
   playPowerup,
   playSoftDestroy,
+  playStep,
   playWin,
   setSoundMuted,
   unlockAudio,
+  type PowerupSoundKind,
 } from './sounds'
 
 const props = defineProps<{
@@ -136,7 +143,16 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault()
     if (!e.repeat) {
       void unlockAudio()
-      playBombPlace()
+      const me = myBomber.value
+      const standingOnBomb =
+        me &&
+        (props.gameState.bombs ?? []).some(
+          (b) => b.x === me.x && b.y === me.y && !b.flight && !b.sliding,
+        )
+      // Throw/kick SFX come from state sync; only preview place here.
+      if (!(me?.can_throw && standingOnBomb)) {
+        playBombPlace()
+      }
       emit('action', { type: 'place_bomb' })
     }
     return
@@ -188,6 +204,7 @@ const POWERUP_COLORS: Record<string, string> = {
   range: '#38bdf8',
   speed: '#a3e635',
   throw: '#fbbf24',
+  kick: '#f472b6',
 }
 
 /** Snapshot used to detect gameplay events for SFX. */
@@ -199,7 +216,14 @@ let prevSoundSnap: {
   softCount: number
   alive: Record<string, boolean>
   countdownSec: number | null
-  myStats: { maxBombs: number; bombRange: number; speedLevel: number; canThrow: boolean } | null
+  myStats: {
+    maxBombs: number
+    bombRange: number
+    speedLevel: number
+    canThrow: boolean
+    canKick: boolean
+  } | null
+  myPos: { x: number; y: number } | null
   softCells: Set<string>
   explosionKeys: Set<string>
 } | null = null
@@ -262,8 +286,10 @@ function playStateSounds(state: BombermanGameState) {
             bombRange: me.bomb_range,
             speedLevel: me.speed_level,
             canThrow: Boolean(me.can_throw),
+            canKick: Boolean(me.can_kick),
           }
         : null,
+      myPos: me ? { x: me.x, y: me.y } : null,
       softCells,
       explosionKeys: explKeys,
     }
@@ -288,13 +314,34 @@ function playStateSounds(state: BombermanGameState) {
     }
   }
 
-  // Bomb throw started (sliding flag flipped on)
+  // Throw / kick / stop
   for (const bomb of state.bombs ?? []) {
     const prevBomb = prev.bombs.find((b) => b.id === bomb.id)
-    if (prevBomb && bomb.sliding && !prevBomb.sliding) {
-      playBombPlace()
+    if (!prevBomb) continue
+    const wasMoving = Boolean(prevBomb.flight || prevBomb.sliding)
+    const isMoving = Boolean(bomb.flight || bomb.sliding)
+    if (!wasMoving && isMoving) {
+      if (bomb.flight === 'kick') playBombKick()
+      else playBombThrow()
       break
     }
+  }
+  for (const prevBomb of prev.bombs) {
+    const bomb = (state.bombs ?? []).find((b) => b.id === prevBomb.id)
+    if (!bomb) continue
+    const wasMoving = Boolean(prevBomb.flight || prevBomb.sliding)
+    const isMoving = Boolean(bomb.flight || bomb.sliding)
+    if (wasMoving && !isMoving) {
+      playBombStop()
+      break
+    }
+  }
+
+  // Fuse hiss while any bomb is close to detonating
+  const liveBombs = state.bombs ?? []
+  if (liveBombs.length > 0 && state.phase === 'playing') {
+    const minFuse = Math.min(...liveBombs.map((b) => b.fuse))
+    if (minFuse <= 5) playBombFuse(minFuse <= 3)
   }
 
   // Explosions + particles / shake
@@ -304,7 +351,8 @@ function playStateSounds(state: BombermanGameState) {
   }
   const bombsLost = prev.bombs.length - (state.bombs ?? []).length
   if (newBlasts.length > 0 || (bombsLost > 0 && explosionCount > 0)) {
-    playExplosion()
+    const intensity = Math.min(1.35, 0.75 + newBlasts.length * 0.12)
+    playExplosion(intensity)
     shake = Math.min(1, shake + 0.55 + newBlasts.length * 0.08)
     for (const key of newBlasts.length ? newBlasts : [...explKeys].slice(0, 6)) {
       const [sx, sy] = key.split(',').map(Number)
@@ -331,20 +379,28 @@ function playStateSounds(state: BombermanGameState) {
     (me.max_bombs > prevMeStats.maxBombs ||
       me.bomb_range > prevMeStats.bombRange ||
       me.speed_level > prevMeStats.speedLevel ||
-      (Boolean(me.can_throw) && !prevMeStats.canThrow))
+      (Boolean(me.can_throw) && !prevMeStats.canThrow) ||
+      (Boolean(me.can_kick) && !prevMeStats.canKick))
   ) {
-    playPowerup()
-    const kind =
+    const kind: PowerupSoundKind =
       me.max_bombs > prevMeStats.maxBombs
         ? 'bomb'
         : me.bomb_range > prevMeStats.bombRange
           ? 'range'
           : me.speed_level > prevMeStats.speedLevel
             ? 'speed'
-            : 'throw'
+            : Boolean(me.can_throw) && !prevMeStats.canThrow
+              ? 'throw'
+              : 'kick'
+    playPowerup(kind)
     particles.push(
       ...spawnPowerupParticles(me.x, me.y, POWERUP_COLORS[kind] ?? '#fff'),
     )
+  }
+
+  // Local footsteps
+  if (me && prev.myPos && (me.x !== prev.myPos.x || me.y !== prev.myPos.y) && me.alive) {
+    playStep()
   }
 
   // Deaths
@@ -352,7 +408,7 @@ function playStateSounds(state: BombermanGameState) {
     if (wasAlive && alive[pid] === false) {
       const dead = state.bombers[pid]
       if (pid === props.playerId) playDeath()
-      else playSoftDestroy()
+      else playEnemyDeath()
       if (dead) {
         particles.push(...spawnDeathParticles(dead.x, dead.y, dead.color))
         shake = Math.min(1, shake + 0.35)
@@ -380,8 +436,10 @@ function playStateSounds(state: BombermanGameState) {
           bombRange: me.bomb_range,
           speedLevel: me.speed_level,
           canThrow: Boolean(me.can_throw),
+          canKick: Boolean(me.can_kick),
         }
       : null,
+    myPos: me ? { x: me.x, y: me.y } : null,
     softCells,
     explosionKeys: explKeys,
   }
@@ -546,11 +604,12 @@ onUnmounted(() => {
               }"
             />
             <span class="name">{{ row.nickname }}</span>
-            <span class="stat-pills" title="Bombs / Range / Speed / Throw">
-              <span class="pill bomb">B{{ row.bomber?.max_bombs ?? 1 }}</span>
-              <span class="pill range">R{{ row.bomber?.bomb_range ?? 1 }}</span>
-              <span class="pill speed">S{{ row.bomber?.speed_level ?? 0 }}</span>
-              <span v-if="row.bomber?.can_throw" class="pill throw" title="Throw">T</span>
+            <span class="stat-pills" title="Bombs / Range / Speed / Throw / Kick">
+              <span class="pill bomb">💣{{ row.bomber?.max_bombs ?? 1 }}</span>
+              <span class="pill range">🔥{{ row.bomber?.bomb_range ?? 1 }}</span>
+              <span class="pill speed">⚡{{ row.bomber?.speed_level ?? 0 }}</span>
+              <span v-if="row.bomber?.can_throw" class="pill throw" title="Throw">🧤</span>
+              <span v-if="row.bomber?.can_kick" class="pill kick" title="Kick">🦵</span>
             </span>
             <span v-if="(row.bomber?.kills ?? 0) > 0" class="kills">×{{ row.bomber?.kills }}</span>
             <span v-if="!row.bomber?.alive" class="status">out</span>
@@ -571,15 +630,17 @@ onUnmounted(() => {
         <p v-if="canControl">
           <strong>Hold</strong> arrows / WASD ·
           <strong>Space</strong> bomb<span v-if="myBomber?.can_throw"> / throw</span>
+          <span v-if="myBomber?.can_kick"> · walk into bombs to kick</span>
           <span class="muted">({{ myActiveBombs }}/{{ myBomber?.max_bombs ?? 1 }})</span>
         </p>
         <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">Spectating</p>
         <p v-else class="muted">Waiting to start…</p>
         <ul class="power-legend">
-          <li><span class="swatch bomb" />Bomb+</li>
-          <li><span class="swatch range" />Range+</li>
-          <li><span class="swatch speed" />Speed+</li>
-          <li><span class="swatch throw" />Throw</li>
+          <li><span class="legend-emoji">💣</span>Bomb+</li>
+          <li><span class="legend-emoji">🔥</span>Range+</li>
+          <li><span class="legend-emoji">⚡</span>Speed+</li>
+          <li><span class="legend-emoji">🧤</span>Throw</li>
+          <li><span class="legend-emoji">🦵</span>Kick</li>
         </ul>
       </div>
     </aside>
@@ -823,10 +884,13 @@ onUnmounted(() => {
   min-width: 1.15rem;
   padding: 0.05rem 0.3rem;
   border-radius: 999px;
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 700;
   text-align: center;
   line-height: 1.35;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
 }
 
 .pill.bomb {
@@ -847,6 +911,11 @@ onUnmounted(() => {
 .pill.throw {
   background: rgba(251, 191, 36, 0.2);
   color: #fcd34d;
+}
+
+.pill.kick {
+  background: rgba(244, 114, 182, 0.2);
+  color: #f9a8d4;
 }
 
 .kills {
@@ -898,31 +967,9 @@ onUnmounted(() => {
   gap: 0.3rem;
 }
 
-.swatch {
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 50%;
-  box-shadow: 0 0 8px currentColor;
-}
-
-.swatch.bomb {
-  background: #f97316;
-  color: #f97316;
-}
-
-.swatch.range {
-  background: #38bdf8;
-  color: #38bdf8;
-}
-
-.swatch.speed {
-  background: #a3e635;
-  color: #a3e635;
-}
-
-.swatch.throw {
-  background: #fbbf24;
-  color: #fbbf24;
+.legend-emoji {
+  font-size: 0.85rem;
+  line-height: 1;
 }
 
 @media (max-width: 720px) {

@@ -43,8 +43,8 @@ SPEED_BONUS = 0.28
 MAX_BOMBS_CAP = 8
 MAX_RANGE_CAP = 8
 MAX_SPEED_LEVEL = 5
-POWERUP_TYPES = ("bomb", "range", "speed", "throw")
-POWERUP_WEIGHTS = (30, 30, 25, 15)
+POWERUP_TYPES = ("bomb", "range", "speed", "throw", "kick")
+POWERUP_WEIGHTS = (26, 26, 22, 13, 13)
 
 
 class BombermanEngine(GamePlugin):
@@ -143,6 +143,7 @@ class BombermanEngine(GamePlugin):
                 "bomb_range": 2 if is_ai else 1,
                 "speed_level": 1 if is_ai else 0,
                 "can_throw": False,
+                "can_kick": False,
                 "move_credit": 0.0,
                 "kills": 0,
                 "passable_bomb_ids": [],
@@ -183,11 +184,27 @@ class BombermanEngine(GamePlugin):
     def _active_bomb_count(self, state: dict, player_id: str) -> int:
         return sum(1 for b in state.get("bombs") or [] if b.get("owner_id") == player_id)
 
-    def _bomb_at(self, state: dict, x: int, y: int) -> dict | None:
+    def _bomb_at(
+        self, state: dict, x: int, y: int, *, grounded_only: bool = False
+    ) -> dict | None:
         for bomb in state.get("bombs") or []:
-            if bomb["x"] == x and bomb["y"] == y:
-                return bomb
+            if bomb["x"] != x or bomb["y"] != y:
+                continue
+            # Thrown bombs are airborne; kicked bombs still occupy the floor.
+            if grounded_only and bomb.get("flight") == "throw":
+                continue
+            return bomb
         return None
+
+    def _is_bomb_moving(self, bomb: dict) -> bool:
+        return bool(bomb.get("flight") or bomb.get("sliding"))
+
+    def _clear_bomb_motion(self, bomb: dict) -> None:
+        bomb["flight"] = None
+        bomb["sliding"] = False
+        bomb["slide_dir"] = None
+        bomb["land_x"] = None
+        bomb["land_y"] = None
 
     def _powerup_at(self, state: dict, x: int, y: int) -> dict | None:
         for p in state.get("powerups") or []:
@@ -203,12 +220,34 @@ class BombermanEngine(GamePlugin):
         tile = state["grid"][y][x]
         if tile != TILE_EMPTY:
             return False
-        bomb = self._bomb_at(state, x, y)
+        bomb = self._bomb_at(state, x, y, grounded_only=True)
         if bomb is not None:
+            # Power Glove: walk onto any grounded bomb (yours or an opponent's).
+            if bomber.get("can_throw"):
+                return True
             passable = set(bomber.get("passable_bomb_ids") or [])
             if bomb["id"] not in passable:
                 return False
         return True
+
+    def _kick_blocked(self, state: dict, x: int, y: int) -> bool:
+        width = state["grid_width"]
+        height = state["grid_height"]
+        if not (0 <= x < width and 0 <= y < height):
+            return True
+        if state["grid"][y][x] != TILE_EMPTY:
+            return True
+        if self._bomb_at(state, x, y, grounded_only=True) is not None:
+            return True
+        return False
+
+    def _can_kick_bomb(self, state: dict, bomb: dict, direction: str) -> bool:
+        if direction not in DIRECTIONS:
+            return False
+        if self._is_bomb_moving(bomb):
+            return False
+        dx, dy = DIRECTIONS[direction]
+        return not self._kick_blocked(state, bomb["x"] + dx, bomb["y"] + dy)
 
     def _place_bomb(self, state: dict, player_id: str, bomber: dict) -> list[dict]:
         events: list[dict] = []
@@ -216,7 +255,7 @@ class BombermanEngine(GamePlugin):
             return events
 
         x, y = bomber["x"], bomber["y"]
-        bomb_here = self._bomb_at(state, x, y)
+        bomb_here = self._bomb_at(state, x, y, grounded_only=True)
         if bomb_here is not None:
             if bomber.get("can_throw"):
                 return self._throw_bomb(state, player_id, bomber, bomb_here)
@@ -232,8 +271,11 @@ class BombermanEngine(GamePlugin):
             "owner_id": player_id,
             "range": int(bomber.get("bomb_range", 1)),
             "fuse": DEFAULT_FUSE,
+            "flight": None,
             "sliding": False,
             "slide_dir": None,
+            "land_x": None,
+            "land_y": None,
         }
         state.setdefault("bombs", []).append(bomb)
         passable = list(bomber.get("passable_bomb_ids") or [])
@@ -259,16 +301,28 @@ class BombermanEngine(GamePlugin):
                 return value
         return "right"
 
-    def _slide_blocked(self, state: dict, x: int, y: int) -> bool:
+    def _find_throw_landing(
+        self, state: dict, start_x: int, start_y: int, direction: str
+    ) -> tuple[int, int] | None:
+        """Classic Power Glove: fly over hard/soft walls; land on last empty before edge/bomb."""
+        if direction not in DIRECTIONS:
+            return None
+        dx, dy = DIRECTIONS[direction]
         width = state["grid_width"]
         height = state["grid_height"]
-        if not (0 <= x < width and 0 <= y < height):
-            return True
-        if state["grid"][y][x] != TILE_EMPTY:
-            return True
-        if self._bomb_at(state, x, y) is not None:
-            return True
-        return False
+        last_empty: tuple[int, int] | None = None
+        x, y = start_x, start_y
+        while True:
+            x, y = x + dx, y + dy
+            if not (0 <= x < width and 0 <= y < height):
+                break
+            other = self._bomb_at(state, x, y, grounded_only=True)
+            if other is not None:
+                break
+            if state["grid"][y][x] == TILE_EMPTY:
+                last_empty = (x, y)
+            # Hard / soft: keep flying over them.
+        return last_empty
 
     def _grant_passable_on_cell(self, state: dict, bomb_id: str, x: int, y: int) -> None:
         for bomber in state["bombers"].values():
@@ -280,24 +334,73 @@ class BombermanEngine(GamePlugin):
                     passable.append(bomb_id)
                 bomber["passable_bomb_ids"] = passable
 
+    def _kick_bomb(
+        self, state: dict, player_id: str, direction: str, bomb: dict
+    ) -> list[dict]:
+        events: list[dict] = []
+        if not self._can_kick_bomb(state, bomb, direction):
+            return events
+
+        dx, dy = DIRECTIONS[direction]
+        nx, ny = bomb["x"] + dx, bomb["y"] + dy
+        bomb["flight"] = "kick"
+        bomb["sliding"] = True
+        bomb["slide_dir"] = direction
+        bomb["land_x"] = None
+        bomb["land_y"] = None
+        bomb["x"], bomb["y"] = nx, ny
+        self._grant_passable_on_cell(state, bomb["id"], nx, ny)
+
+        state["last_action"] = {
+            "type": "bomb_kicked",
+            "player_id": player_id,
+            "bomb_id": bomb["id"],
+            "direction": direction,
+            "x": nx,
+            "y": ny,
+        }
+        events.append(
+            {
+                "type": "bomb_kicked",
+                "player_id": player_id,
+                "bomb_id": bomb["id"],
+                "direction": direction,
+                "x": nx,
+                "y": ny,
+            }
+        )
+        return events
+
     def _throw_bomb(
         self, state: dict, player_id: str, bomber: dict, bomb: dict
     ) -> list[dict]:
         events: list[dict] = []
-        if bomb.get("sliding"):
+        if self._is_bomb_moving(bomb):
             return events
 
         facing = self._throw_facing(bomber)
         bomber["facing"] = facing
-        dx, dy = DIRECTIONS[facing]
-        nx, ny = bomb["x"] + dx, bomb["y"] + dy
-        if self._slide_blocked(state, nx, ny):
+        landing = self._find_throw_landing(state, bomb["x"], bomb["y"], facing)
+        if landing is None:
             return events
 
+        land_x, land_y = landing
+        dx, dy = DIRECTIONS[facing]
+        nx, ny = bomb["x"] + dx, bomb["y"] + dy
+        # First flight step may be over a wall — still move there while airborne.
+        if not (0 <= nx < state["grid_width"] and 0 <= ny < state["grid_height"]):
+            return events
+
+        bomb["flight"] = "throw"
         bomb["sliding"] = True
         bomb["slide_dir"] = facing
+        bomb["land_x"] = land_x
+        bomb["land_y"] = land_y
         bomb["x"], bomb["y"] = nx, ny
-        self._grant_passable_on_cell(state, bomb["id"], nx, ny)
+        if state["grid"][ny][nx] == TILE_EMPTY:
+            self._grant_passable_on_cell(state, bomb["id"], nx, ny)
+        if (nx, ny) == (land_x, land_y):
+            self._clear_bomb_motion(bomb)
 
         # Thrower is no longer standing on this bomb.
         passable = [
@@ -312,8 +415,10 @@ class BombermanEngine(GamePlugin):
             "player_id": player_id,
             "bomb_id": bomb["id"],
             "direction": facing,
-            "x": nx,
-            "y": ny,
+            "x": bomb["x"],
+            "y": bomb["y"],
+            "land_x": land_x,
+            "land_y": land_y,
         }
         events.append(
             {
@@ -321,47 +426,123 @@ class BombermanEngine(GamePlugin):
                 "player_id": player_id,
                 "bomb_id": bomb["id"],
                 "direction": facing,
-                "x": nx,
-                "y": ny,
+                "x": bomb["x"],
+                "y": bomb["y"],
+                "land_x": land_x,
+                "land_y": land_y,
             }
         )
         return events
 
     def _tick_sliding_bombs(self, state: dict) -> list[dict]:
         events: list[dict] = []
+        width = state["grid_width"]
+        height = state["grid_height"]
         for bomb in state.get("bombs") or []:
-            if not bomb.get("sliding"):
+            flight = bomb.get("flight")
+            if not flight and not bomb.get("sliding"):
                 continue
+            # Legacy / fallback: sliding with landing coords => throw
+            if not flight:
+                flight = "throw" if bomb.get("land_x") is not None else "kick"
+                bomb["flight"] = flight
+
             direction = bomb.get("slide_dir")
             if direction not in DIRECTIONS:
-                bomb["sliding"] = False
-                bomb["slide_dir"] = None
+                self._clear_bomb_motion(bomb)
                 continue
-            dx, dy = DIRECTIONS[direction]
-            nx, ny = bomb["x"] + dx, bomb["y"] + dy
-            if self._slide_blocked(state, nx, ny):
-                bomb["sliding"] = False
-                bomb["slide_dir"] = None
-                events.append(
-                    {
-                        "type": "bomb_stopped",
-                        "bomb_id": bomb["id"],
-                        "x": bomb["x"],
-                        "y": bomb["y"],
-                    }
-                )
-                continue
-            bomb["x"], bomb["y"] = nx, ny
-            self._grant_passable_on_cell(state, bomb["id"], nx, ny)
+
+            if flight == "throw":
+                events.extend(self._tick_throw_bomb(state, bomb, direction, width, height))
+            else:
+                events.extend(self._tick_kick_bomb(state, bomb, direction))
+        return events
+
+    def _tick_throw_bomb(
+        self,
+        state: dict,
+        bomb: dict,
+        direction: str,
+        width: int,
+        height: int,
+    ) -> list[dict]:
+        events: list[dict] = []
+        land_x = bomb.get("land_x")
+        land_y = bomb.get("land_y")
+        if land_x is None or land_y is None:
+            self._clear_bomb_motion(bomb)
+            return events
+        if (bomb["x"], bomb["y"]) == (land_x, land_y):
+            self._clear_bomb_motion(bomb)
             events.append(
                 {
-                    "type": "bomb_slid",
+                    "type": "bomb_stopped",
+                    "bomb_id": bomb["id"],
+                    "x": bomb["x"],
+                    "y": bomb["y"],
+                }
+            )
+            return events
+
+        dx, dy = DIRECTIONS[direction]
+        nx, ny = bomb["x"] + dx, bomb["y"] + dy
+        if not (0 <= nx < width and 0 <= ny < height):
+            self._clear_bomb_motion(bomb)
+            return events
+
+        bomb["x"], bomb["y"] = nx, ny
+        if state["grid"][ny][nx] == TILE_EMPTY:
+            self._grant_passable_on_cell(state, bomb["id"], nx, ny)
+        events.append(
+            {
+                "type": "bomb_slid",
+                "bomb_id": bomb["id"],
+                "x": nx,
+                "y": ny,
+                "direction": direction,
+                "flight": "throw",
+            }
+        )
+        if (nx, ny) == (land_x, land_y):
+            self._clear_bomb_motion(bomb)
+            events.append(
+                {
+                    "type": "bomb_stopped",
                     "bomb_id": bomb["id"],
                     "x": nx,
                     "y": ny,
-                    "direction": direction,
                 }
             )
+        return events
+
+    def _tick_kick_bomb(self, state: dict, bomb: dict, direction: str) -> list[dict]:
+        events: list[dict] = []
+        dx, dy = DIRECTIONS[direction]
+        nx, ny = bomb["x"] + dx, bomb["y"] + dy
+        if self._kick_blocked(state, nx, ny):
+            self._clear_bomb_motion(bomb)
+            events.append(
+                {
+                    "type": "bomb_stopped",
+                    "bomb_id": bomb["id"],
+                    "x": bomb["x"],
+                    "y": bomb["y"],
+                }
+            )
+            return events
+
+        bomb["x"], bomb["y"] = nx, ny
+        self._grant_passable_on_cell(state, bomb["id"], nx, ny)
+        events.append(
+            {
+                "type": "bomb_slid",
+                "bomb_id": bomb["id"],
+                "x": nx,
+                "y": ny,
+                "direction": direction,
+                "flight": "kick",
+            }
+        )
         return events
 
     def apply_action(
@@ -434,6 +615,8 @@ class BombermanEngine(GamePlugin):
             )
         elif ptype == "throw":
             bomber["can_throw"] = True
+        elif ptype == "kick":
+            bomber["can_kick"] = True
         else:
             return events
 
@@ -479,6 +662,11 @@ class BombermanEngine(GamePlugin):
         for direction in candidates:
             dx, dy = DIRECTIONS[direction]
             nx, ny = bomber["x"] + dx, bomber["y"] + dy
+            # Classic kick: walking into a bomb pushes it along the floor.
+            if bomber.get("can_kick"):
+                bomb = self._bomb_at(state, nx, ny, grounded_only=True)
+                if bomb is not None and self._can_kick_bomb(state, bomb, direction):
+                    return direction
             if self._is_walkable(state, bomber, nx, ny):
                 return direction
         return None
@@ -505,6 +693,16 @@ class BombermanEngine(GamePlugin):
                 continue
             dx, dy = DIRECTIONS[direction]
             nx, ny = bomber["x"] + dx, bomber["y"] + dy
+
+            if bomber.get("can_kick"):
+                bomb = self._bomb_at(state, nx, ny, grounded_only=True)
+                if bomb is not None and self._can_kick_bomb(state, bomb, direction):
+                    events.extend(self._kick_bomb(state, pid, direction, bomb))
+
+            # After a kick the cell should be free; otherwise require walkable.
+            if not self._is_walkable(state, bomber, nx, ny):
+                continue
+
             bomber["direction"] = direction
             bomber["x"] = nx
             bomber["y"] = ny
@@ -662,7 +860,7 @@ class BombermanEngine(GamePlugin):
                     }
                 )
 
-        # Thrown bombs keep sliding until they hit a wall / soft / another bomb.
+        # Thrown bombs fly toward their landing cell (over walls).
         events.extend(self._tick_sliding_bombs(state))
 
         # Tick fuses
