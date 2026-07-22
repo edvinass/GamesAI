@@ -23,6 +23,7 @@ import RoboRallyLobby from '@/games/roborally/RoboRallyLobby.vue'
 import Connect4Lobby from '@/games/connect4/Connect4Lobby.vue'
 import BattleshipLobby from '@/games/battleship/BattleshipLobby.vue'
 import SolitaireLobby from '@/games/solitaire/SolitaireLobby.vue'
+import PinballLobby from '@/games/pinball/PinballLobby.vue'
 import { validateLobby as validateCodenamesLobby, teamOperatives, teamSpymaster } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
@@ -38,6 +39,7 @@ import { validateLobby as validateRoboRallyLobby } from '@/games/roborally/lobby
 import { validateLobby as validateConnect4Lobby } from '@/games/connect4/lobbyValidation'
 import { validateLobby as validateBattleshipLobby } from '@/games/battleship/lobbyValidation'
 import { validateLobby as validateSolitaireLobby } from '@/games/solitaire/lobbyValidation'
+import { validateLobby as validatePinballLobby } from '@/games/pinball/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import type { Room } from '@/types'
 
@@ -136,6 +138,7 @@ const isRoboRally = computed(() => room.value?.game_type === 'roborally')
 const isConnect4 = computed(() => room.value?.game_type === 'connect4')
 const isBattleship = computed(() => room.value?.game_type === 'battleship')
 const isSolitaire = computed(() => room.value?.game_type === 'solitaire')
+const isPinball = computed(() => room.value?.game_type === 'pinball')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
@@ -156,6 +159,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'connect4') return validateConnect4Lobby(room.value)
   if (room.value.game_type === 'battleship') return validateBattleshipLobby(room.value)
   if (room.value.game_type === 'solitaire') return validateSolitaireLobby(room.value)
+  if (room.value.game_type === 'pinball') return validatePinballLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
@@ -601,6 +605,17 @@ function startGame() {
       <SolitaireLobby
         v-else-if="isSolitaire"
         v-model:draw-count="drawCount"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+      />
+
+      <PinballLobby
+        v-else-if="isPinball"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

@@ -19,13 +19,14 @@ import RoboRallyBoard from '@/games/roborally/RoboRallyBoard.vue'
 import Connect4Board from '@/games/connect4/Connect4Board.vue'
 import BattleshipBoard from '@/games/battleship/BattleshipBoard.vue'
 import SolitaireBoard from '@/games/solitaire/SolitaireBoard.vue'
+import PinballBoard from '@/games/pinball/PinballBoard.vue'
 import { useGoClientSolo } from '@/composables/useGoClientSolo'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
 import { pokerReactionSet } from '@/games/poker/reactions'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState, PinballGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState, isPinballState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -60,6 +61,7 @@ const gameTitle = computed(() => {
   if (type === 'connect4') return 'Connect Four'
   if (type === 'battleship') return 'Battleship'
   if (type === 'solitaire') return 'Solitaire'
+  if (type === 'pinball') return 'Pinball'
   return type ?? 'Game'
 })
 
@@ -125,6 +127,10 @@ const solitaireState = computed(() =>
   gameState.value && isSolitaireState(gameState.value) ? gameState.value as SolitaireGameState : null,
 )
 
+const pinballState = computed(() =>
+  gameState.value && isPinballState(gameState.value) ? gameState.value as PinballGameState : null,
+)
+
 const playerId = computed(() => playerStore.playerId)
 
 const isPoker = computed(() => room.value?.game_type === 'poker')
@@ -132,7 +138,7 @@ const isPoker = computed(() => room.value?.game_type === 'poker')
 const isRoboRally = computed(() => room.value?.game_type === 'roborally')
 
 const isFullscreenGame = computed(() =>
-  Boolean(snakeState.value || bombermanState.value || pacmanState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value || roborallyState.value || connect4State.value || battleshipState.value || solitaireState.value),
+  Boolean(snakeState.value || bombermanState.value || pacmanState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value || roborallyState.value || connect4State.value || battleshipState.value || solitaireState.value || pinballState.value),
 )
 
 const loadingMessage = computed(() => {
@@ -363,6 +369,14 @@ function backToLobby() {
     <SolitaireBoard
       v-else-if="solitaireState && room"
       :game-state="solitaireState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <PinballBoard
+      v-else-if="pinballState && room"
+      :game-state="pinballState"
       :room="room"
       :player-id="playerStore.playerId"
       @action="sendAction"

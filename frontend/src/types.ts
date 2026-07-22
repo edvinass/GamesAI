@@ -864,6 +864,19 @@ export interface SolitaireGameState {
   hint?: SolitaireHint | null
 }
 
+export interface PinballGameState {
+  phase: 'playing' | 'finished'
+  score: number
+  balls_remaining: number
+  high_score: number
+  players: Player[]
+  settings: Record<string, unknown>
+  winner: string | null
+  win_reason: string | null
+  last_action: Record<string, unknown> | null
+  viewer_id: string | null
+}
+
 export interface PacmanPac {
   x: number
   y: number
@@ -924,7 +937,7 @@ export interface PacmanGameState {
   viewer_id: string | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | PacmanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | PacmanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState | PinballGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -984,6 +997,10 @@ export function isBattleshipState(state: GameState): state is BattleshipGameStat
 
 export function isSolitaireState(state: GameState): state is SolitaireGameState {
   return 'tableau' in state && 'foundations' in state && 'stock_count' in state
+}
+
+export function isPinballState(state: GameState): state is PinballGameState {
+  return 'balls_remaining' in state && 'score' in state && !('snakes' in state)
 }
 
 export interface WsMessage {
