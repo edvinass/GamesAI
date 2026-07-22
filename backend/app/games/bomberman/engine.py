@@ -357,12 +357,8 @@ class BombermanEngine(GamePlugin):
         )
         return events
 
-    def _step_movement(self, state: dict, moving: set[str]) -> list[dict]:
-        events: list[dict] = []
-        bombers = state["bombers"]
-
-        # Clear passable bomb ids once the player leaves that cell.
-        for bomber in bombers.values():
+    def _clear_passable_bombs(self, state: dict) -> None:
+        for bomber in state["bombers"].values():
             if not bomber.get("alive"):
                 continue
             passable = list(bomber.get("passable_bomb_ids") or [])
@@ -375,23 +371,51 @@ class BombermanEngine(GamePlugin):
                     kept.append(bid)
             bomber["passable_bomb_ids"] = kept
 
+    def _resolve_step_direction(self, state: dict, bomber: dict) -> str | None:
+        """Prefer the held direction; if blocked, keep sliding in the last move direction."""
+        desired = bomber.get("next_direction", "stop")
+        momentum = bomber.get("direction", "stop")
+        candidates: list[str] = []
+        if desired in DIRECTIONS:
+            candidates.append(desired)
+        if momentum in DIRECTIONS and momentum != desired:
+            candidates.append(momentum)
+        for direction in candidates:
+            dx, dy = DIRECTIONS[direction]
+            nx, ny = bomber["x"] + dx, bomber["y"] + dy
+            if self._is_walkable(state, bomber, nx, ny):
+                return direction
+        return None
+
+    def _step_movement(self, state: dict, moving: set[str]) -> tuple[list[dict], set[str]]:
+        """Advance bombers one cell. Returns (events, pids that actually moved)."""
+        events: list[dict] = []
+        moved: set[str] = set()
+        bombers = state["bombers"]
+        self._clear_passable_bombs(state)
+
         for pid in moving:
             bomber = bombers.get(pid)
             if not bomber or not bomber.get("alive"):
                 continue
-            direction = bomber.get("next_direction", "stop")
-            bomber["direction"] = direction
-            if direction not in DIRECTIONS:
+            direction = self._resolve_step_direction(state, bomber)
+            if direction is None:
+                # Face the held direction even when blocked, but do not consume credit.
+                desired = bomber.get("next_direction", "stop")
+                if desired in DIRECTIONS:
+                    bomber["direction"] = desired
+                elif desired == "stop":
+                    bomber["direction"] = "stop"
                 continue
             dx, dy = DIRECTIONS[direction]
             nx, ny = bomber["x"] + dx, bomber["y"] + dy
-            if not self._is_walkable(state, bomber, nx, ny):
-                continue
+            bomber["direction"] = direction
             bomber["x"] = nx
             bomber["y"] = ny
+            moved.add(pid)
             events.extend(self._pickup_powerup(state, bomber, nx, ny))
 
-        return events
+        return events, moved
 
     def _blast_cells_for_bomb(self, state: dict, bomb: dict) -> list[tuple[int, int]]:
         cells = [(bomb["x"], bomb["y"])]
@@ -613,6 +637,8 @@ class BombermanEngine(GamePlugin):
                 bomber["move_credit"] = float(bomber.get("move_credit", 0.0)) + self._move_rate(
                     bomber
                 )
+                # Cap banking so bumping a wall doesn't store up a multi-cell lunge.
+                bomber["move_credit"] = min(float(bomber["move_credit"]), 1.5)
 
             for _ in range(3):
                 moving = {
@@ -624,16 +650,26 @@ class BombermanEngine(GamePlugin):
                 }
                 if not moving:
                     break
+                step_events, moved = self._step_movement(state, moving)
+                events.extend(step_events)
                 for pid in moving:
-                    bombers[pid]["move_credit"] = (
-                        float(bombers[pid].get("move_credit", 0.0)) - 1.0
-                    )
-                events.extend(self._step_movement(state, moving))
+                    if pid in moved:
+                        bombers[pid]["move_credit"] = (
+                            float(bombers[pid].get("move_credit", 0.0)) - 1.0
+                        )
+                    else:
+                        # Ready to step the instant a path opens — no sticky delay.
+                        bombers[pid]["move_credit"] = min(
+                            float(bombers[pid].get("move_credit", 0.0)),
+                            1.0 - 1e-6,
+                        )
+                if not moved:
+                    break
                 # Walking into lingering explosions
                 blast_now = {
                     (e["x"], e["y"]) for e in state.get("explosions") or [] if e.get("ttl", 0) > 0
                 }
-                for pid in moving:
+                for pid in moved:
                     bomber = bombers.get(pid)
                     if not bomber or not bomber.get("alive"):
                         continue

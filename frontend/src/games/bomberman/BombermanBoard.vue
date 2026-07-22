@@ -59,34 +59,40 @@ const myActiveBombs = computed(() =>
   (props.gameState.bombs ?? []).filter((b) => b.owner_id === props.playerId).length,
 )
 
-const keyToDirection: Record<string, string> = {
+/** Physical key codes — stable across layouts; most-recent direction wins. */
+const codeToDirection: Record<string, string> = {
   ArrowUp: 'up',
   ArrowDown: 'down',
   ArrowLeft: 'left',
   ArrowRight: 'right',
-  w: 'up',
-  W: 'up',
-  s: 'down',
-  S: 'down',
-  a: 'left',
-  A: 'left',
-  d: 'right',
-  D: 'right',
+  KeyW: 'up',
+  KeyS: 'down',
+  KeyA: 'left',
+  KeyD: 'right',
 }
 
-const heldKeys = new Set<string>()
+/** Held directions, oldest → newest (last entry is active). */
+const directionStack: string[] = []
 let currentDirection = 'stop'
 
-function syncDirectionFromKeys() {
-  // Prefer the most recently pressed held key (iterate insertion order of Set — last wins)
-  let next = 'stop'
-  for (const key of heldKeys) {
-    const dir = keyToDirection[key]
-    if (dir) next = dir
-  }
-  if (next !== currentDirection) {
-    currentDirection = next
-    emit('action', { type: 'set_direction', direction: next })
+function desiredDirection(): string {
+  return directionStack.length ? directionStack[directionStack.length - 1]! : 'stop'
+}
+
+function emitDirection(force = false) {
+  const next = desiredDirection()
+  if (!force && next === currentDirection) return
+  currentDirection = next
+  emit('action', { type: 'set_direction', direction: next })
+}
+
+function clearMovementInput() {
+  directionStack.length = 0
+  if (currentDirection !== 'stop') {
+    currentDirection = 'stop'
+    emit('action', { type: 'set_direction', direction: 'stop' })
+  } else {
+    currentDirection = 'stop'
   }
 }
 
@@ -96,38 +102,41 @@ function startNewGame() {
 
 function onKeyDown(e: KeyboardEvent) {
   if (!canControl.value) return
-  if (e.key === ' ' || e.code === 'Space') {
+  if (e.code === 'Space' || e.key === ' ') {
     e.preventDefault()
-    emit('action', { type: 'place_bomb' })
+    if (!e.repeat) emit('action', { type: 'place_bomb' })
     return
   }
-  if (!(e.key in keyToDirection)) return
+  const direction = codeToDirection[e.code]
+  if (!direction) return
   e.preventDefault()
-  heldKeys.add(e.key)
-  syncDirectionFromKeys()
+  if (e.repeat) return
+  const idx = directionStack.indexOf(direction)
+  if (idx >= 0) directionStack.splice(idx, 1)
+  directionStack.push(direction)
+  emitDirection()
 }
 
 function onKeyUp(e: KeyboardEvent) {
-  if (!(e.key in keyToDirection)) return
+  const direction = codeToDirection[e.code]
+  if (!direction) return
   e.preventDefault()
-  heldKeys.delete(e.key)
-  // Also clear aliases (w and ArrowUp both map to up)
-  const dir = keyToDirection[e.key]
-  for (const k of [...heldKeys]) {
-    if (keyToDirection[k] === dir && k !== e.key) {
-      /* keep other aliases */
-    }
-  }
+  const idx = directionStack.indexOf(direction)
+  if (idx >= 0) directionStack.splice(idx, 1)
   if (!canControl.value) {
-    heldKeys.clear()
+    directionStack.length = 0
     currentDirection = 'stop'
     return
   }
-  syncDirectionFromKeys()
+  emitDirection()
 }
 
-function easeOutCubic(t: number) {
-  return 1 - (1 - t) ** 3
+function onWindowBlur() {
+  clearMovementInput()
+}
+
+function easeLinear(t: number) {
+  return t
 }
 
 let rafId = 0
@@ -155,8 +164,11 @@ watch(() => props.gameState, onStateSync, { deep: true, immediate: true })
 
 watch(canControl, (ok) => {
   if (!ok) {
-    heldKeys.clear()
+    directionStack.length = 0
     currentDirection = 'stop'
+  } else if (desiredDirection() !== 'stop') {
+    // Re-assert held direction after countdown / reconnect.
+    emitDirection(true)
   }
 })
 
@@ -188,7 +200,7 @@ function paint(now: number) {
     props.gameState.phase === 'playing'
       ? Math.min(1, (now - tickReceivedAt) / Math.max(16, tickMs))
       : 1
-  const t = easeOutCubic(rawT)
+  const t = easeLinear(rawT)
   const rendered = interpolateBombers(prevBombers, targetBombers, t)
 
   renderFrame(ctx, displayW, displayH, {
@@ -212,6 +224,7 @@ function loop(now: number) {
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('blur', onWindowBlur)
   if (canvasWrapRef.value) {
     resizeObserver = new ResizeObserver(() => {})
     resizeObserver.observe(canvasWrapRef.value)
@@ -222,6 +235,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('blur', onWindowBlur)
   resizeObserver?.disconnect()
   cancelAnimationFrame(rafId)
 })

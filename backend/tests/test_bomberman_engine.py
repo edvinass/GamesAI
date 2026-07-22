@@ -91,13 +91,71 @@ def test_movement_blocked_by_hard_wall(engine: BombermanEngine, state: dict) -> 
     bomber["x"] = 1
     bomber["y"] = 1
     bomber["next_direction"] = "up"
-    bomber["move_credit"] = 1.0
+    bomber["direction"] = "up"
+    bomber["move_credit"] = 0.0
     state["bombers"][state["players"][1]["id"]]["alive"] = False
 
     ox, oy = bomber["x"], bomber["y"]
     state, _ = engine.tick(state)
     assert state["bombers"][pid]["x"] == ox
     assert state["bombers"][pid]["y"] == oy
+    # Blocked steps must not burn credit into a sticky delay
+    assert state["bombers"][pid]["move_credit"] >= 0.99
+
+
+def test_slide_along_wall_when_turn_blocked(engine: BombermanEngine, state: dict) -> None:
+    """Holding up into a wall while moving right should keep sliding right."""
+    player = state["players"][0]
+    pid = player["id"]
+    other = state["players"][1]["id"]
+    state["bombers"][other]["alive"] = False
+    bomber = state["bombers"][pid]
+
+    for x in range(1, 6):
+        state["grid"][1][x] = TILE_EMPTY
+    # Hard wall directly above the path
+    state["grid"][0][3] = TILE_HARD
+
+    bomber["x"], bomber["y"] = 2, 1
+    bomber["direction"] = "right"
+    bomber["next_direction"] = "up"  # blocked — should slide right
+    bomber["move_credit"] = 0.0
+    state["bombs"] = []
+    state["explosions"] = []
+
+    state, _ = engine.tick(state)
+    assert state["bombers"][pid]["x"] == 3
+    assert state["bombers"][pid]["y"] == 1
+    assert state["bombers"][pid]["direction"] == "right"
+
+
+def test_blocked_then_open_moves_immediately(engine: BombermanEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    other = state["players"][1]["id"]
+    bomber = state["bombers"][pid]
+    # Keep the opponent alive far away so the match doesn't end mid-test.
+    state["bombers"][other]["x"] = state["grid_width"] - 2
+    state["bombers"][other]["y"] = state["grid_height"] - 2
+    state["bombers"][other]["next_direction"] = "stop"
+
+    for x in range(1, 5):
+        state["grid"][1][x] = TILE_EMPTY
+    bomber["x"], bomber["y"] = 1, 1
+    bomber["next_direction"] = "left"  # into border
+    bomber["direction"] = "left"
+    bomber["move_credit"] = 0.0
+    state["bombs"] = []
+    state["explosions"] = []
+
+    state, _ = engine.tick(state)
+    assert state["phase"] == "playing"
+    assert state["bombers"][pid]["x"] == 1
+    assert state["bombers"][pid]["move_credit"] >= 0.99
+
+    bomber["next_direction"] = "right"
+    state, _ = engine.tick(state)
+    assert state["bombers"][pid]["x"] == 2
 
 
 def test_bomb_destroys_soft_and_kills(engine: BombermanEngine, state: dict) -> None:
