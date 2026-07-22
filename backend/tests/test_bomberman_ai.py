@@ -47,8 +47,8 @@ def test_escape_fails_in_single_tile_dead_end() -> None:
     state = _empty_corridor_state()
     bomber = state["bombers"]["ai"]
     # Trap: only one empty cell surrounded by hard/soft — no exit after bomb.
-    for y in range(1, 6):
-        for x in range(1, 6):
+    for y in range(0, 7):
+        for x in range(0, 7):
             state["grid"][y][x] = TILE_HARD
     state["grid"][2][2] = TILE_EMPTY
     bomber["x"], bomber["y"] = 2, 2
@@ -63,8 +63,9 @@ def test_escape_succeeds_with_side_alley() -> None:
     state = _empty_corridor_state()
     bomber = state["bombers"]["ai"]
     # Vertical corridor; escape two steps right (beyond range-1 blast).
-    for y in range(1, 6):
-        for x in range(1, 6):
+    # Seal rows/cols around the pocket (no map border walls anymore).
+    for y in range(0, 7):
+        for x in range(0, 7):
             state["grid"][y][x] = TILE_HARD
     state["grid"][1][2] = TILE_EMPTY
     state["grid"][2][2] = TILE_EMPTY

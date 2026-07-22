@@ -17,6 +17,21 @@ def test_every_map_builds_and_has_clear_spawns() -> None:
         assert len(spawns) >= 4
         for sx, sy in spawns:
             assert grid[sy][sx] == TILE_EMPTY
+        # Edges are playable (no solid hard-wall ring)
+        height = len(grid)
+        width = len(grid[0])
+        edge_empty = 0
+        for x in range(width):
+            if grid[0][x] == TILE_EMPTY:
+                edge_empty += 1
+            if grid[height - 1][x] == TILE_EMPTY:
+                edge_empty += 1
+        for y in range(height):
+            if grid[y][0] == TILE_EMPTY:
+                edge_empty += 1
+            if grid[y][width - 1] == TILE_EMPTY:
+                edge_empty += 1
+        assert edge_empty > 0
 
 
 def test_engine_uses_selected_map() -> None:

@@ -10,28 +10,15 @@ TILE_HARD = 1
 TILE_SOFT = 2
 
 
-def _border(grid: list[list[int]]) -> None:
-    height = len(grid)
-    width = len(grid[0])
-    for x in range(width):
-        grid[0][x] = TILE_HARD
-        grid[height - 1][x] = TILE_HARD
-    for y in range(height):
-        grid[y][0] = TILE_HARD
-        grid[y][width - 1] = TILE_HARD
-
-
 def _empty_grid(width: int, height: int) -> list[list[int]]:
-    grid = [[TILE_EMPTY for _ in range(width)] for _ in range(height)]
-    _border(grid)
-    return grid
+    return [[TILE_EMPTY for _ in range(width)] for _ in range(height)]
 
 
 def _scatter_soft(grid: list[list[int]], soft_fill: float, hard_cells: set[tuple[int, int]]) -> None:
     height = len(grid)
     width = len(grid[0])
-    for y in range(1, height - 1):
-        for x in range(1, width - 1):
+    for y in range(height):
+        for x in range(width):
             if (x, y) in hard_cells:
                 continue
             if grid[y][x] != TILE_EMPTY:
@@ -44,28 +31,29 @@ def _set_hard(grid: list[list[int]], cells: set[tuple[int, int]]) -> None:
     height = len(grid)
     width = len(grid[0])
     for x, y in cells:
-        if 0 < x < width - 1 and 0 < y < height - 1:
+        if 0 <= x < width and 0 <= y < height:
             grid[y][x] = TILE_HARD
 
 
 def _classic_pillars(width: int, height: int) -> set[tuple[int, int]]:
+    # Even-cell pillars across the full arena (no outer wall ring).
     return {
         (x, y)
-        for y in range(2, height - 1, 2)
-        for x in range(2, width - 1, 2)
+        for y in range(2, height, 2)
+        for x in range(2, width, 2)
     }
 
 
 def _default_spawns(width: int, height: int) -> list[tuple[int, int]]:
     return [
-        (1, 1),
-        (width - 2, 1),
-        (1, height - 2),
-        (width - 2, height - 2),
-        (width // 2, 1),
-        (width // 2, height - 2),
-        (1, height // 2),
-        (width - 2, height // 2),
+        (0, 0),
+        (width - 1, 0),
+        (0, height - 1),
+        (width - 1, height - 1),
+        (width // 2, 0),
+        (width // 2, height - 1),
+        (0, height // 2),
+        (width - 1, height // 2),
     ]
 
 
@@ -75,16 +63,16 @@ def clear_spawn_zone(grid: list[list[int]], sx: int, sy: int) -> None:
     for dy in range(-1, 2):
         for dx in range(-1, 2):
             x, y = sx + dx, sy + dy
-            if 0 < x < width - 1 and 0 < y < height - 1:
+            if 0 <= x < width and 0 <= y < height:
                 if grid[y][x] != TILE_HARD:
                     grid[y][x] = TILE_EMPTY
     grid[sy][sx] = TILE_EMPTY
     cx, cy = width // 2, height // 2
     step_x = 0 if sx == cx else (1 if sx < cx else -1)
     step_y = 0 if sy == cy else (1 if sy < cy else -1)
-    if step_x and grid[sy][sx + step_x] != TILE_HARD:
+    if step_x and 0 <= sx + step_x < width and grid[sy][sx + step_x] != TILE_HARD:
         grid[sy][sx + step_x] = TILE_EMPTY
-    if step_y and grid[sy + step_y][sx] != TILE_HARD:
+    if step_y and 0 <= sy + step_y < height and grid[sy + step_y][sx] != TILE_HARD:
         grid[sy + step_y][sx] = TILE_EMPTY
 
 
@@ -99,8 +87,8 @@ def _build_classic(width: int, height: int, soft_fill: float) -> list[list[int]]
 def _build_open_field(width: int, height: int, soft_fill: float) -> list[list[int]]:
     """Sparse pillars — wide sightlines and chaotic mid fights."""
     hard: set[tuple[int, int]] = set()
-    for y in range(3, height - 2, 3):
-        for x in range(3, width - 2, 3):
+    for y in range(2, height, 3):
+        for x in range(2, width, 3):
             hard.add((x, y))
     # A few extra anchors
     hard.add((width // 2, height // 2))
@@ -118,8 +106,8 @@ def _build_crossroads(width: int, height: int, soft_fill: float) -> list[list[in
     hard = {(x, y) for x, y in hard if x != mx and y != my}
     grid = _empty_grid(width, height)
     _set_hard(grid, hard)
-    for y in range(1, height - 1):
-        for x in range(1, width - 1):
+    for y in range(height):
+        for x in range(width):
             if (x, y) in hard:
                 continue
             if x == mx or y == my:
@@ -175,25 +163,25 @@ def _build_islands(width: int, height: int, soft_fill: float) -> list[list[int]]
     hard: set[tuple[int, int]] = set()
     mx, my = width // 2, height // 2
     # Thick hard walls dividing into quadrants, with bridge gaps
-    for x in range(1, width - 1):
+    for x in range(width):
         if abs(x - mx) > 1:
             hard.add((x, my))
-    for y in range(1, height - 1):
+    for y in range(height):
         if abs(y - my) > 1:
             hard.add((mx, y))
     # Extra pillars inside each island
     for ox, oy in [(0, 0), (mx, 0), (0, my), (mx, my)]:
-        for y in range(oy + 2, oy + my - 1, 2):
-            for x in range(ox + 2, ox + mx - 1, 2):
-                if 0 < x < width - 1 and 0 < y < height - 1:
+        for y in range(oy + 2, min(oy + my, height), 2):
+            for x in range(ox + 2, min(ox + mx, width), 2):
+                if 0 <= x < width and 0 <= y < height:
                     hard.add((x, y))
     grid = _empty_grid(width, height)
     _set_hard(grid, hard)
     _scatter_soft(grid, soft_fill, hard)
     # Ensure bridges stay clear
-    for x in range(mx - 1, mx + 2):
-        for y in range(my - 1, my + 2):
-            if 0 < x < width - 1 and 0 < y < height - 1 and (x, y) not in hard:
+    for x in range(max(0, mx - 1), min(width, mx + 2)):
+        for y in range(max(0, my - 1), min(height, my + 2)):
+            if (x, y) not in hard:
                 grid[y][x] = TILE_EMPTY
     return grid
 
@@ -202,11 +190,11 @@ def _build_diamond(width: int, height: int, soft_fill: float) -> list[list[int]]
     """Diamond hard-wall ring around center with open outer ring."""
     hard: set[tuple[int, int]] = set()
     mx, my = width // 2, height // 2
-    radius = min(mx, my) - 2
-    for y in range(1, height - 1):
-        for x in range(1, width - 1):
+    radius = min(mx, my) - 1
+    for y in range(height):
+        for x in range(width):
             d = abs(x - mx) + abs(y - my)
-            if d == radius or d == radius - 2:
+            if d == radius or d == max(1, radius - 2):
                 hard.add((x, y))
     # Card openings on the outer diamond
     for gate in [
@@ -225,15 +213,15 @@ def _build_diamond(width: int, height: int, soft_fill: float) -> list[list[int]]
 def _build_narrows(width: int, height: int, soft_fill: float) -> list[list[int]]:
     """Horizontal choke corridors — bombs are extremely deadly."""
     hard: set[tuple[int, int]] = set()
-    for y in range(2, height - 1, 2):
-        for x in range(1, width - 1):
+    for y in range(1, height, 2):
+        for x in range(width):
             # Leave 1-cell gaps every few columns
             if (x + y) % 4 != 1:
                 hard.add((x, y))
     # Vertical struts
-    for x in range(3, width - 2, 4):
-        for y in range(1, height - 1):
-            if y % 2 == 1:
+    for x in range(2, width, 4):
+        for y in range(height):
+            if y % 2 == 0:
                 hard.add((x, y))
     grid = _empty_grid(width, height)
     _set_hard(grid, hard)
@@ -253,8 +241,8 @@ def _build_arena(width: int, height: int, soft_fill: float) -> list[list[int]]:
     }
     grid = _empty_grid(width, height)
     _set_hard(grid, hard)
-    for y in range(1, height - 1):
-        for x in range(1, width - 1):
+    for y in range(height):
+        for x in range(width):
             if (x, y) in hard:
                 continue
             dist = abs(x - mx) + abs(y - my)

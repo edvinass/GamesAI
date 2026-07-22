@@ -87,7 +87,9 @@ def test_movement_blocked_by_hard_wall(engine: BombermanEngine, state: dict) -> 
     player = state["players"][0]
     pid = player["id"]
     bomber = state["bombers"][pid]
-    # Corner spawn (1,1) — moving up hits the border hard wall
+    # Place a hard wall north of the bomber
+    state["grid"][0][1] = TILE_HARD
+    state["grid"][1][1] = TILE_EMPTY
     bomber["x"] = 1
     bomber["y"] = 1
     bomber["next_direction"] = "up"
@@ -113,8 +115,8 @@ def test_slide_along_wall_when_turn_blocked(engine: BombermanEngine, state: dict
 
     for x in range(1, 6):
         state["grid"][1][x] = TILE_EMPTY
-    # Hard wall directly above the path
-    state["grid"][0][3] = TILE_HARD
+    # Hard wall directly above the bomber (blocks the held "up" turn)
+    state["grid"][0][2] = TILE_HARD
 
     bomber["x"], bomber["y"] = 2, 1
     bomber["direction"] = "right"
@@ -139,10 +141,10 @@ def test_blocked_then_open_moves_immediately(engine: BombermanEngine, state: dic
     state["bombers"][other]["y"] = state["grid_height"] - 2
     state["bombers"][other]["next_direction"] = "stop"
 
-    for x in range(1, 5):
+    for x in range(0, 5):
         state["grid"][1][x] = TILE_EMPTY
-    bomber["x"], bomber["y"] = 1, 1
-    bomber["next_direction"] = "left"  # into border
+    bomber["x"], bomber["y"] = 0, 1
+    bomber["next_direction"] = "left"  # out of bounds
     bomber["direction"] = "left"
     bomber["move_credit"] = 0.0
     state["bombs"] = []
@@ -150,12 +152,12 @@ def test_blocked_then_open_moves_immediately(engine: BombermanEngine, state: dic
 
     state, _ = engine.tick(state)
     assert state["phase"] == "playing"
-    assert state["bombers"][pid]["x"] == 1
+    assert state["bombers"][pid]["x"] == 0
     assert state["bombers"][pid]["move_credit"] >= 0.99
 
     bomber["next_direction"] = "right"
     state, _ = engine.tick(state)
-    assert state["bombers"][pid]["x"] == 2
+    assert state["bombers"][pid]["x"] == 1
 
 
 def test_bomb_destroys_soft_and_kills(engine: BombermanEngine, state: dict) -> None:
@@ -492,14 +494,14 @@ def test_kick_stops_at_hard_wall(engine: BombermanEngine, state: dict) -> None:
 
     bomber = state["bombers"][player["id"]]
     bomber["can_kick"] = True
-    bomber["x"], bomber["y"] = 2, 1
+    bomber["x"], bomber["y"] = 1, 1
     bomber["facing"] = "left"
-    # Bomb against the left hard border — cannot kick further left
-    state["grid"][1][1] = TILE_EMPTY
+    # Bomb on the left edge — cannot kick further left (out of bounds)
+    state["grid"][1][0] = TILE_EMPTY
     state["bombs"] = [
         {
             "id": "bomb-1",
-            "x": 1,
+            "x": 0,
             "y": 1,
             "owner_id": player["id"],
             "range": 1,
@@ -512,7 +514,7 @@ def test_kick_stops_at_hard_wall(engine: BombermanEngine, state: dict) -> None:
         }
     ]
     assert engine._can_kick_bomb(state, state["bombs"][0], "left") is False
-    assert engine._is_walkable(state, bomber, 1, 1) is False
+    assert engine._is_walkable(state, bomber, 0, 1) is False
 
 
 def test_tick_interval(engine: BombermanEngine) -> None:
