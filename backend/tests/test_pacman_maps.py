@@ -63,6 +63,23 @@ def test_classic_has_tunnels() -> None:
     assert len(built["tunnels"]) >= 1
 
 
+def test_maps_have_rectangular_border() -> None:
+    """Side walls stay flush except on tunnel rows (no protruding wing stubs)."""
+    from app.games.pacman.maps import TILE_WALL
+
+    for map_id in MAPS:
+        built = build_map(map_id)
+        grid = built["grid"]
+        width = built["width"]
+        height = built["height"]
+        tunnel_ys = {t["y"] for t in built["tunnels"]}
+        for y in range(height):
+            if y in tunnel_ys:
+                continue
+            assert grid[y][0] == TILE_WALL, f"{map_id} left edge open at y={y}"
+            assert grid[y][width - 1] == TILE_WALL, f"{map_id} right edge open at y={y}"
+
+
 def test_all_pellets_reachable() -> None:
     for map_id in MAPS:
         built = build_map(map_id)
