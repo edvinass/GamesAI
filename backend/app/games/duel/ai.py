@@ -771,7 +771,10 @@ def choose_ai_actions(
     difficulty: str | None = None,
 ) -> tuple[str, bool, bool, bool, int, bool]:
     """Returns move, shoot, charge_start, charge_release, charge_ticks, pu_use."""
-    cfg = get_ai_config(difficulty, state)
+    cfg = get_ai_config(
+        difficulty or state.get("settings", {}).get("ai_difficulty"),
+        state,
+    )
     height = _fighter_height(state)
     bullets = _incoming_bullets(state, player_id, fighter)
     enemy = _enemy_fighter(state, player_id)

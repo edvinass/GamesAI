@@ -10,7 +10,8 @@ def make_state() -> dict:
         {"id": "human", "nickname": "Human", "team": None, "role": None, "is_ai": False, "is_connected": True},
         {"id": "ai", "nickname": "AI", "team": None, "role": None, "is_ai": True, "is_connected": True},
     ]
-    state = engine.create_initial_state(players, {"countdown_sec": 0})
+    # Hard has mistake_rate 0 so behavior assertions stay deterministic.
+    state = engine.create_initial_state(players, {"countdown_sec": 0, "ai_difficulty": "hard"})
     state["phase"] = "playing"
     state["countdown_ends_at"] = None
     return state

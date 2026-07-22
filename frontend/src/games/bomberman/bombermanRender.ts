@@ -427,7 +427,6 @@ function drawBomb(
   s: number,
   fuse: number,
   time: number,
-  sliding = false,
   slideDir: string | null = null,
   flight: string | null = null,
 ) {
@@ -671,7 +670,6 @@ function drawBomber(
   ctx.translate(cx, cy)
 
   const legSpread = s * 0.07
-  const legLen = s * 0.16
   const armLen = s * 0.14
 
   // Legs (draw first so body overlaps)
@@ -982,7 +980,6 @@ export function renderFrame(
       s,
       b.fuse,
       time,
-      Boolean(b.sliding || b.flight),
       b.slide_dir ?? null,
       b.flight ?? null,
     )
@@ -1021,7 +1018,6 @@ export function renderFrame(
       s,
       b.fuse,
       time,
-      true,
       null,
       'carried',
     )
