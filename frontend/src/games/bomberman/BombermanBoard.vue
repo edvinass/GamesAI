@@ -583,10 +583,11 @@ onUnmounted(() => {
         <p v-else class="overlay-hint">Waiting for host to start a new game…</p>
       </div>
 
-      <div v-else-if="!isAlive" class="overlay eliminated">
-        <span class="overlay-kicker">Boom</span>
-        <span class="overlay-label">You were eliminated</span>
-        <span class="overlay-hint">Spectating the rest of the match…</span>
+      <div
+        v-else-if="!isAlive && gameState.phase === 'playing'"
+        class="spectate-banner"
+      >
+        <span class="spectate-label">Eliminated — spectating</span>
       </div>
     </div>
 
@@ -790,6 +791,29 @@ onUnmounted(() => {
 .overlay-hint {
   font-size: 0.9rem;
   color: var(--text-muted);
+}
+
+.spectate-banner {
+  position: absolute;
+  top: 0.65rem;
+  left: 50%;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(12, 14, 18, 0.72);
+  border: 1px solid rgba(249, 115, 22, 0.35);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  animation: overlay-in 0.3s ease-out;
+}
+
+.spectate-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fdba74;
+  white-space: nowrap;
 }
 
 .play-again-btn {
