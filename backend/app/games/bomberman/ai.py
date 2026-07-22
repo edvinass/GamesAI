@@ -145,10 +145,10 @@ def _walkable(
     bombs = _bomb_cells(state)
     if (x, y) in bombs:
         bomb = bombs[(x, y)]
-        # Airborne thrown bombs do not block the floor.
-        if bomb.get("flight") == "throw":
+        # Airborne thrown / carried bombs do not block the floor.
+        if bomb.get("flight") in ("throw", "carried"):
             return True
-        if bomber.get("can_throw"):
+        if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
             return True
         # Kick holders can path through bombs (they'll push them when adjacent).
         if bomber.get("can_kick") and not bomb.get("flight"):
@@ -178,7 +178,7 @@ def _throw_landing(
         if not (0 <= x < width and 0 <= y < height):
             break
         other = bombs.get((x, y))
-        if other is not None and other.get("flight") != "throw":
+        if other is not None and other.get("flight") not in ("throw", "carried"):
             break
         if state["grid"][y][x] == TILE_EMPTY:
             last_empty = (x, y)
@@ -575,10 +575,9 @@ def choose_ai_action(
     here_lethal = danger.get(pos)
 
     # 1) Flee any blast covering us — never bomb while threatened.
-    #    If standing on a bomb with throw power, hurl it away from the escape path.
+    #    Power Glove: if carrying, throw away from escape; if standing on a bomb, pick it up.
     if here_lethal is not None:
-        bomb_here = _bomb_cells(state).get(pos)
-        if bomb_here and bomber.get("can_throw") and not bomb_here.get("flight"):
+        if bomber.get("can_throw") and bomber.get("carrying_bomb_id"):
             flee_dir, _ = _find_escape(
                 state, bomber, danger, max_steps=MAX_ESCAPE_STEPS + 3
             )
@@ -597,6 +596,14 @@ def choose_ai_action(
                 if _throw_landing(state, pos[0], pos[1], throw_dir) is None:
                     continue
                 return throw_dir, True
+        bomb_here = _bomb_cells(state).get(pos)
+        if (
+            bomb_here
+            and bomber.get("can_throw")
+            and not bomber.get("carrying_bomb_id")
+            and bomb_here.get("flight") not in ("throw", "kick", "carried")
+        ):
+            return bomber.get("facing") if bomber.get("facing") in DIRECTIONS else "right", True
         flee_dir, _ = _find_escape(
             state, bomber, danger, max_steps=MAX_ESCAPE_STEPS + 3
         )
@@ -608,9 +615,38 @@ def choose_ai_action(
     # If a neighbor is safer and current tile will be hit soon by a distant bomb...
     # (already handled when here_lethal is set)
 
+    # Throw a carried bomb promptly (classic glove — don't walk around holding forever).
+    if bomber.get("can_throw") and bomber.get("carrying_bomb_id"):
+        preferred: list[str] = []
+        for key in ("facing", "direction", "next_direction"):
+            value = bomber.get(key)
+            if value in DIRECTIONS and value not in preferred:
+                preferred.append(value)
+        for d in DIRECTIONS:
+            if d not in preferred:
+                preferred.append(d)
+        for throw_dir in preferred:
+            if _throw_landing(state, pos[0], pos[1], throw_dir) is None:
+                continue
+            return throw_dir, True
+
     active = sum(1 for b in state.get("bombs") or [] if b.get("owner_id") == player_id)
     max_bombs = int(bomber.get("max_bombs", 1))
-    can_bomb = active < max_bombs and _bomb_cells(state).get(pos) is None
+    bomb_here = _bomb_cells(state).get(pos)
+    can_bomb = (
+        active < max_bombs
+        and bomb_here is None
+        and not bomber.get("carrying_bomb_id")
+    )
+    # Glove: pick up a bomb underfoot when useful.
+    if (
+        bomber.get("can_throw")
+        and not bomber.get("carrying_bomb_id")
+        and bomb_here
+        and bomb_here.get("flight") not in ("throw", "kick", "carried")
+        and random.random() < 0.45
+    ):
+        return bomber.get("facing") if bomber.get("facing") in DIRECTIONS else "right", True
 
     # 2) Bombing decisions — traps first, then enemy line, then soft.
     if can_bomb:

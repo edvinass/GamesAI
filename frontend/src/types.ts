@@ -148,6 +148,7 @@ export interface BombermanBomber {
   speed_level: number
   can_throw?: boolean
   can_kick?: boolean
+  carrying_bomb_id?: string | null
   move_credit?: number
   kills: number
   passable_bomb_ids?: string[]
@@ -160,7 +161,7 @@ export interface BombermanBomb {
   owner_id: string
   range: number
   fuse: number
-  flight?: 'throw' | 'kick' | null
+  flight?: 'throw' | 'kick' | 'carried' | null
   sliding?: boolean
   slide_dir?: string | null
   land_x?: number | null

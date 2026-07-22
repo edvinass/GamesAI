@@ -437,15 +437,16 @@ function drawBomb(
     left: [-0.12, 0],
     right: [0.12, 0],
   }
-  const airborne = flight === 'throw' || (sliding && flight !== 'kick')
+  const airborne = flight === 'throw'
+  const carried = flight === 'carried'
   const kicking = flight === 'kick'
-  const [ox, oy] = sliding && slideDir ? (dirOff[slideDir] ?? [0, 0]) : [0, 0]
-  const lift = airborne ? s * 0.14 : kicking ? s * 0.04 : 0
+  const [ox, oy] = (airborne || kicking) && slideDir ? (dirOff[slideDir] ?? [0, 0]) : [0, 0]
+  const lift = carried ? s * 0.34 : airborne ? s * 0.16 : kicking ? s * 0.04 : 0
   const cx = x + s / 2 + ox * s
   const cy = y + s / 2 + oy * s - lift
   const urgent = fuse <= 5
   const pulse = 1 + Math.sin(time / (urgent ? 45 : 90) + fuse) * (urgent ? 0.1 : 0.045)
-  const r = s * 0.3 * pulse
+  const r = s * (carried ? 0.24 : 0.3) * pulse
 
   // Warning ring when fuse is low
   if (urgent) {
@@ -462,13 +463,13 @@ function drawBomb(
   ctx.ellipse(
     cx,
     cy + r * 0.95 + lift,
-    r * (airborne ? 0.5 : kicking ? 0.65 : 0.75),
+    r * (airborne || carried ? 0.45 : kicking ? 0.65 : 0.75),
     r * 0.28,
     0,
     0,
     Math.PI * 2,
   )
-  ctx.fillStyle = airborne || kicking ? 'rgba(0,0,0,0.22)' : 'rgba(0,0,0,0.35)'
+  ctx.fillStyle = airborne || kicking || carried ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.35)'
   ctx.fill()
 
   const body = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.25, r * 0.1, cx, cy, r)
@@ -479,12 +480,14 @@ function drawBomb(
   ctx.arc(cx, cy + s * 0.02, r, 0, Math.PI * 2)
   ctx.fillStyle = body
   ctx.fill()
-  ctx.strokeStyle = airborne
-    ? 'rgba(251, 191, 36, 0.5)'
-    : kicking
-      ? 'rgba(244, 114, 182, 0.55)'
-      : 'rgba(255,255,255,0.12)'
-  ctx.lineWidth = sliding ? Math.max(1.5, s * 0.045) : 1
+  ctx.strokeStyle = carried
+    ? 'rgba(251, 191, 36, 0.65)'
+    : airborne
+      ? 'rgba(251, 191, 36, 0.5)'
+      : kicking
+        ? 'rgba(244, 114, 182, 0.55)'
+        : 'rgba(255,255,255,0.12)'
+  ctx.lineWidth = airborne || kicking || carried ? Math.max(1.5, s * 0.045) : 1
   ctx.stroke()
 
   // Highlight
@@ -971,6 +974,7 @@ export function renderFrame(
   }
 
   for (const b of bombs) {
+    if (b.flight === 'carried') continue
     drawBomb(
       ctx,
       ox + b.x * s,
@@ -1004,6 +1008,22 @@ export function renderFrame(
       b.direction,
       time,
       b.speed ?? 0,
+    )
+  }
+
+  // Carried bombs sit above the bomber's head (classic Power Glove).
+  for (const b of bombs) {
+    if (b.flight !== 'carried') continue
+    drawBomb(
+      ctx,
+      ox + b.x * s,
+      oy + b.y * s,
+      s,
+      b.fuse,
+      time,
+      true,
+      null,
+      'carried',
     )
   }
 

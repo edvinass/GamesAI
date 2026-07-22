@@ -278,15 +278,21 @@ def test_throw_powerup_pickup_and_throw(engine: BombermanEngine, state: dict) ->
     assert state["bombers"][pid]["can_throw"] is True
     assert any(e["type"] == "powerup_taken" and e.get("powerup_type") == "throw" for e in events)
 
-    # Plant, then throw while standing on it
+    # Plant, then pick up, then throw (classic Power Glove)
     state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
     assert any(e["type"] == "bomb_placed" for e in events)
     bomb = state["bombs"][0]
     assert bomb["x"] == 2 and bomb["y"] == 1
 
     state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert any(e["type"] == "bomb_picked_up" for e in events)
+    assert bomber["carrying_bomb_id"] == bomb["id"]
+    assert bomb["flight"] == "carried"
+
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
     assert any(e["type"] == "bomb_thrown" for e in events)
-    assert bomb["sliding"] is True
+    assert bomber["carrying_bomb_id"] is None
+    assert bomb["flight"] == "throw"
     assert bomb["slide_dir"] == "right"
     assert bomb["x"] == 3 and bomb["y"] == 1
     assert bomb["land_x"] is not None and bomb["land_x"] >= 3
@@ -320,6 +326,7 @@ def test_throw_flies_over_soft_walls(engine: BombermanEngine, state: dict) -> No
             "owner_id": player["id"],
             "range": 1,
             "fuse": 20,
+            "flight": None,
             "sliding": False,
             "slide_dir": None,
             "land_x": None,
@@ -332,6 +339,7 @@ def test_throw_flies_over_soft_walls(engine: BombermanEngine, state: dict) -> No
             "owner_id": other,
             "range": 1,
             "fuse": 20,
+            "flight": None,
             "sliding": False,
             "slide_dir": None,
             "land_x": None,
@@ -342,6 +350,8 @@ def test_throw_flies_over_soft_walls(engine: BombermanEngine, state: dict) -> No
     state["_bomb_seq"] = 2
 
     state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert any(e["type"] == "bomb_picked_up" for e in events)
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
     assert any(e["type"] == "bomb_thrown" for e in events)
     bomb = next(b for b in state["bombs"] if b["id"] == "bomb-1")
     assert bomb["land_x"] == 7
@@ -349,10 +359,10 @@ def test_throw_flies_over_soft_walls(engine: BombermanEngine, state: dict) -> No
 
     # Fly until landed past the soft walls
     for _ in range(12):
-        if not bomb.get("sliding"):
+        if bomb.get("flight") != "throw":
             break
         state, _ = engine.tick(state)
-    assert bomb["sliding"] is False
+    assert bomb["flight"] is None
     assert bomb["x"] == 7 and bomb["y"] == 1
     assert state["grid"][1][3] == TILE_SOFT
     assert state["grid"][1][4] == TILE_SOFT
@@ -388,16 +398,17 @@ def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     ]
     state["explosions"] = []
 
-    # With throw, walk onto the opponent bomb
+    # With throw, walk onto the opponent bomb → auto pick up
     assert engine._is_walkable(state, bomber, 2, 1)
-    state, _ = engine.tick(state)
+    state, events = engine.tick(state)
     assert bomber["x"] == 2 and bomber["y"] == 1
+    assert bomber["carrying_bomb_id"] == "enemy-bomb"
+    assert any(e["type"] == "bomb_picked_up" for e in events)
 
     state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
     assert any(e["type"] == "bomb_thrown" for e in events)
     bomb = state["bombs"][0]
     assert bomb["owner_id"] == other
-    assert bomb["sliding"] is True
     assert bomb["flight"] == "throw"
     assert bomb["x"] == 3
 

@@ -146,13 +146,19 @@ function onKeyDown(e: KeyboardEvent) {
     if (!e.repeat) {
       void unlockAudio()
       const me = myBomber.value
+      const carrying = Boolean(me?.carrying_bomb_id)
       const standingOnBomb =
         me &&
         (props.gameState.bombs ?? []).some(
-          (b) => b.x === me.x && b.y === me.y && !b.flight && !b.sliding,
+          (b) =>
+            b.x === me.x &&
+            b.y === me.y &&
+            b.flight !== 'throw' &&
+            b.flight !== 'kick' &&
+            b.flight !== 'carried',
         )
-      // Throw/kick SFX come from state sync; only preview place here.
-      if (!(me?.can_throw && standingOnBomb)) {
+      // Place SFX only for planting; pick up / throw come from state sync.
+      if (!(me?.can_throw && (carrying || standingOnBomb))) {
         playBombPlace()
       }
       emit('action', { type: 'place_bomb' })
@@ -315,12 +321,16 @@ function playStateSounds(state: BombermanGameState) {
     }
   }
 
-  // Throw / kick / stop
+  // Throw / kick / pick up / stop
   for (const bomb of state.bombs ?? []) {
     const prevBomb = prev.bombs.find((b) => b.id === bomb.id)
     if (!prevBomb) continue
-    const wasMoving = Boolean(prevBomb.flight || prevBomb.sliding)
-    const isMoving = Boolean(bomb.flight || bomb.sliding)
+    if (bomb.flight === 'carried' && prevBomb.flight !== 'carried') {
+      playBombPlace()
+      break
+    }
+    const wasMoving = prevBomb.flight === 'throw' || prevBomb.flight === 'kick' || prevBomb.sliding
+    const isMoving = bomb.flight === 'throw' || bomb.flight === 'kick' || Boolean(bomb.sliding)
     if (!wasMoving && isMoving) {
       if (bomb.flight === 'kick') playBombKick()
       else playBombThrow()
@@ -636,7 +646,8 @@ onUnmounted(() => {
         </button>
         <p v-if="canControl">
           <strong>Hold</strong> arrows / WASD ·
-          <strong>Space</strong> bomb<span v-if="myBomber?.can_throw"> / throw</span>
+          <strong>Space</strong> bomb<span v-if="myBomber?.can_throw">
+            / {{ myBomber?.carrying_bomb_id ? 'throw' : 'pick up' }}</span>
           <span v-if="myBomber?.can_kick"> · walk into bombs to kick</span>
           <span class="muted">({{ myActiveBombs }}/{{ myBomber?.max_bombs ?? 1 }})</span>
         </p>
