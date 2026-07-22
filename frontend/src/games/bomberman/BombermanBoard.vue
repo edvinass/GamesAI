@@ -2,9 +2,10 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, BombermanGameState, BombermanBomb } from '@/types'
 import {
-  interpolateBombers,
   renderFrame,
   snapshotBombers,
+  smoothBombers,
+  smoothBombs,
   spawnDebrisParticles,
   spawnDeathParticles,
   spawnExplosionParticles,
@@ -12,6 +13,7 @@ import {
   updateParticles,
   type BomberSnapshot,
   type Particle,
+  type SmoothBomber,
 } from './bombermanRender'
 import {
   isSoundMuted,
@@ -185,17 +187,16 @@ function onWindowBlur() {
   clearMovementInput()
 }
 
-function easeOutQuad(t: number) {
-  return 1 - (1 - t) * (1 - t)
-}
-
 let rafId = 0
 let resizeObserver: ResizeObserver | null = null
-let tickReceivedAt = performance.now()
 let lastFrameTime = performance.now()
 let lastTick = -1
-let prevBombers: Record<string, BomberSnapshot> = {}
+/** Server truth positions. */
 let targetBombers: Record<string, BomberSnapshot> = {}
+/** Continuously smoothed render positions. */
+let displayBombers: Record<string, SmoothBomber> = {}
+/** Smoothed bomb positions while kicked / thrown. */
+const displayBombPos: Record<string, { x: number; y: number }> = {}
 let particles: Particle[] = []
 let shake = 0
 
@@ -448,15 +449,16 @@ function playStateSounds(state: BombermanGameState) {
 function onStateSync() {
   const tick = props.gameState.tick
   const snap = snapshotBombers(props.gameState.bombers)
+  targetBombers = snap
   if (tick !== lastTick) {
-    prevBombers = Object.keys(targetBombers).length ? targetBombers : snap
-    targetBombers = snap
     lastTick = tick
-    tickReceivedAt = performance.now()
     playStateSounds(props.gameState)
-  } else {
-    targetBombers = snap
-    if (!Object.keys(prevBombers).length) prevBombers = snap
+  }
+  // Seed display on first sync / empty state.
+  if (!Object.keys(displayBombers).length) {
+    displayBombers = Object.fromEntries(
+      Object.entries(snap).map(([pid, b]) => [pid, { ...b, speed: 0 }]),
+    )
   }
 }
 
@@ -506,21 +508,25 @@ function paint(now: number) {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const tickMs =
-    props.gameState.tick_ms ?? Number(props.room.settings?.tick_ms ?? 150)
-  const rawT =
-    props.gameState.phase === 'playing'
-      ? Math.min(1, (now - tickReceivedAt) / Math.max(16, tickMs))
-      : 1
-  const t = easeOutQuad(rawT)
-  const rendered = interpolateBombers(prevBombers, targetBombers, t)
+  const playing = props.gameState.phase === 'playing'
+  if (playing) {
+    displayBombers = smoothBombers(displayBombers, targetBombers, dt, 18)
+  } else {
+    displayBombers = Object.fromEntries(
+      Object.entries(targetBombers).map(([pid, b]) => [pid, { ...b, speed: 0 }]),
+    )
+  }
+
+  const renderedBombs = playing
+    ? smoothBombs(displayBombPos, props.gameState.bombs ?? [], dt, 20)
+    : (props.gameState.bombs ?? [])
 
   renderFrame(ctx, displayW, displayH, {
     gridW: props.gameState.grid_width,
     gridH: props.gameState.grid_height,
     grid: props.gameState.grid,
-    bombers: rendered,
-    bombs: props.gameState.bombs ?? [],
+    bombers: displayBombers,
+    bombs: renderedBombs,
     explosions: props.gameState.explosions ?? [],
     powerups: props.gameState.powerups ?? [],
     playerId: props.playerId,

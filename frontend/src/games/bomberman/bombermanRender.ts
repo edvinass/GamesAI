@@ -17,6 +17,11 @@ export interface BomberSnapshot {
   direction: string
 }
 
+export interface SmoothBomber extends BomberSnapshot {
+  /** Cells per second, for walk-cycle animation. */
+  speed: number
+}
+
 export interface Particle {
   x: number
   y: number
@@ -34,7 +39,10 @@ export interface RenderFrameInput {
   gridW: number
   gridH: number
   grid: number[][]
-  bombers: Record<string, { x: number; y: number; alive: boolean; color: string; direction: string }>
+  bombers: Record<
+    string,
+    { x: number; y: number; alive: boolean; color: string; direction: string; speed?: number }
+  >
   bombs: BombermanBomb[]
   explosions: BombermanExplosion[]
   powerups: BombermanPowerup[]
@@ -112,6 +120,108 @@ export function interpolateBombers(
       direction: cur.direction,
     }
   }
+  return out
+}
+
+/**
+ * Continuously ease display positions toward server grid coords.
+ * Feels smoother than per-tick lerp when ticks jitter or speed moves 2+ cells.
+ */
+export function smoothBombers(
+  display: Record<string, SmoothBomber>,
+  target: Record<string, BomberSnapshot>,
+  dt: number,
+  followHz = 18,
+): Record<string, SmoothBomber> {
+  const alpha = 1 - Math.exp(-followHz * Math.max(0, dt))
+  const out: Record<string, SmoothBomber> = {}
+
+  for (const [pid, cur] of Object.entries(target)) {
+    const prev = display[pid]
+    if (!prev || !cur.alive || !prev.alive) {
+      out[pid] = { ...cur, speed: 0 }
+      continue
+    }
+
+    const dx = cur.x - prev.x
+    const dy = cur.y - prev.y
+    // Hard snap on large jumps (death warp / desync).
+    if (Math.abs(dx) > 2.75 || Math.abs(dy) > 2.75) {
+      out[pid] = { ...cur, speed: 0 }
+      continue
+    }
+
+    let x = prev.x + dx * alpha
+    let y = prev.y + dy * alpha
+    if (Math.abs(cur.x - x) < 0.012) x = cur.x
+    if (Math.abs(cur.y - y) < 0.012) y = cur.y
+
+    const moveX = x - prev.x
+    const moveY = y - prev.y
+    const speed = Math.hypot(moveX, moveY) / Math.max(dt, 1e-4)
+
+    let direction = cur.direction
+    if (speed > 0.35) {
+      direction =
+        Math.abs(moveX) >= Math.abs(moveY)
+          ? moveX >= 0
+            ? 'right'
+            : 'left'
+          : moveY >= 0
+            ? 'down'
+            : 'up'
+    } else if (cur.direction === 'stop' && prev.direction !== 'stop') {
+      // Keep last facing briefly while settling onto a cell.
+      direction = prev.direction
+    }
+
+    out[pid] = {
+      x,
+      y,
+      alive: cur.alive,
+      color: cur.color,
+      direction,
+      speed,
+    }
+  }
+
+  return out
+}
+
+/** Smooth kicked / thrown bombs the same way. */
+export function smoothBombs(
+  display: Record<string, { x: number; y: number }>,
+  bombs: BombermanBomb[],
+  dt: number,
+  followHz = 20,
+): BombermanBomb[] {
+  const alpha = 1 - Math.exp(-followHz * Math.max(0, dt))
+  const nextDisplay: Record<string, { x: number; y: number }> = {}
+  const out = bombs.map((bomb) => {
+    const prev = display[bomb.id]
+    const moving = Boolean(bomb.flight || bomb.sliding)
+    if (!prev || !moving) {
+      nextDisplay[bomb.id] = { x: bomb.x, y: bomb.y }
+      return bomb
+    }
+    const dx = bomb.x - prev.x
+    const dy = bomb.y - prev.y
+    if (Math.abs(dx) > 2.75 || Math.abs(dy) > 2.75) {
+      nextDisplay[bomb.id] = { x: bomb.x, y: bomb.y }
+      return bomb
+    }
+    let x = prev.x + dx * alpha
+    let y = prev.y + dy * alpha
+    if (Math.abs(bomb.x - x) < 0.02) x = bomb.x
+    if (Math.abs(bomb.y - y) < 0.02) y = bomb.y
+    nextDisplay[bomb.id] = { x, y }
+    return { ...bomb, x, y }
+  })
+  // Mutate display map in place for caller convenience
+  for (const key of Object.keys(display)) {
+    if (!(key in nextDisplay)) delete display[key]
+  }
+  Object.assign(display, nextDisplay)
   return out
 }
 
@@ -518,16 +628,29 @@ function drawBomber(
   isMe: boolean,
   direction: string,
   time: number,
+  speed = 0,
 ) {
-  const moving = direction !== 'stop'
-  const bounce = moving ? Math.abs(Math.sin(time / 90)) * s * 0.04 : Math.sin(time / 400) * s * 0.012
+  const moving = speed > 0.4 || direction !== 'stop'
+  const walk = Math.min(1, speed / 8)
+  const bounce = moving
+    ? Math.abs(Math.sin(time / (75 - walk * 18))) * s * (0.035 + walk * 0.035)
+    : Math.sin(time / 420) * s * 0.01
+  const squash = moving ? 1 + Math.sin(time / (75 - walk * 18)) * 0.04 * walk : 1
   const cx = x + s / 2
   const cy = y + s / 2 - bounce
   const bodyR = s * 0.3
 
   // Shadow
   ctx.beginPath()
-  ctx.ellipse(cx, y + s * 0.72 + bounce * 0.4, bodyR * 0.85, bodyR * 0.26, 0, 0, Math.PI * 2)
+  ctx.ellipse(
+    cx,
+    y + s * 0.72 + bounce * 0.35,
+    bodyR * (0.85 + walk * 0.08) * squash,
+    bodyR * (0.26 / squash),
+    0,
+    0,
+    Math.PI * 2,
+  )
   ctx.fillStyle = 'rgba(0,0,0,0.32)'
   ctx.fill()
 
@@ -540,20 +663,23 @@ function drawBomber(
     ctx.stroke()
   }
 
-  // Body
+  // Body with slight walk squash
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.scale(squash, 1 / squash)
   const bodyGrad = ctx.createRadialGradient(
-    cx - bodyR * 0.3,
-    cy - bodyR * 0.35,
+    -bodyR * 0.3,
+    -bodyR * 0.35,
     bodyR * 0.15,
-    cx,
-    cy,
+    0,
+    0,
     bodyR,
   )
   bodyGrad.addColorStop(0, shade(color, 0.35))
   bodyGrad.addColorStop(0.55, color)
   bodyGrad.addColorStop(1, shade(color, -0.25))
   ctx.beginPath()
-  ctx.arc(cx, cy, bodyR, 0, Math.PI * 2)
+  ctx.arc(0, 0, bodyR, 0, Math.PI * 2)
   ctx.fillStyle = bodyGrad
   ctx.fill()
   ctx.strokeStyle = isMe ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.35)'
@@ -562,10 +688,11 @@ function drawBomber(
 
   // Helmet band
   ctx.beginPath()
-  ctx.arc(cx, cy - bodyR * 0.15, bodyR * 0.92, Math.PI * 1.15, Math.PI * 1.85)
+  ctx.arc(0, -bodyR * 0.15, bodyR * 0.92, Math.PI * 1.15, Math.PI * 1.85)
   ctx.strokeStyle = 'rgba(255,255,255,0.22)'
   ctx.lineWidth = Math.max(2, s * 0.07)
   ctx.stroke()
+  ctx.restore()
 
   // Eyes face direction
   const face: Record<string, [number, number]> = {
@@ -751,6 +878,7 @@ export function renderFrame(
       pid === playerId,
       b.direction,
       time,
+      b.speed ?? 0,
     )
   }
 
