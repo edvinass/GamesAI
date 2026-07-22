@@ -18,7 +18,7 @@ export interface BomberSnapshot {
 }
 
 export interface SmoothBomber extends BomberSnapshot {
-  /** Cells per second, for walk-cycle animation. */
+  /** Cells advanced this tick (for walk-cycle animation). */
   speed: number
 }
 
@@ -93,73 +93,113 @@ function shade(hex: string, amount: number): string {
   return `rgb(${Math.round(r + (t - r) * p)},${Math.round(g + (t - g) * p)},${Math.round(b + (t - b) * p)})`
 }
 
+const DIR_DELTA: Record<string, [number, number]> = {
+  up: [0, -1],
+  down: [0, 1],
+  left: [-1, 0],
+  right: [1, 0],
+}
+
+/**
+ * Tick-timed lerp: complete each cell step over one tick, then glide slightly
+ * along facing so late ticks don't freeze motion (same approach as Pac-Man).
+ */
+export function lerpBomber(
+  prev: BomberSnapshot | undefined,
+  target: BomberSnapshot,
+  t: number,
+): SmoothBomber {
+  if (!prev || !target.alive || !prev.alive) {
+    return { ...target, speed: 0 }
+  }
+  const dx = target.x - prev.x
+  const dy = target.y - prev.y
+  // Snap on teleports / multi-cell warps.
+  if (Math.abs(dx) > 2.75 || Math.abs(dy) > 2.75) {
+    return { ...target, speed: 0 }
+  }
+
+  let direction = target.direction
+  if (Math.hypot(dx, dy) > 0.01) {
+    direction =
+      Math.abs(dx) >= Math.abs(dy)
+        ? dx >= 0
+          ? 'right'
+          : 'left'
+        : dy >= 0
+          ? 'down'
+          : 'up'
+  } else if (target.direction === 'stop' && prev.direction !== 'stop') {
+    direction = prev.direction
+  }
+
+  if (t > 1) {
+    const moved = Math.hypot(dx, dy) > 0.01
+    // Only micro-glide when we actually stepped — avoids sliding into walls while blocked.
+    if (moved) {
+      const [ddx, ddy] = DIR_DELTA[target.direction] ?? DIR_DELTA[direction] ?? [0, 0]
+      const extra = Math.min(0.28, t - 1) * 0.45
+      return {
+        ...target,
+        x: target.x + ddx * extra,
+        y: target.y + ddy * extra,
+        direction,
+        speed: Math.max(Math.hypot(dx, dy), 0.85),
+      }
+    }
+    return { ...target, direction, speed: 0 }
+  }
+
+  const u = Math.min(1, Math.max(0, t))
+  return {
+    ...target,
+    x: prev.x + dx * u,
+    y: prev.y + dy * u,
+    direction,
+    speed: Math.hypot(dx, dy),
+  }
+}
+
 export function interpolateBombers(
   prev: Record<string, BomberSnapshot>,
   target: Record<string, BomberSnapshot>,
   t: number,
-): Record<string, { x: number; y: number; alive: boolean; color: string; direction: string }> {
-  const out: Record<string, { x: number; y: number; alive: boolean; color: string; direction: string }> = {}
+): Record<string, SmoothBomber> {
+  const out: Record<string, SmoothBomber> = {}
   for (const [pid, cur] of Object.entries(target)) {
-    const p = prev[pid]
-    if (!p || !cur.alive) {
-      out[pid] = { ...cur }
-      continue
-    }
-    const dx = cur.x - p.x
-    const dy = cur.y - p.y
-    // Snap on teleports / respawns
-    if (Math.abs(dx) > 1.5 || Math.abs(dy) > 1.5) {
-      out[pid] = { ...cur }
-      continue
-    }
-    out[pid] = {
-      x: p.x + dx * t,
-      y: p.y + dy * t,
-      alive: cur.alive,
-      color: cur.color,
-      direction: cur.direction,
-    }
+    out[pid] = lerpBomber(prev[pid], cur, t)
   }
   return out
 }
 
-/**
- * Continuously ease display positions toward server grid coords.
- * Feels smoother than per-tick lerp when ticks jitter or speed moves 2+ cells.
- */
+/** Exponential chase toward server coords (legacy; prefer interpolateBombers). */
 export function smoothBombers(
   display: Record<string, SmoothBomber>,
   target: Record<string, BomberSnapshot>,
   dt: number,
-  followHz = 18,
+  followHz = 28,
 ): Record<string, SmoothBomber> {
   const alpha = 1 - Math.exp(-followHz * Math.max(0, dt))
   const out: Record<string, SmoothBomber> = {}
-
   for (const [pid, cur] of Object.entries(target)) {
     const prev = display[pid]
     if (!prev || !cur.alive || !prev.alive) {
       out[pid] = { ...cur, speed: 0 }
       continue
     }
-
     const dx = cur.x - prev.x
     const dy = cur.y - prev.y
-    // Hard snap on large jumps (death warp / desync).
     if (Math.abs(dx) > 2.75 || Math.abs(dy) > 2.75) {
       out[pid] = { ...cur, speed: 0 }
       continue
     }
-
     let x = prev.x + dx * alpha
     let y = prev.y + dy * alpha
     if (Math.abs(cur.x - x) < 0.012) x = cur.x
     if (Math.abs(cur.y - y) < 0.012) y = cur.y
-
     const moveX = x - prev.x
     const moveY = y - prev.y
     const speed = Math.hypot(moveX, moveY) / Math.max(dt, 1e-4)
-
     let direction = cur.direction
     if (speed > 0.35) {
       direction =
@@ -171,29 +211,42 @@ export function smoothBombers(
             ? 'down'
             : 'up'
     } else if (cur.direction === 'stop' && prev.direction !== 'stop') {
-      // Keep last facing briefly while settling onto a cell.
       direction = prev.direction
     }
-
-    out[pid] = {
-      x,
-      y,
-      alive: cur.alive,
-      color: cur.color,
-      direction,
-      speed,
-    }
+    out[pid] = { x, y, alive: cur.alive, color: cur.color, direction, speed }
   }
-
   return out
 }
 
-/** Smooth kicked / thrown bombs the same way. */
+/** Tick-timed positions for kicked / thrown bombs. */
+export function interpolateBombs(
+  prev: Record<string, { x: number; y: number }>,
+  bombs: BombermanBomb[],
+  t: number,
+): BombermanBomb[] {
+  const u = Math.min(1, Math.max(0, t))
+  return bombs.map((bomb) => {
+    const p = prev[bomb.id]
+    const moving = bomb.flight === 'throw' || bomb.flight === 'kick' || Boolean(bomb.sliding)
+    if (!p || !moving) return bomb
+    const dx = bomb.x - p.x
+    const dy = bomb.y - p.y
+    if (Math.abs(dx) > 2.75 || Math.abs(dy) > 2.75) return bomb
+    if (t > 1 && Math.hypot(dx, dy) > 0.01) {
+      const [ddx, ddy] = DIR_DELTA[bomb.slide_dir ?? ''] ?? [0, 0]
+      const extra = Math.min(0.28, t - 1) * 0.45
+      return { ...bomb, x: bomb.x + ddx * extra, y: bomb.y + ddy * extra }
+    }
+    return { ...bomb, x: p.x + dx * u, y: p.y + dy * u }
+  })
+}
+
+/** @deprecated Prefer interpolateBombs. */
 export function smoothBombs(
   display: Record<string, { x: number; y: number }>,
   bombs: BombermanBomb[],
   dt: number,
-  followHz = 20,
+  followHz = 28,
 ): BombermanBomb[] {
   const alpha = 1 - Math.exp(-followHz * Math.max(0, dt))
   const nextDisplay: Record<string, { x: number; y: number }> = {}
@@ -217,7 +270,6 @@ export function smoothBombs(
     nextDisplay[bomb.id] = { x, y }
     return { ...bomb, x, y }
   })
-  // Mutate display map in place for caller convenience
   for (const key of Object.keys(display)) {
     if (!(key in nextDisplay)) delete display[key]
   }
@@ -632,8 +684,9 @@ function drawBomber(
   time: number,
   speed = 0,
 ) {
-  const moving = speed > 0.4 || direction !== 'stop'
-  const walk = Math.min(1, speed / 8)
+  // `speed` is cells advanced this tick (≈1 at base, up to ~2 with speed power-ups).
+  const moving = speed > 0.12
+  const walk = moving ? Math.min(1, 0.55 + speed * 0.4) : 0
   const phase = time / (70 - walk * 16)
   const stride = moving ? Math.sin(phase) * walk : 0
   const bounce = moving

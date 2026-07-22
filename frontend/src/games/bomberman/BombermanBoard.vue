@@ -2,10 +2,10 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, BombermanGameState, BombermanBomb } from '@/types'
 import {
+  interpolateBombers,
+  interpolateBombs,
   renderFrame,
   snapshotBombers,
-  smoothBombers,
-  smoothBombs,
   spawnDebrisParticles,
   spawnDeathParticles,
   spawnExplosionParticles,
@@ -238,12 +238,14 @@ let rafId = 0
 let resizeObserver: ResizeObserver | null = null
 let lastFrameTime = performance.now()
 let lastTick = -1
-/** Server truth positions. */
+let tickReceivedAt = performance.now()
+/** Previous tick positions (lerp origin). */
+let prevBombers: Record<string, BomberSnapshot> = {}
+/** Latest server truth positions. */
 let targetBombers: Record<string, BomberSnapshot> = {}
-/** Continuously smoothed render positions. */
-let displayBombers: Record<string, SmoothBomber> = {}
-/** Smoothed bomb positions while kicked / thrown. */
-const displayBombPos: Record<string, { x: number; y: number }> = {}
+/** Previous / current bomb cells for kick/throw lerp. */
+let prevBombPos: Record<string, { x: number; y: number }> = {}
+let targetBombPos: Record<string, { x: number; y: number }> = {}
 let particles: Particle[] = []
 let shake = 0
 
@@ -497,19 +499,29 @@ function playStateSounds(state: BombermanGameState) {
   }
 }
 
+function bombPosSnapshot(bombs: BombermanBomb[]): Record<string, { x: number; y: number }> {
+  return Object.fromEntries(bombs.map((b) => [b.id, { x: b.x, y: b.y }]))
+}
+
 function onStateSync() {
   const tick = props.gameState.tick
   const snap = snapshotBombers(props.gameState.bombers)
-  targetBombers = snap
+  const bombSnap = bombPosSnapshot(props.gameState.bombs ?? [])
+
   if (tick !== lastTick) {
+    // Use last rendered targets as origin so motion never snaps backward.
+    prevBombers = Object.keys(targetBombers).length ? { ...targetBombers } : snap
+    prevBombPos = Object.keys(targetBombPos).length ? { ...targetBombPos } : bombSnap
+    targetBombers = snap
+    targetBombPos = bombSnap
     lastTick = tick
+    tickReceivedAt = performance.now()
     playStateSounds(props.gameState)
-  }
-  // Seed display on first sync / empty state.
-  if (!Object.keys(displayBombers).length) {
-    displayBombers = Object.fromEntries(
-      Object.entries(snap).map(([pid, b]) => [pid, { ...b, speed: 0 }]),
-    )
+  } else {
+    targetBombers = snap
+    targetBombPos = bombSnap
+    if (!Object.keys(prevBombers).length) prevBombers = snap
+    if (!Object.keys(prevBombPos).length) prevBombPos = bombSnap
   }
 }
 
@@ -559,18 +571,34 @@ function paint(now: number) {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const playing = props.gameState.phase === 'playing'
-  if (playing) {
-    displayBombers = smoothBombers(displayBombers, targetBombers, dt, 18)
-  } else {
-    displayBombers = Object.fromEntries(
-      Object.entries(targetBombers).map(([pid, b]) => [pid, { ...b, speed: 0 }]),
-    )
-  }
+  const tickMs =
+    props.gameState.tick_ms ?? Number(props.room.settings?.tick_ms ?? 150)
+  const rawT =
+    props.gameState.phase === 'playing'
+      ? (now - tickReceivedAt) / Math.max(16, tickMs)
+      : 1
 
-  const renderedBombs = playing
-    ? smoothBombs(displayBombPos, props.gameState.bombs ?? [], dt, 20)
-    : (props.gameState.bombs ?? [])
+  const displayBombers: Record<string, SmoothBomber> =
+    props.gameState.phase === 'playing'
+      ? interpolateBombers(prevBombers, targetBombers, rawT)
+      : Object.fromEntries(
+          Object.entries(targetBombers).map(([pid, b]) => [pid, { ...b, speed: 0 }]),
+        )
+
+  const renderedBombs =
+    props.gameState.phase === 'playing'
+      ? interpolateBombs(prevBombPos, props.gameState.bombs ?? [], rawT).map((bomb) => {
+          if (bomb.flight !== 'carried') return bomb
+          // Keep carried bombs locked to the smoothed bomber so they don't stutter on the grid.
+          const carrier = Object.entries(props.gameState.bombers).find(
+            ([, b]) => b.carrying_bomb_id === bomb.id,
+          )
+          if (!carrier) return bomb
+          const smooth = displayBombers[carrier[0]]
+          if (!smooth) return bomb
+          return { ...bomb, x: smooth.x, y: smooth.y }
+        })
+      : (props.gameState.bombs ?? [])
 
   renderFrame(ctx, displayW, displayH, {
     gridW: props.gameState.grid_width,
