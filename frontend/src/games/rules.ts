@@ -9,6 +9,7 @@ import { snakeRules } from './snake/rules'
 import { bombermanRules } from './bomberman/rules'
 import { pacmanRules } from './pacman/rules'
 import { solitaireRules } from './solitaire/rules'
+import { pinballRules } from './pinball/rules'
 import { spyfallRules } from './spyfall/rules'
 import { tetrisRules } from './tetris/rules'
 import { connect4Rules } from './connect4/rules'
@@ -30,6 +31,7 @@ const rulesByGameType: Record<string, GameRules> = {
   connect4: connect4Rules,
   battleship: battleshipRules,
   solitaire: solitaireRules,
+  pinball: pinballRules,
 }
 
 export function getGameRules(gameType: string): GameRules | null {

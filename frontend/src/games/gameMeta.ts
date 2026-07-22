@@ -154,6 +154,15 @@ const metaByGameType: Record<string, GameMeta> = {
     players: 'Solo',
     accent: '#3dd68c',
   },
+  pinball: {
+    name: 'Pinball',
+    description: 'Classic arcade pinball — hit bumpers, score points, beat your high score.',
+    emoji: '🎱',
+    lobbyHint: 'Solo arcade game — just you. Start when ready.',
+    category: 'arcade',
+    players: 'Solo',
+    accent: '#5352ed',
+  },
 }
 
 export interface GameListItem {
