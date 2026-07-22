@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { Room, BombermanGameState, BombermanBomb, BombermanPowerup } from '@/types'
+import type { Room, BombermanGameState, BombermanBomb } from '@/types'
 import {
   interpolateBombers,
   renderFrame,
@@ -181,9 +181,9 @@ let prevSoundSnap: {
   bombs: BombermanBomb[]
   explosionCount: number
   softCount: number
-  powerups: BombermanPowerup[]
   alive: Record<string, boolean>
   countdownSec: number | null
+  myStats: { maxBombs: number; bombRange: number; speedLevel: number } | null
 } | null = null
 let soundBootstrapped = false
 
@@ -201,11 +201,11 @@ function playStateSounds(state: BombermanGameState) {
   const bombIds = new Set((state.bombs ?? []).map((b) => b.id))
   const explosionCount = (state.explosions ?? []).length
   const softCount = countSoftBlocks(state.grid)
-  const powerups = state.powerups ?? []
   const alive: Record<string, boolean> = {}
   for (const [pid, b] of Object.entries(state.bombers)) {
     alive[pid] = Boolean(b.alive)
   }
+  const me = state.bombers[props.playerId]
   const countdownSec =
     state.phase === 'countdown' && state.countdown_ends_at
       ? Math.max(0, Math.ceil((new Date(state.countdown_ends_at).getTime() - Date.now()) / 1000))
@@ -219,9 +219,11 @@ function playStateSounds(state: BombermanGameState) {
       bombs: (state.bombs ?? []).map((b) => ({ ...b })),
       explosionCount,
       softCount,
-      powerups: powerups.map((p) => ({ ...p })),
       alive: { ...alive },
       countdownSec,
+      myStats: me
+        ? { maxBombs: me.max_bombs, bombRange: me.bomb_range, speedLevel: me.speed_level }
+        : null,
     }
     return
   }
@@ -244,15 +246,11 @@ function playStateSounds(state: BombermanGameState) {
     }
   }
 
-  // Explosions: new blast cells appeared or bombs disappeared with blasts
-  if (explosionCount > prev.explosionCount) {
+  // Explosions
+  const bombsLost = prev.bombs.length - (state.bombs ?? []).length
+  if (bombsLost > 0 && explosionCount > 0) {
     playExplosion()
-  } else if (
-    explosionCount > 0 &&
-    (state.bombs ?? []).length < prev.bombs.length &&
-    explosionCount >= prev.explosionCount
-  ) {
-    // Bomb detonated refreshing existing blast cells
+  } else if (explosionCount > prev.explosionCount) {
     playExplosion()
   }
 
@@ -261,30 +259,23 @@ function playStateSounds(state: BombermanGameState) {
     playSoftDestroy()
   }
 
-  // Power-up pickup (ours)
-  const prevPowerKeys = new Set(prev.powerups.map((p) => `${p.x},${p.y},${p.type}`))
-  const curPowerKeys = new Set(powerups.map((p) => `${p.x},${p.y},${p.type}`))
-  let powerupGone = false
-  for (const key of prevPowerKeys) {
-    if (!curPowerKeys.has(key)) {
-      powerupGone = true
-      break
-    }
-  }
-  if (powerupGone) {
-    const me = state.bombers[props.playerId]
-    const prevMe = prev.alive[props.playerId]
-    // If we moved onto a powerup cell or our stats rose, celebrate; otherwise still a light cue
-    if (me?.alive && prevMe !== false) {
-      playPowerup()
-    }
+  // Power-up pickup (detect via our bomber stats rising)
+  const prevMeStats = prev.myStats
+  if (
+    me &&
+    prevMeStats &&
+    (me.max_bombs > prevMeStats.maxBombs ||
+      me.bomb_range > prevMeStats.bombRange ||
+      me.speed_level > prevMeStats.speedLevel)
+  ) {
+    playPowerup()
   }
 
   // Deaths
   for (const [pid, wasAlive] of Object.entries(prev.alive)) {
     if (wasAlive && alive[pid] === false) {
       if (pid === props.playerId) playDeath()
-      else noiseDeathOther()
+      else playSoftDestroy()
     }
   }
 
@@ -300,15 +291,12 @@ function playStateSounds(state: BombermanGameState) {
     bombs: (state.bombs ?? []).map((b) => ({ ...b })),
     explosionCount,
     softCount,
-    powerups: powerups.map((p) => ({ ...p })),
     alive: { ...alive },
     countdownSec,
+    myStats: me
+      ? { maxBombs: me.max_bombs, bombRange: me.bomb_range, speedLevel: me.speed_level }
+      : null,
   }
-}
-
-function noiseDeathOther() {
-  // Quieter cue when someone else dies — reuse death at lower urgency via powerup-ish blip
-  playSoftDestroy()
 }
 
 function onStateSync() {
@@ -460,6 +448,15 @@ onUnmounted(() => {
       </ul>
 
       <div class="controls-hint">
+        <button
+          type="button"
+          class="btn-secondary mute-btn"
+          :aria-label="soundMuted ? 'Unmute sound' : 'Mute sound'"
+          :title="soundMuted ? 'Unmute' : 'Mute'"
+          @click="toggleSoundMute"
+        >
+          {{ soundMuted ? '🔇' : '🔊' }}
+        </button>
         <p v-if="canControl">
           <strong>Controls:</strong> Hold arrows / WASD ·
           <strong>Space</strong> bomb
@@ -646,6 +643,17 @@ onUnmounted(() => {
 .controls-hint {
   font-size: 0.8rem;
   color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.mute-btn {
+  font-size: 1rem;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  min-width: 2.25rem;
 }
 
 .controls-hint .muted {
