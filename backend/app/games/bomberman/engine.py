@@ -1,0 +1,681 @@
+"""Classic Bomberman — shared arena, bombs, soft blocks, last bomber standing."""
+
+from __future__ import annotations
+
+import random
+from datetime import datetime, timedelta, timezone
+
+from app.games.base import GamePlugin
+from app.games.bomberman.ai import choose_ai_action
+
+DIRECTIONS = {
+    "up": (0, -1),
+    "down": (0, 1),
+    "left": (-1, 0),
+    "right": (1, 0),
+}
+
+TILE_EMPTY = 0
+TILE_HARD = 1
+TILE_SOFT = 2
+
+BOMBER_COLORS = [
+    "#ef4444",
+    "#3b82f6",
+    "#22c55e",
+    "#f59e0b",
+    "#a855f7",
+    "#06b6d4",
+    "#ec4899",
+    "#84cc16",
+]
+
+DEFAULT_FUSE = 14  # ~2.1s at 150ms
+EXPLOSION_TTL = 4
+POWERUP_CHANCE = 0.35
+SOFT_FILL = 0.62
+BASE_MOVE_RATE = 1.0
+SPEED_BONUS = 0.28
+MAX_BOMBS_CAP = 8
+MAX_RANGE_CAP = 8
+MAX_SPEED_LEVEL = 5
+
+
+class BombermanEngine(GamePlugin):
+    game_type = "bomberman"
+
+    def default_settings(self) -> dict:
+        return {
+            "min_players": 2,
+            "max_players": 8,
+            "grid_width": 15,
+            "grid_height": 13,
+            "tick_ms": 150,
+            "countdown_sec": 3,
+            "solo_practice": False,
+            "soft_fill": SOFT_FILL,
+        }
+
+    def validate_settings(self, settings: dict) -> dict:
+        defaults = self.default_settings()
+        merged = {**defaults, **(settings or {})}
+        merged["min_players"] = max(2, min(8, int(merged.get("min_players", 2))))
+        merged["max_players"] = max(
+            merged["min_players"], min(8, int(merged.get("max_players", 8)))
+        )
+        # Odd sizes keep the classic pillar pattern centered.
+        w = max(11, min(21, int(merged.get("grid_width", 15))))
+        h = max(9, min(17, int(merged.get("grid_height", 13))))
+        if w % 2 == 0:
+            w += 1
+        if h % 2 == 0:
+            h += 1
+        merged["grid_width"] = w
+        merged["grid_height"] = h
+        merged["tick_ms"] = max(80, min(300, int(merged.get("tick_ms", 150))))
+        merged["countdown_sec"] = max(1, min(10, int(merged.get("countdown_sec", 3))))
+        merged["solo_practice"] = bool(merged.get("solo_practice", False))
+        merged["soft_fill"] = max(0.2, min(0.85, float(merged.get("soft_fill", SOFT_FILL))))
+        return merged
+
+    def tick_interval_ms(self) -> int:
+        return 150
+
+    def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
+        settings = self.validate_settings(settings)
+        if settings.get("solo_practice"):
+            humans = [p for p in players if not p.get("is_ai")]
+            if len(humans) != 1:
+                return "Solo practice requires exactly one human player"
+            return None
+
+        count = len(players)
+        if count < settings["min_players"]:
+            return f"Need at least {settings['min_players']} players"
+        if count > settings["max_players"]:
+            return f"Maximum {settings['max_players']} players allowed"
+        return None
+
+    def _spawn_points(self, width: int, height: int) -> list[tuple[int, int]]:
+        """Corner + mid-edge spawns on walkable cells (inside the border)."""
+        return [
+            (1, 1),
+            (width - 2, 1),
+            (1, height - 2),
+            (width - 2, height - 2),
+            (width // 2, 1),
+            (width // 2, height - 2),
+            (1, height // 2),
+            (width - 2, height // 2),
+        ]
+
+    def _clear_spawn_zone(self, grid: list[list[int]], sx: int, sy: int) -> None:
+        """Keep a small clear area so players aren't trapped at spawn."""
+        height = len(grid)
+        width = len(grid[0])
+        for dy in range(-1, 2):
+            for dx in range(-1, 2):
+                x, y = sx + dx, sy + dy
+                if 0 < x < width - 1 and 0 < y < height - 1:
+                    if grid[y][x] != TILE_HARD:
+                        grid[y][x] = TILE_EMPTY
+        # Guarantee spawn cell + one step toward center are empty.
+        grid[sy][sx] = TILE_EMPTY
+        cx, cy = width // 2, height // 2
+        step_x = 0 if sx == cx else (1 if sx < cx else -1)
+        step_y = 0 if sy == cy else (1 if sy < cy else -1)
+        if step_x and grid[sy][sx + step_x] != TILE_HARD:
+            grid[sy][sx + step_x] = TILE_EMPTY
+        if step_y and grid[sy + step_y][sx] != TILE_HARD:
+            grid[sy + step_y][sx] = TILE_EMPTY
+
+    def _build_grid(
+        self, width: int, height: int, soft_fill: float, spawns: list[tuple[int, int]]
+    ) -> list[list[int]]:
+        grid = [[TILE_EMPTY for _ in range(width)] for _ in range(height)]
+        for x in range(width):
+            grid[0][x] = TILE_HARD
+            grid[height - 1][x] = TILE_HARD
+        for y in range(height):
+            grid[y][0] = TILE_HARD
+            grid[y][width - 1] = TILE_HARD
+
+        for y in range(1, height - 1):
+            for x in range(1, width - 1):
+                if x % 2 == 0 and y % 2 == 0:
+                    grid[y][x] = TILE_HARD
+                elif random.random() < soft_fill:
+                    grid[y][x] = TILE_SOFT
+
+        for sx, sy in spawns:
+            self._clear_spawn_zone(grid, sx, sy)
+        return grid
+
+    def create_initial_state(self, players: list[dict], settings: dict) -> dict:
+        settings = self.validate_settings(settings)
+        width = settings["grid_width"]
+        height = settings["grid_height"]
+        spawn_pool = self._spawn_points(width, height)
+        spawns = spawn_pool[: len(players)]
+        grid = self._build_grid(width, height, settings["soft_fill"], spawns)
+
+        bombers: dict[str, dict] = {}
+        for i, player in enumerate(players):
+            sx, sy = spawns[i]
+            bombers[player["id"]] = {
+                "x": sx,
+                "y": sy,
+                "direction": "stop",
+                "next_direction": "stop",
+                "alive": True,
+                "color": BOMBER_COLORS[i % len(BOMBER_COLORS)],
+                "max_bombs": 1,
+                "bomb_range": 1,
+                "speed_level": 0,
+                "move_credit": 0.0,
+                "kills": 0,
+                "passable_bomb_ids": [],
+            }
+
+        countdown_sec = settings["countdown_sec"]
+        countdown_ends_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=countdown_sec)
+        ).isoformat()
+
+        return {
+            "phase": "countdown",
+            "countdown_ends_at": countdown_ends_at,
+            "tick": 0,
+            "tick_ms": settings["tick_ms"],
+            "grid_width": width,
+            "grid_height": height,
+            "grid": grid,
+            "bombers": bombers,
+            "bombs": [],
+            "explosions": [],
+            "powerups": [],
+            "players": players,
+            "settings": settings,
+            "winner": None,
+            "win_reason": None,
+            "last_action": None,
+            "_bomb_seq": 0,
+        }
+
+    def _next_bomb_id(self, state: dict) -> str:
+        nid = int(state.get("_bomb_seq", 0)) + 1
+        state["_bomb_seq"] = nid
+        return f"bomb-{nid}"
+
+    def _active_bomb_count(self, state: dict, player_id: str) -> int:
+        return sum(1 for b in state.get("bombs") or [] if b.get("owner_id") == player_id)
+
+    def _bomb_at(self, state: dict, x: int, y: int) -> dict | None:
+        for bomb in state.get("bombs") or []:
+            if bomb["x"] == x and bomb["y"] == y:
+                return bomb
+        return None
+
+    def _powerup_at(self, state: dict, x: int, y: int) -> dict | None:
+        for p in state.get("powerups") or []:
+            if p["x"] == x and p["y"] == y:
+                return p
+        return None
+
+    def _is_walkable(self, state: dict, bomber: dict, x: int, y: int) -> bool:
+        width = state["grid_width"]
+        height = state["grid_height"]
+        if not (0 <= x < width and 0 <= y < height):
+            return False
+        tile = state["grid"][y][x]
+        if tile != TILE_EMPTY:
+            return False
+        bomb = self._bomb_at(state, x, y)
+        if bomb is not None:
+            passable = set(bomber.get("passable_bomb_ids") or [])
+            if bomb["id"] not in passable:
+                return False
+        return True
+
+    def _place_bomb(self, state: dict, player_id: str, bomber: dict) -> list[dict]:
+        events: list[dict] = []
+        if not bomber.get("alive"):
+            return events
+        if self._active_bomb_count(state, player_id) >= int(bomber.get("max_bombs", 1)):
+            return events
+        x, y = bomber["x"], bomber["y"]
+        if self._bomb_at(state, x, y) is not None:
+            return events
+
+        bomb = {
+            "id": self._next_bomb_id(state),
+            "x": x,
+            "y": y,
+            "owner_id": player_id,
+            "range": int(bomber.get("bomb_range", 1)),
+            "fuse": DEFAULT_FUSE,
+        }
+        state.setdefault("bombs", []).append(bomb)
+        passable = list(bomber.get("passable_bomb_ids") or [])
+        if bomb["id"] not in passable:
+            passable.append(bomb["id"])
+        bomber["passable_bomb_ids"] = passable
+        state["last_action"] = {"type": "place_bomb", "player_id": player_id, "x": x, "y": y}
+        events.append(
+            {
+                "type": "bomb_placed",
+                "player_id": player_id,
+                "bomb_id": bomb["id"],
+                "x": x,
+                "y": y,
+            }
+        )
+        return events
+
+    def apply_action(
+        self, state: dict, action: dict, player: dict
+    ) -> tuple[dict, list[dict]]:
+        events: list[dict] = []
+        if state["phase"] != "playing":
+            return state, events
+
+        player_id = player["id"]
+        bomber = state["bombers"].get(player_id)
+        if not bomber or not bomber.get("alive"):
+            return state, events
+
+        action_type = action.get("type")
+        if action_type == "place_bomb":
+            events.extend(self._place_bomb(state, player_id, bomber))
+            return state, events
+
+        if action_type != "set_direction":
+            return state, events
+
+        direction = action.get("direction")
+        if direction not in DIRECTIONS and direction != "stop":
+            return state, events
+
+        bomber["next_direction"] = direction
+        state["last_action"] = {
+            "type": "set_direction",
+            "player_id": player_id,
+            "direction": direction,
+        }
+        return state, events
+
+    def _apply_ai_actions(self, state: dict) -> list[dict]:
+        events: list[dict] = []
+        for player in state["players"]:
+            if not player.get("is_ai"):
+                continue
+            pid = player["id"]
+            bomber = state["bombers"].get(pid)
+            if not bomber or not bomber.get("alive"):
+                continue
+            direction, place = choose_ai_action(state, pid, bomber)
+            if direction in DIRECTIONS or direction == "stop":
+                bomber["next_direction"] = direction
+            if place:
+                events.extend(self._place_bomb(state, pid, bomber))
+        return events
+
+    def _move_rate(self, bomber: dict) -> float:
+        level = max(0, min(MAX_SPEED_LEVEL, int(bomber.get("speed_level", 0))))
+        return BASE_MOVE_RATE + SPEED_BONUS * level
+
+    def _pickup_powerup(self, state: dict, bomber: dict, x: int, y: int) -> list[dict]:
+        events: list[dict] = []
+        powerup = self._powerup_at(state, x, y)
+        if powerup is None:
+            return events
+        ptype = powerup.get("type")
+        if ptype == "bomb":
+            bomber["max_bombs"] = min(MAX_BOMBS_CAP, int(bomber.get("max_bombs", 1)) + 1)
+        elif ptype == "range":
+            bomber["bomb_range"] = min(MAX_RANGE_CAP, int(bomber.get("bomb_range", 1)) + 1)
+        elif ptype == "speed":
+            bomber["speed_level"] = min(
+                MAX_SPEED_LEVEL, int(bomber.get("speed_level", 0)) + 1
+            )
+        else:
+            return events
+
+        state["powerups"] = [
+            p for p in state.get("powerups") or [] if not (p["x"] == x and p["y"] == y)
+        ]
+        events.append(
+            {
+                "type": "powerup_taken",
+                "player_id": next(
+                    (pid for pid, b in state["bombers"].items() if b is bomber), None
+                ),
+                "powerup_type": ptype,
+                "x": x,
+                "y": y,
+            }
+        )
+        return events
+
+    def _step_movement(self, state: dict, moving: set[str]) -> list[dict]:
+        events: list[dict] = []
+        bombers = state["bombers"]
+
+        # Clear passable bomb ids once the player leaves that cell.
+        for bomber in bombers.values():
+            if not bomber.get("alive"):
+                continue
+            passable = list(bomber.get("passable_bomb_ids") or [])
+            if not passable:
+                continue
+            kept: list[str] = []
+            for bid in passable:
+                bomb = next((b for b in state.get("bombs") or [] if b["id"] == bid), None)
+                if bomb and bomb["x"] == bomber["x"] and bomb["y"] == bomber["y"]:
+                    kept.append(bid)
+            bomber["passable_bomb_ids"] = kept
+
+        for pid in moving:
+            bomber = bombers.get(pid)
+            if not bomber or not bomber.get("alive"):
+                continue
+            direction = bomber.get("next_direction", "stop")
+            bomber["direction"] = direction
+            if direction not in DIRECTIONS:
+                continue
+            dx, dy = DIRECTIONS[direction]
+            nx, ny = bomber["x"] + dx, bomber["y"] + dy
+            if not self._is_walkable(state, bomber, nx, ny):
+                continue
+            bomber["x"] = nx
+            bomber["y"] = ny
+            events.extend(self._pickup_powerup(state, bomber, nx, ny))
+
+        return events
+
+    def _blast_cells_for_bomb(self, state: dict, bomb: dict) -> list[tuple[int, int]]:
+        cells = [(bomb["x"], bomb["y"])]
+        width = state["grid_width"]
+        height = state["grid_height"]
+        brange = int(bomb.get("range", 1))
+        for dx, dy in DIRECTIONS.values():
+            for step in range(1, brange + 1):
+                x = bomb["x"] + dx * step
+                y = bomb["y"] + dy * step
+                if not (0 <= x < width and 0 <= y < height):
+                    break
+                tile = state["grid"][y][x]
+                if tile == TILE_HARD:
+                    break
+                cells.append((x, y))
+                if tile == TILE_SOFT:
+                    break
+        return cells
+
+    def _detonate(self, state: dict, bomb_ids: set[str]) -> list[dict]:
+        """Detonate bombs (with chain reactions). Returns events."""
+        events: list[dict] = []
+        if not bomb_ids:
+            return events
+
+        pending = set(bomb_ids)
+        exploded_ids: set[str] = set()
+        blast_cells: set[tuple[int, int]] = set()
+
+        while pending:
+            bid = pending.pop()
+            if bid in exploded_ids:
+                continue
+            bomb = next((b for b in state.get("bombs") or [] if b["id"] == bid), None)
+            if bomb is None:
+                continue
+            exploded_ids.add(bid)
+            cells = self._blast_cells_for_bomb(state, bomb)
+            blast_cells.update(cells)
+            events.append(
+                {
+                    "type": "bomb_exploded",
+                    "bomb_id": bid,
+                    "owner_id": bomb.get("owner_id"),
+                    "cells": [{"x": x, "y": y} for x, y in cells],
+                }
+            )
+            # Chain: other bombs in the blast
+            for other in state.get("bombs") or []:
+                if other["id"] in exploded_ids:
+                    continue
+                if (other["x"], other["y"]) in blast_cells:
+                    pending.add(other["id"])
+
+        # Remove detonated bombs
+        state["bombs"] = [
+            b for b in state.get("bombs") or [] if b["id"] not in exploded_ids
+        ]
+
+        # Destroy soft blocks + spawn powerups; wipe powerups in blast
+        destroyed_soft: list[tuple[int, int]] = []
+        for x, y in blast_cells:
+            if state["grid"][y][x] == TILE_SOFT:
+                state["grid"][y][x] = TILE_EMPTY
+                destroyed_soft.append((x, y))
+                events.append({"type": "soft_destroyed", "x": x, "y": y})
+
+        state["powerups"] = [
+            p
+            for p in state.get("powerups") or []
+            if (p["x"], p["y"]) not in blast_cells
+        ]
+        for x, y in destroyed_soft:
+            if random.random() < POWERUP_CHANCE:
+                ptype = random.choice(["bomb", "range", "speed"])
+                state.setdefault("powerups", []).append({"x": x, "y": y, "type": ptype})
+                events.append({"type": "powerup_spawned", "x": x, "y": y, "powerup_type": ptype})
+
+        # Add / refresh explosion visuals
+        existing = {(e["x"], e["y"]): e for e in state.get("explosions") or []}
+        for x, y in blast_cells:
+            existing[(x, y)] = {"x": x, "y": y, "ttl": EXPLOSION_TTL}
+        state["explosions"] = list(existing.values())
+
+        # Kill bombers standing in blast; attribute to covering bomb owner.
+        cell_owners: dict[tuple[int, int], str] = {}
+        for ev in events:
+            if ev.get("type") != "bomb_exploded":
+                continue
+            owner = ev.get("owner_id")
+            if not owner:
+                continue
+            for c in ev.get("cells") or []:
+                cell_owners.setdefault((c["x"], c["y"]), owner)
+
+        for pid, bomber in state["bombers"].items():
+            if not bomber.get("alive"):
+                continue
+            pos = (bomber["x"], bomber["y"])
+            if pos not in blast_cells:
+                continue
+            bomber["alive"] = False
+            killer = cell_owners.get(pos)
+            if killer == pid:
+                killer = None
+            if killer and killer in state["bombers"]:
+                state["bombers"][killer]["kills"] = int(
+                    state["bombers"][killer].get("kills", 0)
+                ) + 1
+            events.append(
+                {
+                    "type": "player_died",
+                    "player_id": pid,
+                    "reason": "explosion",
+                    "by": killer,
+                }
+            )
+
+        return events
+
+    def _tick_bombs_and_explosions(self, state: dict) -> list[dict]:
+        events: list[dict] = []
+
+        # Decay active explosions; kill anyone walking into them
+        remaining_explosions: list[dict] = []
+        blast_now: set[tuple[int, int]] = set()
+        for cell in state.get("explosions") or []:
+            ttl = int(cell.get("ttl", 0)) - 1
+            if ttl > 0:
+                cell = {**cell, "ttl": ttl}
+                remaining_explosions.append(cell)
+                blast_now.add((cell["x"], cell["y"]))
+        state["explosions"] = remaining_explosions
+
+        for pid, bomber in state["bombers"].items():
+            if not bomber.get("alive"):
+                continue
+            if (bomber["x"], bomber["y"]) in blast_now:
+                bomber["alive"] = False
+                events.append(
+                    {
+                        "type": "player_died",
+                        "player_id": pid,
+                        "reason": "explosion",
+                        "by": None,
+                    }
+                )
+
+        # Tick fuses
+        to_detonate: set[str] = set()
+        for bomb in state.get("bombs") or []:
+            bomb["fuse"] = int(bomb.get("fuse", 1)) - 1
+            if bomb["fuse"] <= 0:
+                to_detonate.add(bomb["id"])
+
+        if to_detonate:
+            events.extend(self._detonate(state, to_detonate))
+
+        return events
+
+    def _alive_ids(self, state: dict) -> list[str]:
+        return [pid for pid, b in state["bombers"].items() if b.get("alive")]
+
+    def _resolve_winner(self, state: dict) -> None:
+        alive = self._alive_ids(state)
+        if len(alive) == 1:
+            state["winner"] = alive[0]
+            state["win_reason"] = "last_standing"
+            state["phase"] = "finished"
+            return
+        if len(alive) == 0:
+            # Most kills, then arbitrary
+            scores = {
+                pid: int(b.get("kills", 0)) for pid, b in state["bombers"].items()
+            }
+            max_kills = max(scores.values()) if scores else 0
+            winners = [pid for pid, k in scores.items() if k == max_kills]
+            state["winner"] = winners[0] if len(winners) == 1 else random.choice(winners)
+            state["win_reason"] = "most_kills"
+            state["phase"] = "finished"
+
+    def _maybe_finish(self, state: dict) -> bool:
+        if state.get("phase") == "finished":
+            return True
+        if len(self._alive_ids(state)) <= 1:
+            self._resolve_winner(state)
+            return state.get("phase") == "finished"
+        return False
+
+    def tick(self, state: dict) -> tuple[dict, list[dict]]:
+        events: list[dict] = []
+
+        if state["phase"] == "finished":
+            return state, events
+
+        if state["phase"] == "countdown":
+            ends_at = state.get("countdown_ends_at")
+            if ends_at:
+                end = datetime.fromisoformat(ends_at)
+                if datetime.now(timezone.utc) >= end:
+                    state["phase"] = "playing"
+                    events.append({"type": "game_started"})
+            state["tick"] += 1
+            return state, events
+
+        events.extend(self._apply_ai_actions(state))
+
+        # Bombs/explosions first so players can flee this tick's new blasts next frame.
+        # Actually classic order: move then bomb tick, or bomb tick then move.
+        # We tick bombs first (fuse countdown / explode), then move (so you can walk into fire).
+        events.extend(self._tick_bombs_and_explosions(state))
+
+        if state.get("phase") != "finished":
+            bombers = state["bombers"]
+            for bomber in bombers.values():
+                if not bomber.get("alive"):
+                    continue
+                bomber["move_credit"] = float(bomber.get("move_credit", 0.0)) + self._move_rate(
+                    bomber
+                )
+
+            for _ in range(3):
+                moving = {
+                    pid
+                    for pid, bomber in bombers.items()
+                    if bomber.get("alive")
+                    and float(bomber.get("move_credit", 0.0)) >= 1.0 - 1e-9
+                    and bomber.get("next_direction") in DIRECTIONS
+                }
+                if not moving:
+                    break
+                for pid in moving:
+                    bombers[pid]["move_credit"] = (
+                        float(bombers[pid].get("move_credit", 0.0)) - 1.0
+                    )
+                events.extend(self._step_movement(state, moving))
+                # Walking into lingering explosions
+                blast_now = {
+                    (e["x"], e["y"]) for e in state.get("explosions") or [] if e.get("ttl", 0) > 0
+                }
+                for pid in moving:
+                    bomber = bombers.get(pid)
+                    if not bomber or not bomber.get("alive"):
+                        continue
+                    if (bomber["x"], bomber["y"]) in blast_now:
+                        bomber["alive"] = False
+                        events.append(
+                            {
+                                "type": "player_died",
+                                "player_id": pid,
+                                "reason": "explosion",
+                                "by": None,
+                            }
+                        )
+
+        if self._maybe_finish(state):
+            events.append({"type": "game_over", "winner": state["winner"]})
+
+        state["tick"] += 1
+        return state, events
+
+    def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
+        settings = state.get("settings") or {}
+        return {
+            "phase": state["phase"],
+            "countdown_ends_at": state.get("countdown_ends_at"),
+            "tick": state["tick"],
+            "tick_ms": state.get("tick_ms", settings.get("tick_ms", 150)),
+            "grid_width": state["grid_width"],
+            "grid_height": state["grid_height"],
+            "grid": state["grid"],
+            "bombers": state["bombers"],
+            "bombs": state.get("bombs") or [],
+            "explosions": state.get("explosions") or [],
+            "powerups": state.get("powerups") or [],
+            "players": state["players"],
+            "winner": state.get("winner"),
+            "win_reason": state.get("win_reason"),
+            "last_action": state.get("last_action"),
+            "viewer_id": viewer_player["id"] if viewer_player else None,
+        }
+
+    def check_winner(self, state: dict) -> str | None:
+        if state.get("phase") == "finished":
+            return state.get("winner")
+        return None

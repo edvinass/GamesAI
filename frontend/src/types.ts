@@ -133,6 +133,64 @@ export interface SnakeGameState {
   viewer_id: string | null
 }
 
+export type BombermanPowerupType = 'bomb' | 'range' | 'speed'
+
+export interface BombermanBomber {
+  x: number
+  y: number
+  direction: string
+  next_direction: string
+  alive: boolean
+  color: string
+  max_bombs: number
+  bomb_range: number
+  speed_level: number
+  move_credit?: number
+  kills: number
+  passable_bomb_ids?: string[]
+}
+
+export interface BombermanBomb {
+  id: string
+  x: number
+  y: number
+  owner_id: string
+  range: number
+  fuse: number
+}
+
+export interface BombermanExplosion {
+  x: number
+  y: number
+  ttl: number
+}
+
+export interface BombermanPowerup {
+  x: number
+  y: number
+  type: BombermanPowerupType
+}
+
+export interface BombermanGameState {
+  phase: 'countdown' | 'playing' | 'finished'
+  countdown_ends_at: string | null
+  tick: number
+  tick_ms?: number
+  grid_width: number
+  grid_height: number
+  /** 0 empty, 1 hard wall, 2 soft wall */
+  grid: number[][]
+  bombers: Record<string, BombermanBomber>
+  bombs: BombermanBomb[]
+  explosions: BombermanExplosion[]
+  powerups: BombermanPowerup[]
+  players: Player[]
+  winner: string | null
+  win_reason: string | null
+  last_action: Record<string, unknown> | null
+  viewer_id: string | null
+}
+
 export interface DuelFighterEffects {
   machine_gun_until?: number
   shield_until?: number
@@ -794,7 +852,7 @@ export interface SolitaireGameState {
   hint?: SolitaireHint | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -806,6 +864,10 @@ export function isSpyfallState(state: GameState): state is SpyfallGameState {
 
 export function isSnakeState(state: GameState): state is SnakeGameState {
   return 'snakes' in state
+}
+
+export function isBombermanState(state: GameState): state is BombermanGameState {
+  return 'bombers' in state && 'bombs' in state && 'grid' in state && Array.isArray((state as BombermanGameState).grid)
 }
 
 export function isDuelState(state: GameState): state is DuelGameState {

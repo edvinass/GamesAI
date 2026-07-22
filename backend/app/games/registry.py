@@ -1,4 +1,5 @@
 from app.games.battleship.engine import BattleshipEngine
+from app.games.bomberman.engine import BombermanEngine
 from app.games.chess.engine import ChessEngine
 from app.games.codenames.engine import CodenamesEngine
 from app.games.connect4.engine import Connect4Engine
@@ -20,6 +21,7 @@ _REGISTRY: dict[str, GamePlugin] = {
     "snake": SnakeEngine(),
     "duel": DuelEngine(),
     "tetris": TetrisEngine(),
+    "bomberman": BombermanEngine(),
     "gravity_master": GravityMasterEngine(),
     "poker": PokerEngine(),
     "chess": ChessEngine(),
@@ -44,6 +46,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "snake": {"name": "Multiplayer Snake", "description": "Battle on a shared grid — last snake standing"},
     "duel": {"name": "Side Duel", "description": "Best-of rounds with HP, cover, power-ups, and mutators"},
     "tetris": {"name": "Multiplier Tetris", "description": "Each player stacks alone — speed rises, last board standing wins"},
+    "bomberman": {"name": "Bomberman", "description": "Plant bombs, break walls, and be the last bomber standing"},
     "gravity_master": {"name": "Gravity Master", "description": "Draw shapes that fall and become walls — guide the ball to the target"},
     "poker": {"name": "Poker", "description": "Texas Hold'em — bluff, bet, and beat your friends (or AI)"},
     "chess": {"name": "Chess", "description": "Classic chess — play a friend or challenge the AI"},

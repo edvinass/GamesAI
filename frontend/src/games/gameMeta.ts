@@ -64,6 +64,15 @@ const metaByGameType: Record<string, GameMeta> = {
     players: '2–4',
     accent: '#f0a060',
   },
+  bomberman: {
+    name: 'Bomberman',
+    description: 'Plant bombs, break soft walls, grab power-ups — last bomber standing wins.',
+    emoji: '💣',
+    lobbyHint: 'Need 2–8 players. Share the link or add AI to fill seats.',
+    category: 'arcade',
+    players: '2–8',
+    accent: '#f97316',
+  },
   gravity_master: {
     name: 'Gravity Master',
     description: 'Draw shapes that fall and become walls — guide the ball to the target.',
