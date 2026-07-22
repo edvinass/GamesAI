@@ -1,12 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { Room, BombermanGameState } from '@/types'
+import type { Room, BombermanGameState, BombermanBomb, BombermanPowerup } from '@/types'
 import {
   interpolateBombers,
   renderFrame,
   snapshotBombers,
   type BomberSnapshot,
 } from './bombermanRender'
+import {
+  isSoundMuted,
+  playBombPlace,
+  playCountdownGo,
+  playCountdownTick,
+  playDeath,
+  playExplosion,
+  playLose,
+  playPowerup,
+  playSoftDestroy,
+  playWin,
+  setSoundMuted,
+  unlockAudio,
+} from './sounds'
 
 const props = defineProps<{
   gameState: BombermanGameState
@@ -20,6 +34,7 @@ const emit = defineEmits<{
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const canvasWrapRef = ref<HTMLElement | null>(null)
+const soundMuted = ref(isSoundMuted())
 
 const myBomber = computed(() => props.gameState.bombers[props.playerId])
 const isAlive = computed(() => myBomber.value?.alive ?? false)
@@ -59,6 +74,13 @@ const myActiveBombs = computed(() =>
   (props.gameState.bombs ?? []).filter((b) => b.owner_id === props.playerId).length,
 )
 
+function toggleSoundMute() {
+  const next = !soundMuted.value
+  setSoundMuted(next)
+  soundMuted.value = next
+  if (!next) void unlockAudio()
+}
+
 /** Physical key codes — stable across layouts; most-recent direction wins. */
 const codeToDirection: Record<string, string> = {
   ArrowUp: 'up',
@@ -83,6 +105,7 @@ function emitDirection(force = false) {
   const next = desiredDirection()
   if (!force && next === currentDirection) return
   currentDirection = next
+  void unlockAudio()
   emit('action', { type: 'set_direction', direction: next })
 }
 
@@ -97,6 +120,7 @@ function clearMovementInput() {
 }
 
 function startNewGame() {
+  void unlockAudio()
   emit('action', { type: 'start_game' })
 }
 
@@ -104,7 +128,11 @@ function onKeyDown(e: KeyboardEvent) {
   if (!canControl.value) return
   if (e.code === 'Space' || e.key === ' ') {
     e.preventDefault()
-    if (!e.repeat) emit('action', { type: 'place_bomb' })
+    if (!e.repeat) {
+      void unlockAudio()
+      playBombPlace()
+      emit('action', { type: 'place_bomb' })
+    }
     return
   }
   const direction = codeToDirection[e.code]
@@ -146,6 +174,143 @@ let lastTick = -1
 let prevBombers: Record<string, BomberSnapshot> = {}
 let targetBombers: Record<string, BomberSnapshot> = {}
 
+/** Snapshot used to detect gameplay events for SFX. */
+let prevSoundSnap: {
+  phase: string
+  bombIds: Set<string>
+  bombs: BombermanBomb[]
+  explosionCount: number
+  softCount: number
+  powerups: BombermanPowerup[]
+  alive: Record<string, boolean>
+  countdownSec: number | null
+} | null = null
+let soundBootstrapped = false
+
+function countSoftBlocks(grid: number[][]): number {
+  let n = 0
+  for (const row of grid) {
+    for (const cell of row) {
+      if (cell === 2) n++
+    }
+  }
+  return n
+}
+
+function playStateSounds(state: BombermanGameState) {
+  const bombIds = new Set((state.bombs ?? []).map((b) => b.id))
+  const explosionCount = (state.explosions ?? []).length
+  const softCount = countSoftBlocks(state.grid)
+  const powerups = state.powerups ?? []
+  const alive: Record<string, boolean> = {}
+  for (const [pid, b] of Object.entries(state.bombers)) {
+    alive[pid] = Boolean(b.alive)
+  }
+  const countdownSec =
+    state.phase === 'countdown' && state.countdown_ends_at
+      ? Math.max(0, Math.ceil((new Date(state.countdown_ends_at).getTime() - Date.now()) / 1000))
+      : null
+
+  if (!soundBootstrapped || !prevSoundSnap) {
+    soundBootstrapped = true
+    prevSoundSnap = {
+      phase: state.phase,
+      bombIds,
+      bombs: (state.bombs ?? []).map((b) => ({ ...b })),
+      explosionCount,
+      softCount,
+      powerups: powerups.map((p) => ({ ...p })),
+      alive: { ...alive },
+      countdownSec,
+    }
+    return
+  }
+
+  const prev = prevSoundSnap
+
+  // Countdown
+  if (state.phase === 'countdown' && countdownSec != null && countdownSec !== prev.countdownSec) {
+    if (countdownSec > 0) playCountdownTick()
+  }
+  if (prev.phase === 'countdown' && state.phase === 'playing') {
+    playCountdownGo()
+  }
+
+  // New bombs (AI / remote — local place already played on keydown)
+  for (const bomb of state.bombs ?? []) {
+    if (!prev.bombIds.has(bomb.id) && bomb.owner_id !== props.playerId) {
+      playBombPlace()
+      break
+    }
+  }
+
+  // Explosions: new blast cells appeared or bombs disappeared with blasts
+  if (explosionCount > prev.explosionCount) {
+    playExplosion()
+  } else if (
+    explosionCount > 0 &&
+    (state.bombs ?? []).length < prev.bombs.length &&
+    explosionCount >= prev.explosionCount
+  ) {
+    // Bomb detonated refreshing existing blast cells
+    playExplosion()
+  }
+
+  // Soft walls destroyed
+  if (softCount < prev.softCount) {
+    playSoftDestroy()
+  }
+
+  // Power-up pickup (ours)
+  const prevPowerKeys = new Set(prev.powerups.map((p) => `${p.x},${p.y},${p.type}`))
+  const curPowerKeys = new Set(powerups.map((p) => `${p.x},${p.y},${p.type}`))
+  let powerupGone = false
+  for (const key of prevPowerKeys) {
+    if (!curPowerKeys.has(key)) {
+      powerupGone = true
+      break
+    }
+  }
+  if (powerupGone) {
+    const me = state.bombers[props.playerId]
+    const prevMe = prev.alive[props.playerId]
+    // If we moved onto a powerup cell or our stats rose, celebrate; otherwise still a light cue
+    if (me?.alive && prevMe !== false) {
+      playPowerup()
+    }
+  }
+
+  // Deaths
+  for (const [pid, wasAlive] of Object.entries(prev.alive)) {
+    if (wasAlive && alive[pid] === false) {
+      if (pid === props.playerId) playDeath()
+      else noiseDeathOther()
+    }
+  }
+
+  // Match end
+  if (prev.phase !== 'finished' && state.phase === 'finished') {
+    if (state.winner === props.playerId) playWin()
+    else playLose()
+  }
+
+  prevSoundSnap = {
+    phase: state.phase,
+    bombIds,
+    bombs: (state.bombs ?? []).map((b) => ({ ...b })),
+    explosionCount,
+    softCount,
+    powerups: powerups.map((p) => ({ ...p })),
+    alive: { ...alive },
+    countdownSec,
+  }
+}
+
+function noiseDeathOther() {
+  // Quieter cue when someone else dies — reuse death at lower urgency via powerup-ish blip
+  playSoftDestroy()
+}
+
 function onStateSync() {
   const tick = props.gameState.tick
   const snap = snapshotBombers(props.gameState.bombers)
@@ -154,6 +319,7 @@ function onStateSync() {
     targetBombers = snap
     lastTick = tick
     tickReceivedAt = performance.now()
+    playStateSounds(props.gameState)
   } else {
     targetBombers = snap
     if (!Object.keys(prevBombers).length) prevBombers = snap
@@ -169,6 +335,13 @@ watch(canControl, (ok) => {
   } else if (desiredDirection() !== 'stop') {
     // Re-assert held direction after countdown / reconnect.
     emitDirection(true)
+  }
+})
+
+watch(countdownRemaining, (sec, prev) => {
+  if (sec == null || prev == null) return
+  if (sec !== prev && sec > 0 && props.gameState.phase === 'countdown') {
+    void unlockAudio()
   }
 })
 
