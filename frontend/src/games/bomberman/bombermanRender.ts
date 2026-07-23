@@ -426,10 +426,11 @@ export function lerpBomber(
 
   if (t > 1) {
     const moved = Math.hypot(dx, dy) > 0.01
-    // Only micro-glide when we actually stepped — avoids sliding into walls while blocked.
+    // Only micro-glide along the step we just took — never redirect using a
+    // mid-tick facing change (that caused sideways/back pops while overshooting).
     if (moved) {
-      const [ddx, ddy] = DIR_DELTA[target.direction] ?? DIR_DELTA[direction] ?? [0, 0]
-      const extra = Math.min(0.28, t - 1) * 0.45
+      const [ddx, ddy] = DIR_DELTA[direction] ?? [0, 0]
+      const extra = Math.min(0.22, t - 1) * 0.35
       return {
         ...target,
         x: target.x + ddx * extra,

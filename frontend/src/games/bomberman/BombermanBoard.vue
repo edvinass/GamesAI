@@ -312,8 +312,8 @@ function onKeyDown(e: KeyboardEvent) {
     spectateDirectionStack.push(direction)
     return
   }
-  if (!canControl.value) return
   if (e.code === 'Space' || e.key === ' ') {
+    if (!canControl.value) return
     e.preventDefault()
     if (!e.repeat) {
       void unlockAudio()
@@ -327,12 +327,13 @@ function onKeyDown(e: KeyboardEvent) {
   }
   const direction = codeToDirection[e.code]
   if (!direction) return
+  if (!acceptsMoveKeys()) return
   e.preventDefault()
   if (e.repeat) return
   const idx = directionStack.indexOf(direction)
   if (idx >= 0) directionStack.splice(idx, 1)
   directionStack.push(direction)
-  emitDirection()
+  if (canControl.value) emitDirection()
 }
 
 function onKeyUp(e: KeyboardEvent) {
@@ -346,12 +347,12 @@ function onKeyUp(e: KeyboardEvent) {
   }
   const idx = directionStack.indexOf(direction)
   if (idx >= 0) directionStack.splice(idx, 1)
-  if (!canControl.value) {
+  if (!acceptsMoveKeys()) {
     directionStack.length = 0
     currentDirection = 'stop'
     return
   }
-  emitDirection()
+  if (canControl.value) emitDirection()
 }
 
 function onWindowBlur() {
@@ -364,13 +365,61 @@ let resizeObserver: ResizeObserver | null = null
 let lastFrameTime = performance.now()
 let lastTick = -1
 let tickReceivedAt = performance.now()
-/** Previous tick positions (lerp origin). */
+/** EMA of actual inter-tick gaps so lerp doesn't constantly overshoot. */
+let smoothedTickMs = 0
+/** Previous tick positions (lerp origin — may be fractional from last display). */
 let prevBombers: Record<string, BomberSnapshot> = {}
 /** Latest server truth positions. */
 let targetBombers: Record<string, BomberSnapshot> = {}
 /** Previous / current bomb cells for kick/throw lerp. */
 let prevBombPos: Record<string, { x: number; y: number }> = {}
 let targetBombPos: Record<string, { x: number; y: number }> = {}
+
+function configuredTickMs(): number {
+  return props.gameState.tick_ms ?? Number(props.room.settings?.tick_ms ?? 150)
+}
+
+function lerpTickMs(): number {
+  const configured = configuredTickMs()
+  return Math.max(16, smoothedTickMs > 0 ? smoothedTickMs : configured)
+}
+
+function currentLerpT(now = performance.now()): number {
+  if (props.gameState.phase !== 'playing') return 1
+  return (now - tickReceivedAt) / lerpTickMs()
+}
+
+/** Keep held keys through countdown so GO isn't a dead press. */
+function acceptsMoveKeys(): boolean {
+  return canControl.value || props.gameState.phase === 'countdown'
+}
+
+function snapshotFromDisplay(
+  display: Record<string, SmoothBomber>,
+  meta: Record<string, BomberSnapshot>,
+): Record<string, BomberSnapshot> {
+  const out: Record<string, BomberSnapshot> = {}
+  for (const [pid, b] of Object.entries(meta)) {
+    const d = display[pid]
+    if (
+      d &&
+      d.alive &&
+      b.alive &&
+      Math.abs(d.x - b.x) <= 1.6 &&
+      Math.abs(d.y - b.y) <= 1.6
+    ) {
+      out[pid] = {
+        ...b,
+        x: d.x,
+        y: d.y,
+        direction: d.direction,
+      }
+    } else {
+      out[pid] = { ...b }
+    }
+  }
+  return out
+}
 let particles: Particle[] = []
 let shake = 0
 
@@ -656,15 +705,42 @@ function onStateSync() {
   const tick = props.gameState.tick
   const snap = snapshotBombers(props.gameState.bombers)
   const bombSnap = bombPosSnapshot(props.gameState.bombs ?? [])
+  const now = performance.now()
 
   if (tick !== lastTick) {
-    // Use last rendered targets as origin so motion never snaps backward.
-    prevBombers = Object.keys(targetBombers).length ? { ...targetBombers } : snap
+    const matchReset = lastTick >= 0 && tick < lastTick
+    const prevTargets = targetBombers
+    // Continue from the currently drawn pose (incl. micro-glide). Seeding from
+    // the last integer cell made the sprite jump backward every late tick.
+    if (!matchReset && Object.keys(prevTargets).length) {
+      const display = interpolateBombers(prevBombers, prevTargets, currentLerpT(now))
+      prevBombers = snapshotFromDisplay(display, prevTargets)
+      // Stationary bombers: drop overshoot so releasing a key doesn't ease backward.
+      for (const [pid, b] of Object.entries(snap)) {
+        const old = prevTargets[pid]
+        if (old && old.x === b.x && old.y === b.y) {
+          prevBombers[pid] = { ...b }
+        }
+      }
+    } else {
+      prevBombers = snap
+    }
     prevBombPos = Object.keys(targetBombPos).length ? { ...targetBombPos } : bombSnap
     targetBombers = snap
     targetBombPos = bombSnap
+    const configured = configuredTickMs()
+    if (matchReset || lastTick < 0) {
+      smoothedTickMs = configured
+    } else {
+      const gap = now - tickReceivedAt
+      // Ignore huge stalls (tab background) so EMA doesn't blow up.
+      if (gap > 16 && gap < configured * 4) {
+        smoothedTickMs =
+          smoothedTickMs > 0 ? smoothedTickMs * 0.75 + gap * 0.25 : gap
+      }
+    }
     lastTick = tick
-    tickReceivedAt = performance.now()
+    tickReceivedAt = now
     playStateSounds(props.gameState)
   } else {
     targetBombers = snap
@@ -678,8 +754,11 @@ watch(() => props.gameState, onStateSync, { deep: true, immediate: true })
 
 watch(canControl, (ok) => {
   if (!ok) {
-    directionStack.length = 0
-    currentDirection = 'stop'
+    // Keep direction keys through countdown so a held press still walks on GO.
+    if (props.gameState.phase !== 'countdown') {
+      directionStack.length = 0
+      currentDirection = 'stop'
+    }
     if (isSpectating.value) seedSpectateFocus()
   } else {
     clearSpectateInput()
@@ -733,12 +812,7 @@ function paint(now: number) {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const tickMs =
-    props.gameState.tick_ms ?? Number(props.room.settings?.tick_ms ?? 150)
-  const rawT =
-    props.gameState.phase === 'playing'
-      ? (now - tickReceivedAt) / Math.max(16, tickMs)
-      : 1
+  const rawT = currentLerpT(now)
 
   const displayBombers: Record<string, SmoothBomber> =
     props.gameState.phase === 'playing'
