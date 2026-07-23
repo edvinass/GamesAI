@@ -1036,14 +1036,20 @@ class BombermanEngine(GamePlugin):
             bomber["passable_bomb_ids"] = kept
 
     def _resolve_step_direction(self, state: dict, bomber: dict) -> str | None:
-        """Prefer the held direction; if blocked, keep sliding in the last move direction."""
+        """Move only in the held direction.
+
+        A blocked turn faces the wall and stops — no sliding past on prior momentum.
+        Perpetual disease still falls back to momentum so the curse cannot pin you
+        forever against a single brick.
+        """
         desired = self._desired_move_direction(bomber)
-        momentum = bomber.get("direction", "stop")
         candidates: list[str] = []
         if desired in DIRECTIONS:
             candidates.append(desired)
-        if momentum in DIRECTIONS and momentum != desired:
-            candidates.append(momentum)
+        if bomber.get("disease") == "perpetual":
+            momentum = bomber.get("direction", "stop")
+            if momentum in DIRECTIONS and momentum != desired:
+                candidates.append(momentum)
         for direction in candidates:
             dx, dy = DIRECTIONS[direction]
             nx, ny = bomber["x"] + dx, bomber["y"] + dy

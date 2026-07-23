@@ -105,8 +105,8 @@ def test_movement_blocked_by_hard_wall(engine: BombermanEngine, state: dict) -> 
     assert state["bombers"][pid]["move_credit"] >= 0.99
 
 
-def test_slide_along_wall_when_turn_blocked(engine: BombermanEngine, state: dict) -> None:
-    """Holding up into a wall while moving right should keep sliding right."""
+def test_blocked_turn_faces_wall_and_stops(engine: BombermanEngine, state: dict) -> None:
+    """Holding up into a wall while moving right should face up and stop — not slide."""
     player = state["players"][0]
     pid = player["id"]
     other = state["players"][1]["id"]
@@ -120,7 +120,37 @@ def test_slide_along_wall_when_turn_blocked(engine: BombermanEngine, state: dict
 
     bomber["x"], bomber["y"] = 2, 1
     bomber["direction"] = "right"
-    bomber["next_direction"] = "up"  # blocked — should slide right
+    bomber["next_direction"] = "up"  # blocked — face it, do not keep walking right
+    bomber["move_credit"] = 0.0
+    state["bombs"] = []
+    state["explosions"] = []
+
+    state, _ = engine.tick(state)
+    assert state["bombers"][pid]["x"] == 2
+    assert state["bombers"][pid]["y"] == 1
+    assert state["bombers"][pid]["direction"] == "up"
+    assert state["bombers"][pid]["facing"] == "up"
+
+
+def test_perpetual_still_slides_when_turn_blocked(
+    engine: BombermanEngine, state: dict
+) -> None:
+    """Perpetual disease may keep sliding so a wall cannot fully pin the bomber."""
+    player = state["players"][0]
+    pid = player["id"]
+    other = state["players"][1]["id"]
+    state["bombers"][other]["alive"] = False
+    bomber = state["bombers"][pid]
+
+    for x in range(1, 6):
+        state["grid"][1][x] = TILE_EMPTY
+    state["grid"][0][2] = TILE_HARD
+
+    bomber["x"], bomber["y"] = 2, 1
+    bomber["direction"] = "right"
+    bomber["next_direction"] = "up"
+    bomber["disease"] = "perpetual"
+    bomber["disease_ticks"] = 100
     bomber["move_credit"] = 0.0
     state["bombs"] = []
     state["explosions"] = []
