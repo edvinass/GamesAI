@@ -7,7 +7,7 @@ export const bombermanRules: GameRules = {
     'Join a room with 2–8 players (or add AI bots).',
     'Use arrow keys or WASD to move. Release to stop.',
     'Press Space to plant a bomb under your feet.',
-    'Blast soft walls for power-ups — bombs, range, speed, throw, and kick.',
+    'Blast soft walls for power-ups — bombs, range, speed, throw, kick… and skulls.',
     'Don’t get caught in the explosion. Last player alive wins.',
   ],
   sections: [
@@ -22,6 +22,10 @@ export const bombermanRules: GameRules = {
     {
       heading: 'Power-ups',
       body: 'Bomb (💣): carry more bombs at once. Range (🔥): longer explosions. Speed (⚡): move faster. Throw (🧤): Space on/facing a bomb to pick it up, then Space to throw — it flies 3 tiles and lands there, or on the next empty tile past an obstacle/bomb. Kick (🦵): walk into a bomb to kick it along the ground until it hits a wall, soft block, or another bomb. Power-ups in a blast are destroyed.',
+    },
+    {
+      heading: 'Skull diseases',
+      body: 'Skull (💀) curses you with a random temporary disease. You blink while cursed, but the exact disease is not named — discover it from how you move and bomb. Touch another player to pass the curse (and cure yourself). Diseases: crawl slowly, cannot plant bombs, auto-plant bombs every step, reversed controls, bombs with a short fuse, or perpetual motion (cannot stop).',
     },
     {
       heading: 'Winning',
@@ -39,5 +43,6 @@ export const bombermanRules: GameRules = {
     'Speed power-ups help you outrun your own fuses.',
     'Throw a bomb over walls into a corridor to surprise rivals.',
     'Kick bombs down long lanes to catch players at a distance.',
+    'If you pick up a skull, tag someone else to pass the curse.',
   ],
 }

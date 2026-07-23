@@ -37,6 +37,7 @@ POWERUP_BASE = {
     "bomb": 9,
     "range": 8,
     "speed": 7,
+    "skull": -50,
 }
 
 
@@ -875,6 +876,8 @@ def _priority_powerup_targets(
         if danger.get(cell) is not None and danger.get(cell, 0) <= ESCAPE_MARGIN:
             continue
         ptype = p.get("type")
+        if ptype == "skull":
+            continue
         score = POWERUP_BASE.get(ptype, 4)
         if ptype == "throw" and bomber.get("can_throw"):
             score = 2

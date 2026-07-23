@@ -61,11 +61,29 @@ const canControl = computed(
   () => props.gameState.phase === 'playing' && isAlive.value,
 )
 
+const myNickname = computed(
+  () => props.gameState.players.find((p) => p.id === props.playerId)?.nickname ?? 'You',
+)
+
 const countdownRemaining = computed(() => {
   if (props.gameState.phase !== 'countdown' || !props.gameState.countdown_ends_at) return null
   const end = new Date(props.gameState.countdown_ends_at).getTime()
   return Math.max(0, Math.ceil((end - Date.now()) / 1000))
 })
+
+/** Full marker during countdown; fades out over the first few seconds of play. */
+const SELF_MARKER_FADE_MS = 3500
+let playingStartedAt: number | null = null
+
+function selfMarkerStrength(now = performance.now()): number {
+  const phase = props.gameState.phase
+  if (phase === 'countdown') return 1
+  if (phase !== 'playing' || !isAlive.value) return 0
+  if (playingStartedAt == null) playingStartedAt = now
+  const t = (now - playingStartedAt) / SELF_MARKER_FADE_MS
+  if (t >= 1) return 0
+  return 1 - t
+}
 
 const winnerName = computed(() => {
   const winnerId = props.gameState.winner
@@ -275,6 +293,7 @@ const POWERUP_COLORS: Record<string, string> = {
   speed: '#a3e635',
   throw: '#fbbf24',
   kick: '#f472b6',
+  skull: '#64748b',
 }
 
 /** Snapshot used to detect gameplay events for SFX. */
@@ -292,6 +311,7 @@ let prevSoundSnap: {
     speedLevel: number
     canThrow: boolean
     canKick: boolean
+    diseased: boolean
   } | null
   myPos: { x: number; y: number } | null
   softCells: Set<string>
@@ -357,6 +377,7 @@ function playStateSounds(state: BombermanGameState) {
             speedLevel: me.speed_level,
             canThrow: Boolean(me.can_throw),
             canKick: Boolean(me.can_kick),
+            diseased: Boolean(me.disease),
           }
         : null,
       myPos: me ? { x: me.x, y: me.y } : null,
@@ -372,6 +393,13 @@ function playStateSounds(state: BombermanGameState) {
   if (state.phase === 'countdown' && countdownSec != null && countdownSec !== prev.countdownSec) {
     if (countdownSec > 0) playCountdownTick()
   }
+  if (prev.phase !== 'playing' && state.phase === 'playing') {
+    playingStartedAt = performance.now()
+  }
+  if (state.phase !== 'playing') {
+    playingStartedAt = null
+  }
+
   if (prev.phase === 'countdown' && state.phase === 'playing') {
     playCountdownGo()
   }
@@ -445,9 +473,12 @@ function playStateSounds(state: BombermanGameState) {
     }
   }
 
-  // Power-up pickup (detect via our bomber stats rising)
+  // Power-up pickup (detect via our bomber stats rising or skull infection)
   const prevMeStats = prev.myStats
-  if (
+  if (me && prevMeStats && !prevMeStats.diseased && Boolean(me.disease)) {
+    playPowerup('skull')
+    particles.push(...spawnPowerupParticles(me.x, me.y, POWERUP_COLORS.skull ?? '#64748b'))
+  } else if (
     me &&
     prevMeStats &&
     (me.max_bombs > prevMeStats.maxBombs ||
@@ -510,6 +541,7 @@ function playStateSounds(state: BombermanGameState) {
           speedLevel: me.speed_level,
           canThrow: Boolean(me.can_throw),
           canKick: Boolean(me.can_kick),
+          diseased: Boolean(me.disease),
         }
       : null,
     myPos: me ? { x: me.x, y: me.y } : null,
@@ -632,6 +664,7 @@ function paint(now: number) {
     particles,
     shake,
     mapId: props.gameState.map_id,
+    selfMarker: selfMarkerStrength(now),
   })
 }
 
@@ -674,6 +707,18 @@ onUnmounted(() => {
         <span class="overlay-kicker">{{ gameState.map_name ?? 'Arena' }}</span>
         <span class="overlay-value pulse">{{ countdownRemaining ?? '…' }}</span>
         <span class="overlay-label">Get ready!</span>
+        <div v-if="myBomber" class="you-are">
+          <span
+            class="you-are-swatch"
+            :style="{
+              background: myBomber.color,
+              boxShadow: `0 0 14px ${myBomber.color}`,
+            }"
+          />
+          <span class="you-are-text">
+            You’re <strong>{{ myNickname }}</strong>
+          </span>
+        </div>
       </div>
 
       <div v-else-if="isFinished" class="overlay finished">
@@ -791,6 +836,11 @@ onUnmounted(() => {
               <span class="pill speed">⚡{{ row.bomber?.speed_level ?? 0 }}</span>
               <span v-if="row.bomber?.can_throw" class="pill throw" title="Throw">🧤</span>
               <span v-if="row.bomber?.can_kick" class="pill kick" title="Kick">🦵</span>
+              <span
+                v-if="row.bomber?.disease"
+                class="pill skull"
+                title="Cursed — touch another player to pass it on"
+              >💀</span>
             </span>
             <span v-if="(row.bomber?.kills ?? 0) > 0" class="kills">×{{ row.bomber?.kills }}</span>
             <span v-if="!row.bomber?.alive" class="status">out</span>
@@ -978,6 +1028,59 @@ onUnmounted(() => {
   color: #f6d7b8;
 }
 
+.you-are {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  animation: you-are-in 0.45s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+@keyframes you-are-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.you-are-swatch {
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  flex-shrink: 0;
+  animation: you-swatch-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes you-swatch-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+
+.you-are-text {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #f6d7b8;
+}
+
+.you-are-text strong {
+  color: #fff;
+  font-weight: 800;
+}
+
 .overlay-hint {
   font-size: 0.9rem;
   color: var(--text-muted);
@@ -1136,6 +1239,21 @@ onUnmounted(() => {
 .pill.kick {
   background: rgba(244, 114, 182, 0.2);
   color: #f9a8d4;
+}
+
+.pill.skull {
+  background: rgba(100, 116, 139, 0.35);
+  color: #e2e8f0;
+  animation: skull-pulse 0.7s ease-in-out infinite alternate;
+}
+
+@keyframes skull-pulse {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .kills {

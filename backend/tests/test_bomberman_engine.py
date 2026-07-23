@@ -685,3 +685,151 @@ def test_kick_stops_at_hard_wall(engine: BombermanEngine, state: dict) -> None:
 
 def test_tick_interval(engine: BombermanEngine) -> None:
     assert engine.tick_interval_ms() == 150
+
+
+def _clear_arena(state: dict, x0: int = 1, y0: int = 1, x1: int = 6, y1: int = 4) -> None:
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            if state["grid"][y][x] != TILE_HARD:
+                state["grid"][y][x] = TILE_EMPTY
+
+
+def test_skull_pickup_infects(engine: BombermanEngine, state: dict) -> None:
+    from app.games.bomberman.engine import DISEASE_TYPES, DISEASE_DURATION_TICKS
+
+    player = state["players"][0]
+    pid = player["id"]
+    bomber = state["bombers"][pid]
+    other = state["players"][1]["id"]
+    state["bombers"][other]["alive"] = False
+
+    _clear_arena(state)
+    bomber["x"], bomber["y"] = 1, 1
+    bomber["next_direction"] = "right"
+    bomber["move_credit"] = 0.0
+    state["powerups"] = [{"x": 2, "y": 1, "type": "skull"}]
+    state["bombs"] = []
+    state["explosions"] = []
+
+    state, events = engine.tick(state)
+    assert state["bombers"][pid]["x"] == 2
+    assert state["bombers"][pid]["disease"] in DISEASE_TYPES
+    assert state["bombers"][pid]["disease_ticks"] == DISEASE_DURATION_TICKS
+    assert any(e["type"] == "powerup_taken" and e.get("powerup_type") == "skull" for e in events)
+    assert any(e["type"] == "disease_infected" for e in events)
+
+
+def test_constipation_blocks_plant(engine: BombermanEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    bomber = state["bombers"][pid]
+    engine._infect(bomber, "constipation")
+    bomber["x"], bomber["y"] = 1, 1
+    _clear_arena(state)
+    state["bombs"] = []
+
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert state["bombs"] == []
+    assert not any(e["type"] == "bomb_placed" for e in events)
+
+
+def test_short_fuse_disease(engine: BombermanEngine, state: dict) -> None:
+    from app.games.bomberman.engine import SHORT_FUSE
+
+    player = state["players"][0]
+    pid = player["id"]
+    bomber = state["bombers"][pid]
+    engine._infect(bomber, "short_fuse")
+    bomber["x"], bomber["y"] = 1, 1
+    _clear_arena(state)
+    state["bombs"] = []
+
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert len(state["bombs"]) == 1
+    assert state["bombs"][0]["fuse"] == SHORT_FUSE
+    assert any(e["type"] == "bomb_placed" for e in events)
+
+
+def test_reverse_flips_controls(engine: BombermanEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    bomber = state["bombers"][pid]
+    engine._infect(bomber, "reverse")
+
+    state, _ = engine.apply_action(state, {"type": "set_direction", "direction": "up"}, player)
+    assert state["bombers"][pid]["next_direction"] == "down"
+    assert state["bombers"][pid]["facing"] == "down"
+
+
+def test_slow_reduces_move_rate(engine: BombermanEngine, state: dict) -> None:
+    from app.games.bomberman.engine import BASE_MOVE_RATE, SLOW_MOVE_RATE
+
+    bomber = state["bombers"][state["players"][0]["id"]]
+    bomber["speed_level"] = 3
+    assert engine._move_rate(bomber) > BASE_MOVE_RATE
+    engine._infect(bomber, "slow")
+    assert engine._move_rate(bomber) == SLOW_MOVE_RATE
+
+
+def test_diarrhea_plants_on_step(engine: BombermanEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    bomber = state["bombers"][pid]
+    other = state["players"][1]["id"]
+    state["bombers"][other]["alive"] = False
+
+    _clear_arena(state)
+    engine._infect(bomber, "diarrhea")
+    bomber["x"], bomber["y"] = 1, 1
+    bomber["next_direction"] = "right"
+    bomber["move_credit"] = 0.0
+    bomber["max_bombs"] = 4
+    state["bombs"] = []
+    state["explosions"] = []
+    state["powerups"] = []
+
+    state, events = engine.tick(state)
+    assert state["bombers"][pid]["x"] == 2
+    assert any(e["type"] == "bomb_placed" for e in events)
+    assert any(b["x"] == 2 and b["y"] == 1 for b in state["bombs"])
+
+
+def test_perpetual_keeps_moving(engine: BombermanEngine, state: dict) -> None:
+    player = state["players"][0]
+    pid = player["id"]
+    bomber = state["bombers"][pid]
+    other = state["players"][1]["id"]
+    state["bombers"][other]["alive"] = False
+
+    _clear_arena(state)
+    engine._infect(bomber, "perpetual")
+    bomber["x"], bomber["y"] = 1, 1
+    bomber["facing"] = "right"
+    bomber["direction"] = "right"
+    bomber["next_direction"] = "stop"
+    bomber["move_credit"] = 0.0
+    state["bombs"] = []
+    state["explosions"] = []
+    state["powerups"] = []
+
+    state, _ = engine.tick(state)
+    assert state["bombers"][pid]["x"] == 2
+    assert engine._desired_move_direction(state["bombers"][pid]) == "right"
+
+
+def test_disease_transfers_on_contact(engine: BombermanEngine, state: dict) -> None:
+    p0 = state["players"][0]["id"]
+    p1 = state["players"][1]["id"]
+    a = state["bombers"][p0]
+    b = state["bombers"][p1]
+    a["x"], a["y"] = 3, 3
+    b["x"], b["y"] = 3, 3
+    a["alive"] = b["alive"] = True
+    engine._infect(a, "reverse", ticks=20)
+    engine._clear_disease(b)
+
+    events = engine._spread_diseases(state)
+    assert a.get("disease") is None
+    assert b.get("disease") == "reverse"
+    assert b.get("disease_ticks") == 20
+    assert any(e["type"] == "disease_infected" and e["player_id"] == p1 for e in events)

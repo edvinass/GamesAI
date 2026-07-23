@@ -15,6 +15,7 @@ export interface BomberSnapshot {
   alive: boolean
   color: string
   direction: string
+  disease?: string | null
 }
 
 export interface SmoothBomber extends BomberSnapshot {
@@ -41,7 +42,15 @@ export interface RenderFrameInput {
   grid: number[][]
   bombers: Record<
     string,
-    { x: number; y: number; alive: boolean; color: string; direction: string; speed?: number }
+    {
+      x: number
+      y: number
+      alive: boolean
+      color: string
+      direction: string
+      speed?: number
+      disease?: string | null
+    }
   >
   bombs: BombermanBomb[]
   explosions: BombermanExplosion[]
@@ -51,6 +60,8 @@ export interface RenderFrameInput {
   particles?: Particle[]
   shake?: number
   mapId?: string
+  /** 0–1 strength of the local-player ground marker (countdown / early play). */
+  selfMarker?: number
 }
 
 export type SoftBlockStyle = 'brick' | 'crate' | 'ice' | 'hedge' | 'wood' | 'stone'
@@ -503,6 +514,7 @@ export function snapshotBombers(
       alive: b.alive,
       color: b.color,
       direction: b.direction,
+      disease: b.disease ?? null,
     }
   }
   return out
@@ -912,6 +924,7 @@ function drawPowerup(
     speed: '#a3e635',
     throw: '#fbbf24',
     kick: '#f472b6',
+    skull: '#64748b',
   }
   const labels: Record<string, string> = {
     bomb: '💣',
@@ -919,6 +932,7 @@ function drawPowerup(
     speed: '⚡',
     throw: '🧤',
     kick: '🦵',
+    skull: '💀',
   }
   const color = colors[type] ?? '#fff'
 
@@ -956,6 +970,39 @@ function drawPowerup(
   ctx.fillText(labels[type] ?? '❓', cx, cy + 1)
 }
 
+function drawSelfMarker(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  footY: number,
+  s: number,
+  color: string,
+  time: number,
+  strength: number,
+) {
+  if (strength <= 0.01) return
+  const pulse = 0.55 + 0.45 * Math.sin(time / 180)
+  const rx = s * (0.38 + pulse * 0.06)
+  const ry = s * (0.14 + pulse * 0.03)
+  const alpha = strength * (0.35 + pulse * 0.35)
+
+  ctx.beginPath()
+  ctx.ellipse(cx, footY, rx * 1.15, ry * 1.35, 0, 0, Math.PI * 2)
+  ctx.fillStyle = rgba(color, alpha * 0.35)
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.ellipse(cx, footY, rx, ry, 0, 0, Math.PI * 2)
+  ctx.strokeStyle = rgba('#ffffff', alpha * 0.85)
+  ctx.lineWidth = Math.max(2, s * 0.055)
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.ellipse(cx, footY, rx * 0.92, ry * 0.92, 0, 0, Math.PI * 2)
+  ctx.strokeStyle = rgba(color, alpha)
+  ctx.lineWidth = Math.max(1.5, s * 0.04)
+  ctx.stroke()
+}
+
 function drawBomber(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -966,6 +1013,8 @@ function drawBomber(
   direction: string,
   time: number,
   speed = 0,
+  diseased = false,
+  selfMarker = 0,
 ) {
   // `speed` is cells advanced this tick (≈1 at base, up to ~2 with speed power-ups).
   const moving = speed > 0.12
@@ -975,6 +1024,13 @@ function drawBomber(
   const bounce = moving
     ? Math.abs(Math.sin(phase)) * s * (0.028 + walk * 0.028)
     : Math.sin(time / 420) * s * 0.008
+
+  // Classic skull cue: blink while cursed (disease type stays unnamed).
+  const blinkOut = diseased && Math.floor(time / 120) % 2 === 0
+  const prevAlpha = ctx.globalAlpha
+  if (blinkOut) {
+    ctx.globalAlpha = prevAlpha * 0.28
+  }
 
   const cx = x + s / 2
   const cy = y + s / 2 - bounce
@@ -995,6 +1051,11 @@ function drawBomber(
   }
   const [fdx, fdy] = face[direction] ?? face.stop!
   const backView = direction === 'up'
+
+  // Local-player marker under feet (drawn before shadow / sprite).
+  if (isMe) {
+    drawSelfMarker(ctx, cx, y + s * 0.78, s, color, time, selfMarker)
+  }
 
   // Shadow
   ctx.beginPath()
@@ -1178,6 +1239,18 @@ function drawBomber(
   }
 
   ctx.restore()
+  if (blinkOut) {
+    ctx.globalAlpha = prevAlpha
+  }
+
+  // Soft purple haze so cursed bombers stay readable while blinking.
+  if (diseased) {
+    const pulse = 0.25 + 0.2 * Math.sin(time / 140)
+    ctx.beginPath()
+    ctx.ellipse(cx, y + s * 0.72, s * 0.34, s * 0.12, 0, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(148, 80, 200, ${pulse})`
+    ctx.fill()
+  }
 }
 
 function drawParticles(
@@ -1270,6 +1343,7 @@ export function renderFrame(
     particles = [],
     shake = 0,
     mapId,
+    selfMarker = 0,
   } = input
   const theme = getMapTheme(mapId)
   const s = cellSize(displayW, displayH, gridW, gridH)
@@ -1330,16 +1404,19 @@ export function renderFrame(
   const entries = Object.entries(bombers).filter(([, b]) => b.alive)
   entries.sort(([a], [b]) => (a === playerId ? 1 : b === playerId ? -1 : 0))
   for (const [pid, b] of entries) {
+    const isMe = pid === playerId
     drawBomber(
       ctx,
       ox + b.x * s,
       oy + b.y * s,
       s,
       b.color,
-      pid === playerId,
+      isMe,
       b.direction,
       time,
       b.speed ?? 0,
+      Boolean(b.disease),
+      isMe ? selfMarker : 0,
     )
   }
 

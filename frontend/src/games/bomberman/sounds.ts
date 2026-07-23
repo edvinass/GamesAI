@@ -334,11 +334,31 @@ export function playSoftDestroy(): void {
   tone(140, 0.08, { type: 'sine', volume: 0.05, slideTo: 70, delay: 0.03 })
 }
 
-export type PowerupSoundKind = 'bomb' | 'range' | 'speed' | 'throw' | 'kick'
+export type PowerupSoundKind = 'bomb' | 'range' | 'speed' | 'throw' | 'kick' | 'skull'
 
 /** Pickup chime — slight flavor per power-up type. */
 export function playPowerup(kind: PowerupSoundKind = 'bomb'): void {
-  const flavors: Record<PowerupSoundKind, number[]> = {
+  if (kind === 'skull') {
+    // Low, uneasy sting for the cursed skull.
+    ;[180, 140, 110].forEach((freq, idx) => {
+      schedule(idx * 70, () => {
+        tone(freq, 0.14 + idx * 0.03, {
+          type: idx === 2 ? 'sawtooth' : 'triangle',
+          volume: 0.09 - idx * 0.015,
+          filterFreq: 900,
+          slideTo: freq * 0.7,
+        })
+      })
+    })
+    noiseBurst(0.1, {
+      volume: 0.045,
+      filterFreq: 600,
+      filterType: 'lowpass',
+      delay: 0.05,
+    })
+    return
+  }
+  const flavors: Record<Exclude<PowerupSoundKind, 'skull'>, number[]> = {
     bomb: [392, 523, 659],
     range: [440, 554, 740],
     speed: [523, 659, 880],

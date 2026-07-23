@@ -35,17 +35,35 @@ BOMBER_COLORS = [
 ]
 
 DEFAULT_FUSE = 14  # ~2.1s at 150ms
+SHORT_FUSE = 5  # ~0.75s — skull "short fuse" disease
 EXPLOSION_TTL = 4
 POWERUP_CHANCE = 0.35
 SOFT_FILL = 0.62
 BASE_MOVE_RATE = 1.0
 SPEED_BONUS = 0.28
+SLOW_MOVE_RATE = 0.32  # skull "slow" — crawl below base speed
 MAX_BOMBS_CAP = 8
 MAX_RANGE_CAP = 8
 MAX_SPEED_LEVEL = 5
 THROW_LAND_DISTANCE = 3
-POWERUP_TYPES = ("bomb", "range", "speed", "throw", "kick")
-POWERUP_WEIGHTS = (26, 26, 22, 13, 13)
+POWERUP_TYPES = ("bomb", "range", "speed", "throw", "kick", "skull")
+POWERUP_WEIGHTS = (24, 24, 20, 12, 12, 8)
+DISEASE_TYPES = (
+    "slow",
+    "constipation",
+    "diarrhea",
+    "reverse",
+    "short_fuse",
+    "perpetual",
+)
+DISEASE_DURATION_TICKS = 100  # ~15s at 150ms
+REVERSE_DIRS = {
+    "up": "down",
+    "down": "up",
+    "left": "right",
+    "right": "left",
+    "stop": "stop",
+}
 
 
 class BombermanEngine(GamePlugin):
@@ -149,6 +167,8 @@ class BombermanEngine(GamePlugin):
                 "move_credit": 0.0,
                 "kills": 0,
                 "passable_bomb_ids": [],
+                "disease": None,
+                "disease_ticks": 0,
             }
 
         countdown_sec = settings["countdown_sec"]
@@ -354,16 +374,25 @@ class BombermanEngine(GamePlugin):
         if bomber.get("carrying_bomb_id"):
             return events
 
+        # Constipation: cannot plant new bombs (pick-up / throw still allowed above).
+        if bomber.get("disease") == "constipation":
+            return events
+
         if self._active_bomb_count(state, player_id) >= int(bomber.get("max_bombs", 1)):
             return events
 
+        fuse = (
+            SHORT_FUSE
+            if bomber.get("disease") == "short_fuse"
+            else DEFAULT_FUSE
+        )
         bomb = {
             "id": self._next_bomb_id(state),
             "x": x,
             "y": y,
             "owner_id": player_id,
             "range": int(bomber.get("bomb_range", 1)),
-            "fuse": DEFAULT_FUSE,
+            "fuse": fuse,
             "flight": None,
             "sliding": False,
             "slide_dir": None,
@@ -793,6 +822,7 @@ class BombermanEngine(GamePlugin):
         if direction not in DIRECTIONS and direction != "stop":
             return state, events
 
+        direction = self._apply_reverse(bomber, direction)
         bomber["next_direction"] = direction
         if direction in DIRECTIONS:
             bomber["facing"] = direction
@@ -802,6 +832,126 @@ class BombermanEngine(GamePlugin):
             "direction": direction,
         }
         return state, events
+
+    def _apply_reverse(self, bomber: dict, direction: str) -> str:
+        if bomber.get("disease") != "reverse":
+            return direction
+        return REVERSE_DIRS.get(direction, direction)
+
+    def _bomber_pid(self, state: dict, bomber: dict) -> str | None:
+        return next((pid for pid, b in state["bombers"].items() if b is bomber), None)
+
+    def _infect(
+        self,
+        bomber: dict,
+        disease: str | None = None,
+        *,
+        ticks: int | None = None,
+    ) -> str:
+        chosen = disease if disease in DISEASE_TYPES else random.choice(DISEASE_TYPES)
+        bomber["disease"] = chosen
+        bomber["disease_ticks"] = (
+            DISEASE_DURATION_TICKS if ticks is None else max(1, int(ticks))
+        )
+        return chosen
+
+    def _clear_disease(self, bomber: dict) -> None:
+        bomber["disease"] = None
+        bomber["disease_ticks"] = 0
+
+    def _tick_diseases(self, state: dict) -> list[dict]:
+        events: list[dict] = []
+        for pid, bomber in state["bombers"].items():
+            if not bomber.get("disease"):
+                continue
+            if not bomber.get("alive"):
+                self._clear_disease(bomber)
+                continue
+            ticks = int(bomber.get("disease_ticks", 0)) - 1
+            if ticks <= 0:
+                self._clear_disease(bomber)
+                events.append({"type": "disease_cleared", "player_id": pid})
+            else:
+                bomber["disease_ticks"] = ticks
+        return events
+
+    def _spread_diseases(self, state: dict) -> list[dict]:
+        """Transfer skull disease on contact (same tile). Passing it cures the giver."""
+        events: list[dict] = []
+        alive = [
+            (pid, b)
+            for pid, b in state["bombers"].items()
+            if b.get("alive")
+        ]
+        by_cell: dict[tuple[int, int], list[tuple[str, dict]]] = {}
+        for pid, bomber in alive:
+            by_cell.setdefault((bomber["x"], bomber["y"]), []).append((pid, bomber))
+
+        for occupants in by_cell.values():
+            if len(occupants) < 2:
+                continue
+            infected = [(pid, b) for pid, b in occupants if b.get("disease")]
+            clean = [(pid, b) for pid, b in occupants if not b.get("disease")]
+            # Infected + healthy: each infected tags one clean player and is cured.
+            if infected and clean:
+                random.shuffle(clean)
+                for i, (src_pid, src) in enumerate(infected):
+                    if i >= len(clean):
+                        break
+                    dst_pid, dst = clean[i]
+                    disease = src.get("disease")
+                    ticks = int(src.get("disease_ticks", DISEASE_DURATION_TICKS))
+                    self._clear_disease(src)
+                    events.append(
+                        {
+                            "type": "disease_cleared",
+                            "player_id": src_pid,
+                            "reason": "transferred",
+                        }
+                    )
+                    self._infect(dst, disease, ticks=ticks)
+                    events.append(
+                        {
+                            "type": "disease_infected",
+                            "player_id": dst_pid,
+                            "disease": disease,
+                            "from": src_pid,
+                        }
+                    )
+                continue
+            # Two infected players: swap diseases.
+            if len(infected) >= 2:
+                a_pid, a = infected[0]
+                b_pid, b = infected[1]
+                a_dis, a_ticks = a.get("disease"), int(a.get("disease_ticks", 0))
+                b_dis, b_ticks = b.get("disease"), int(b.get("disease_ticks", 0))
+                if a_dis == b_dis:
+                    continue
+                self._infect(a, b_dis, ticks=b_ticks)
+                self._infect(b, a_dis, ticks=a_ticks)
+                events.append(
+                    {
+                        "type": "disease_swapped",
+                        "a": a_pid,
+                        "b": b_pid,
+                        "a_disease": b_dis,
+                        "b_disease": a_dis,
+                    }
+                )
+        return events
+
+    def _desired_move_direction(self, bomber: dict) -> str:
+        """Direction the bomber wants to walk this tick (perpetual overrides stop)."""
+        desired = bomber.get("next_direction", "stop")
+        if bomber.get("disease") == "perpetual":
+            if desired in DIRECTIONS:
+                return desired
+            for key in ("facing", "direction"):
+                value = bomber.get(key)
+                if value in DIRECTIONS:
+                    return value
+            return "down"
+        return desired if desired in DIRECTIONS or desired == "stop" else "stop"
 
     def _apply_ai_actions(self, state: dict) -> list[dict]:
         events: list[dict] = []
@@ -814,12 +964,14 @@ class BombermanEngine(GamePlugin):
                 continue
             direction, place = choose_ai_action(state, pid, bomber)
             if direction in DIRECTIONS or direction == "stop":
-                bomber["next_direction"] = direction
+                bomber["next_direction"] = self._apply_reverse(bomber, direction)
             if place:
                 events.extend(self._place_bomb(state, pid, bomber))
         return events
 
     def _move_rate(self, bomber: dict) -> float:
+        if bomber.get("disease") == "slow":
+            return SLOW_MOVE_RATE
         level = max(0, min(MAX_SPEED_LEVEL, int(bomber.get("speed_level", 0))))
         return BASE_MOVE_RATE + SPEED_BONUS * level
 
@@ -829,6 +981,7 @@ class BombermanEngine(GamePlugin):
         if powerup is None:
             return events
         ptype = powerup.get("type")
+        pid = self._bomber_pid(state, bomber)
         if ptype == "bomb":
             bomber["max_bombs"] = min(MAX_BOMBS_CAP, int(bomber.get("max_bombs", 1)) + 1)
         elif ptype == "range":
@@ -841,6 +994,16 @@ class BombermanEngine(GamePlugin):
             bomber["can_throw"] = True
         elif ptype == "kick":
             bomber["can_kick"] = True
+        elif ptype == "skull":
+            disease = self._infect(bomber)
+            events.append(
+                {
+                    "type": "disease_infected",
+                    "player_id": pid,
+                    "disease": disease,
+                    "from": "skull",
+                }
+            )
         else:
             return events
 
@@ -850,9 +1013,7 @@ class BombermanEngine(GamePlugin):
         events.append(
             {
                 "type": "powerup_taken",
-                "player_id": next(
-                    (pid for pid, b in state["bombers"].items() if b is bomber), None
-                ),
+                "player_id": pid,
                 "powerup_type": ptype,
                 "x": x,
                 "y": y,
@@ -876,7 +1037,7 @@ class BombermanEngine(GamePlugin):
 
     def _resolve_step_direction(self, state: dict, bomber: dict) -> str | None:
         """Prefer the held direction; if blocked, keep sliding in the last move direction."""
-        desired = bomber.get("next_direction", "stop")
+        desired = self._desired_move_direction(bomber)
         momentum = bomber.get("direction", "stop")
         candidates: list[str] = []
         if desired in DIRECTIONS:
@@ -911,9 +1072,10 @@ class BombermanEngine(GamePlugin):
             direction = self._resolve_step_direction(state, bomber)
             if direction is None:
                 # Face the held direction even when blocked, but do not consume credit.
-                desired = bomber.get("next_direction", "stop")
+                desired = self._desired_move_direction(bomber)
                 if desired in DIRECTIONS:
                     bomber["direction"] = desired
+                    bomber["facing"] = desired
                 elif desired == "stop":
                     bomber["direction"] = "stop"
                 continue
@@ -936,8 +1098,14 @@ class BombermanEngine(GamePlugin):
             bomber["x"] = nx
             bomber["y"] = ny
             bomber["facing"] = direction
+            # Keep next_direction in sync for perpetual so walls don't strand a "stop".
+            if bomber.get("disease") == "perpetual":
+                bomber["next_direction"] = direction
             moved.add(pid)
             events.extend(self._pickup_powerup(state, bomber, nx, ny))
+
+            if bomber.get("disease") == "diarrhea":
+                events.extend(self._place_bomb(state, pid, bomber))
 
             if bomber.get("carrying_bomb_id"):
                 self._sync_carried_bomb(state, bomber)
@@ -1163,6 +1331,7 @@ class BombermanEngine(GamePlugin):
             return state, events
 
         events.extend(self._apply_ai_actions(state))
+        events.extend(self._tick_diseases(state))
 
         # Bombs/explosions first so players can flee this tick's new blasts next frame.
         # Actually classic order: move then bomb tick, or bomb tick then move.
@@ -1186,7 +1355,7 @@ class BombermanEngine(GamePlugin):
                     for pid, bomber in bombers.items()
                     if bomber.get("alive")
                     and float(bomber.get("move_credit", 0.0)) >= 1.0 - 1e-9
-                    and bomber.get("next_direction") in DIRECTIONS
+                    and self._desired_move_direction(bomber) in DIRECTIONS
                 }
                 if not moving:
                     break
@@ -1224,6 +1393,8 @@ class BombermanEngine(GamePlugin):
                                 "by": None,
                             }
                         )
+
+            events.extend(self._spread_diseases(state))
 
         if self._maybe_finish(state):
             events.append({"type": "game_over", "winner": state["winner"]})

@@ -133,7 +133,21 @@ export interface SnakeGameState {
   viewer_id: string | null
 }
 
-export type BombermanPowerupType = 'bomb' | 'range' | 'speed' | 'throw' | 'kick'
+export type BombermanPowerupType =
+  | 'bomb'
+  | 'range'
+  | 'speed'
+  | 'throw'
+  | 'kick'
+  | 'skull'
+
+export type BombermanDisease =
+  | 'slow'
+  | 'constipation'
+  | 'diarrhea'
+  | 'reverse'
+  | 'short_fuse'
+  | 'perpetual'
 
 export interface BombermanBomber {
   x: number
@@ -152,6 +166,8 @@ export interface BombermanBomber {
   move_credit?: number
   kills: number
   passable_bomb_ids?: string[]
+  disease?: BombermanDisease | null
+  disease_ticks?: number
 }
 
 export interface BombermanBomb {
