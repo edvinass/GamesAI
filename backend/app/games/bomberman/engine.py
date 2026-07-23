@@ -65,6 +65,79 @@ REVERSE_DIRS = {
     "stop": "stop",
 }
 
+GAME_MODES = ("classic", "team", "kill_race")
+TEAMS = ("red", "blue")
+TEAM_COLORS = {"red": "#ef4444", "blue": "#3b82f6"}
+RESPAWN_TICKS = 18  # ~2.7s at 150ms
+INVULN_TICKS = 20  # brief protection after spawn
+SUDDEN_DEATH_INTERVAL_TICKS = 24  # shrink one ring about every 3.6s
+MIN_PLAYABLE_SPAN = 5  # stop shrinking when arena would be too small
+
+# Frontend / host presets expand into concrete settings before validate_settings.
+RULE_PRESETS: dict[str, dict] = {
+    "classic": {
+        "game_mode": "classic",
+        "lives": 1,
+        "kill_target": 5,
+        "match_time_sec": 0,
+        "sudden_death_sec": 0,
+        "allow_skulls": True,
+        "starting_bombs": 1,
+        "starting_range": 1,
+        "starting_kick": False,
+        "starting_throw": False,
+    },
+    "team_battle": {
+        "game_mode": "team",
+        "lives": 1,
+        "kill_target": 5,
+        "match_time_sec": 0,
+        "sudden_death_sec": 0,
+        "allow_skulls": True,
+        "starting_bombs": 1,
+        "starting_range": 1,
+        "starting_kick": False,
+        "starting_throw": False,
+    },
+    "kill_race": {
+        "game_mode": "kill_race",
+        "lives": 1,
+        "kill_target": 5,
+        "match_time_sec": 180,
+        "sudden_death_sec": 120,
+        "allow_skulls": True,
+        "starting_bombs": 1,
+        "starting_range": 1,
+        "starting_kick": False,
+        "starting_throw": False,
+    },
+    "stock_lives": {
+        "game_mode": "classic",
+        "lives": 3,
+        "kill_target": 5,
+        "match_time_sec": 0,
+        "sudden_death_sec": 150,
+        "allow_skulls": True,
+        "starting_bombs": 1,
+        "starting_range": 1,
+        "starting_kick": False,
+        "starting_throw": False,
+    },
+    "sudden_chaos": {
+        "game_mode": "classic",
+        "lives": 1,
+        "kill_target": 5,
+        "match_time_sec": 0,
+        "sudden_death_sec": 90,
+        "allow_skulls": True,
+        "starting_bombs": 2,
+        "starting_range": 2,
+        "starting_kick": True,
+        "starting_throw": False,
+        "tick_ms": 120,
+    },
+}
+
 
 class BombermanEngine(GamePlugin):
     game_type = "bomberman"
@@ -81,11 +154,30 @@ class BombermanEngine(GamePlugin):
             "countdown_sec": 3,
             "solo_practice": False,
             "soft_fill": SOFT_FILL,
+            "rule_preset": "classic",
+            "game_mode": "classic",
+            "lives": 1,
+            "kill_target": 5,
+            "match_time_sec": 0,
+            "sudden_death_sec": 0,
+            "allow_skulls": True,
+            "starting_bombs": 1,
+            "starting_range": 1,
+            "starting_kick": False,
+            "starting_throw": False,
         }
 
     def validate_settings(self, settings: dict) -> dict:
         defaults = self.default_settings()
-        merged = {**defaults, **(settings or {})}
+        raw = dict(settings or {})
+        # Presets are applied by the lobby (full settings blob). Do not re-expand
+        # RULE_PRESETS here — that would reset host tweaks on partial updates.
+        merged = {**defaults, **raw}
+        preset_id = str(merged.get("rule_preset", "classic"))
+        if preset_id not in RULE_PRESETS and preset_id != "custom":
+            preset_id = "classic"
+        merged["rule_preset"] = preset_id
+
         merged["min_players"] = max(2, min(8, int(merged.get("min_players", 2))))
         merged["max_players"] = max(
             merged["min_players"], min(8, int(merged.get("max_players", 8)))
@@ -112,10 +204,24 @@ class BombermanEngine(GamePlugin):
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
         default_fill = float(meta.get("soft_fill", SOFT_FILL))
         # Allow host override, but default to the map's intended density.
-        if "soft_fill" in (settings or {}):
+        if "soft_fill" in raw:
             merged["soft_fill"] = max(0.2, min(0.85, float(merged.get("soft_fill", default_fill))))
         else:
             merged["soft_fill"] = default_fill
+
+        mode = str(merged.get("game_mode", "classic"))
+        if mode not in GAME_MODES:
+            mode = "classic"
+        merged["game_mode"] = mode
+        merged["lives"] = max(1, min(5, int(merged.get("lives", 1))))
+        merged["kill_target"] = max(1, min(20, int(merged.get("kill_target", 5))))
+        merged["match_time_sec"] = max(0, min(600, int(merged.get("match_time_sec", 0))))
+        merged["sudden_death_sec"] = max(0, min(600, int(merged.get("sudden_death_sec", 0))))
+        merged["allow_skulls"] = bool(merged.get("allow_skulls", True))
+        merged["starting_bombs"] = max(1, min(MAX_BOMBS_CAP, int(merged.get("starting_bombs", 1))))
+        merged["starting_range"] = max(1, min(MAX_RANGE_CAP, int(merged.get("starting_range", 1))))
+        merged["starting_kick"] = bool(merged.get("starting_kick", False))
+        merged["starting_throw"] = bool(merged.get("starting_throw", False))
         return merged
 
     def tick_interval_ms(self) -> int:
@@ -127,6 +233,10 @@ class BombermanEngine(GamePlugin):
             humans = [p for p in players if not p.get("is_ai")]
             if len(humans) != 1:
                 return "Solo practice requires exactly one human player"
+            if settings.get("game_mode") == "team":
+                # Solo practice always ends as 1 human + 2 AI → odd teams.
+                # Allow it: auto-balance as 2v1 at start.
+                return None
             return None
 
         count = len(players)
@@ -134,6 +244,8 @@ class BombermanEngine(GamePlugin):
             return f"Need at least {settings['min_players']} players"
         if count > settings["max_players"]:
             return f"Maximum {settings['max_players']} players allowed"
+        if settings.get("game_mode") == "team" and count < 2:
+            return "Team battle needs at least 2 players"
         return None
 
     def create_initial_state(self, players: list[dict], settings: dict) -> dict:
@@ -144,31 +256,53 @@ class BombermanEngine(GamePlugin):
         width = len(grid[0])
         height = len(grid)
         spawns = spawn_pool[: len(players)]
+        team_of = self._assign_teams(players, settings)
+
+        start_bombs = int(settings["starting_bombs"])
+        start_range = int(settings["starting_range"])
+        start_kick = bool(settings["starting_kick"])
+        start_throw = bool(settings["starting_throw"])
+        lives = int(settings["lives"])
 
         bombers: dict[str, dict] = {}
         for i, player in enumerate(players):
             sx, sy = spawns[i]
             is_ai = bool(player.get("is_ai"))
+            team = team_of.get(player["id"])
+            color = (
+                TEAM_COLORS.get(team, BOMBER_COLORS[i % len(BOMBER_COLORS)])
+                if settings["game_mode"] == "team" and team
+                else BOMBER_COLORS[i % len(BOMBER_COLORS)]
+            )
+            # AI seats get a mild head start so they stay competitive.
+            bombs = max(start_bombs, 2 if is_ai else start_bombs)
+            brange = max(start_range, 2 if is_ai else start_range)
+            speed = 1 if is_ai else 0
             bombers[player["id"]] = {
                 "x": sx,
                 "y": sy,
+                "spawn_x": sx,
+                "spawn_y": sy,
                 "direction": "stop",
                 "next_direction": "stop",
                 "facing": "down",
                 "alive": True,
-                "color": BOMBER_COLORS[i % len(BOMBER_COLORS)],
-                # AI seats get a mild head start so they stay competitive.
-                "max_bombs": 2 if is_ai else 1,
-                "bomb_range": 2 if is_ai else 1,
-                "speed_level": 1 if is_ai else 0,
-                "can_throw": False,
-                "can_kick": False,
+                "color": color,
+                "team": team,
+                "lives": lives,
+                "max_bombs": bombs,
+                "bomb_range": brange,
+                "speed_level": speed,
+                "can_throw": start_throw,
+                "can_kick": start_kick,
                 "carrying_bomb_id": None,
                 "move_credit": 0.0,
                 "kills": 0,
                 "passable_bomb_ids": [],
                 "disease": None,
                 "disease_ticks": 0,
+                "respawn_ticks": 0,
+                "invuln_ticks": 0,
             }
 
         countdown_sec = settings["countdown_sec"]
@@ -176,11 +310,20 @@ class BombermanEngine(GamePlugin):
             datetime.now(timezone.utc) + timedelta(seconds=countdown_sec)
         ).isoformat()
 
+        tick_ms = int(settings["tick_ms"])
+        match_time_sec = int(settings["match_time_sec"])
+        sudden_death_sec = int(settings["sudden_death_sec"])
+        match_ticks = (match_time_sec * 1000) // tick_ms if match_time_sec > 0 else 0
+        sudden_death_ticks = (
+            (sudden_death_sec * 1000) // tick_ms if sudden_death_sec > 0 else 0
+        )
+
         return {
             "phase": "countdown",
             "countdown_ends_at": countdown_ends_at,
             "tick": 0,
-            "tick_ms": settings["tick_ms"],
+            "playing_tick": 0,
+            "tick_ms": tick_ms,
             "grid_width": width,
             "grid_height": height,
             "grid": grid,
@@ -192,11 +335,27 @@ class BombermanEngine(GamePlugin):
             "powerups": [],
             "players": players,
             "settings": settings,
+            "game_mode": settings["game_mode"],
+            "kill_target": settings["kill_target"],
+            "match_ticks": match_ticks,
+            "sudden_death_ticks": sudden_death_ticks,
+            "shrink_level": 0,
+            "sudden_death_active": False,
             "winner": None,
+            "winning_team": None,
             "win_reason": None,
             "last_action": None,
             "_bomb_seq": 0,
         }
+
+    def _assign_teams(self, players: list[dict], settings: dict) -> dict[str, str | None]:
+        if settings.get("game_mode") != "team":
+            return {p["id"]: None for p in players}
+        # Alternate seats so corners/spawns mix both sides.
+        teams: dict[str, str | None] = {}
+        for i, player in enumerate(players):
+            teams[player["id"]] = TEAMS[i % 2]
+        return teams
 
     def _next_bomb_id(self, state: dict) -> str:
         nid = int(state.get("_bomb_seq", 0)) + 1
@@ -344,7 +503,7 @@ class BombermanEngine(GamePlugin):
 
     def _place_bomb(self, state: dict, player_id: str, bomber: dict) -> list[dict]:
         events: list[dict] = []
-        if not bomber.get("alive"):
+        if not self._bomber_controllable(bomber):
             return events
 
         # Classic glove: Space while carrying throws.
@@ -807,7 +966,7 @@ class BombermanEngine(GamePlugin):
 
         player_id = player["id"]
         bomber = state["bombers"].get(player_id)
-        if not bomber or not bomber.get("alive"):
+        if not bomber or not self._bomber_controllable(bomber):
             return state, events
 
         action_type = action.get("type")
@@ -881,7 +1040,7 @@ class BombermanEngine(GamePlugin):
         alive = [
             (pid, b)
             for pid, b in state["bombers"].items()
-            if b.get("alive")
+            if self._bomber_controllable(b)
         ]
         by_cell: dict[tuple[int, int], list[tuple[str, dict]]] = {}
         for pid, bomber in alive:
@@ -960,7 +1119,7 @@ class BombermanEngine(GamePlugin):
                 continue
             pid = player["id"]
             bomber = state["bombers"].get(pid)
-            if not bomber or not bomber.get("alive"):
+            if not bomber or not self._bomber_controllable(bomber):
                 continue
             direction, place = choose_ai_action(state, pid, bomber)
             if direction in DIRECTIONS or direction == "stop":
@@ -1195,7 +1354,7 @@ class BombermanEngine(GamePlugin):
         ]
         for x, y in destroyed_soft:
             if random.random() < POWERUP_CHANCE:
-                ptype = random.choices(POWERUP_TYPES, weights=POWERUP_WEIGHTS, k=1)[0]
+                ptype = self._roll_powerup(state)
                 state.setdefault("powerups", []).append({"x": x, "y": y, "type": ptype})
                 events.append({"type": "powerup_spawned", "x": x, "y": y, "powerup_type": ptype})
 
@@ -1222,22 +1381,11 @@ class BombermanEngine(GamePlugin):
             pos = (bomber["x"], bomber["y"])
             if pos not in blast_cells:
                 continue
-            self._drop_carried_bomb(state, bomber)
-            bomber["alive"] = False
             killer = cell_owners.get(pos)
             if killer == pid:
                 killer = None
-            if killer and killer in state["bombers"]:
-                state["bombers"][killer]["kills"] = int(
-                    state["bombers"][killer].get("kills", 0)
-                ) + 1
-            events.append(
-                {
-                    "type": "player_died",
-                    "player_id": pid,
-                    "reason": "explosion",
-                    "by": killer,
-                }
+            events.extend(
+                self._hurt_bomber(state, pid, reason="explosion", by=killer)
             )
 
         return events
@@ -1260,15 +1408,8 @@ class BombermanEngine(GamePlugin):
             if not bomber.get("alive"):
                 continue
             if (bomber["x"], bomber["y"]) in blast_now:
-                self._drop_carried_bomb(state, bomber)
-                bomber["alive"] = False
-                events.append(
-                    {
-                        "type": "player_died",
-                        "player_id": pid,
-                        "reason": "explosion",
-                        "by": None,
-                    }
+                events.extend(
+                    self._hurt_bomber(state, pid, reason="explosion", by=None)
                 )
 
         # Keep carried bombs locked to their carriers between moves.
@@ -1291,33 +1432,374 @@ class BombermanEngine(GamePlugin):
 
         return events
 
+    def _roll_powerup(self, state: dict) -> str:
+        settings = state.get("settings") or {}
+        if settings.get("allow_skulls", True):
+            return random.choices(POWERUP_TYPES, weights=POWERUP_WEIGHTS, k=1)[0]
+        types = [t for t in POWERUP_TYPES if t != "skull"]
+        weights = [w for t, w in zip(POWERUP_TYPES, POWERUP_WEIGHTS) if t != "skull"]
+        return random.choices(types, weights=weights, k=1)[0]
+
+    def _bomber_controllable(self, bomber: dict) -> bool:
+        return (
+            bool(bomber.get("alive"))
+            and int(bomber.get("respawn_ticks", 0)) <= 0
+        )
+
+    def _hurt_bomber(
+        self,
+        state: dict,
+        pid: str,
+        *,
+        reason: str,
+        by: str | None,
+    ) -> list[dict]:
+        events: list[dict] = []
+        bomber = state["bombers"].get(pid)
+        if not bomber or not bomber.get("alive"):
+            return events
+        if int(bomber.get("respawn_ticks", 0)) > 0:
+            return events
+        if int(bomber.get("invuln_ticks", 0)) > 0:
+            return events
+
+        settings = state.get("settings") or {}
+        mode = settings.get("game_mode", "classic")
+
+        killer = by
+        if killer == pid:
+            killer = None
+        if killer and killer in state["bombers"]:
+            victim_team = bomber.get("team")
+            killer_team = state["bombers"][killer].get("team")
+            if mode == "team" and victim_team and victim_team == killer_team:
+                killer = None
+            else:
+                state["bombers"][killer]["kills"] = int(
+                    state["bombers"][killer].get("kills", 0)
+                ) + 1
+
+        self._drop_carried_bomb(state, bomber)
+        self._clear_disease(bomber)
+
+        # Kill race: always respawn. Stock/classic: spend a life.
+        if mode == "kill_race":
+            events.append(
+                {
+                    "type": "life_lost",
+                    "player_id": pid,
+                    "reason": reason,
+                    "by": killer,
+                    "lives": int(bomber.get("lives", 1)),
+                }
+            )
+            events.extend(self._respawn_bomber(state, pid, bomber))
+            return events
+
+        lives = int(bomber.get("lives", 1)) - 1
+        bomber["lives"] = max(0, lives)
+        events.append(
+            {
+                "type": "life_lost",
+                "player_id": pid,
+                "reason": reason,
+                "by": killer,
+                "lives": bomber["lives"],
+            }
+        )
+
+        if bomber["lives"] <= 0:
+            bomber["alive"] = False
+            bomber["direction"] = "stop"
+            bomber["next_direction"] = "stop"
+            events.append(
+                {
+                    "type": "player_died",
+                    "player_id": pid,
+                    "reason": reason,
+                    "by": killer,
+                }
+            )
+        else:
+            events.extend(self._respawn_bomber(state, pid, bomber))
+        return events
+
+    def _respawn_bomber(self, state: dict, pid: str, bomber: dict) -> list[dict]:
+        sx = int(bomber.get("spawn_x", bomber["x"]))
+        sy = int(bomber.get("spawn_y", bomber["y"]))
+        bomber["x"] = sx
+        bomber["y"] = sy
+        bomber["direction"] = "stop"
+        bomber["next_direction"] = "stop"
+        bomber["facing"] = "down"
+        bomber["move_credit"] = 0.0
+        bomber["carrying_bomb_id"] = None
+        bomber["passable_bomb_ids"] = []
+        bomber["respawn_ticks"] = RESPAWN_TICKS
+        bomber["invuln_ticks"] = 0
+        bomber["alive"] = True
+        return [
+            {
+                "type": "player_respawn",
+                "player_id": pid,
+                "x": sx,
+                "y": sy,
+                "delay_ticks": RESPAWN_TICKS,
+            }
+        ]
+
+    def _tick_respawns(self, state: dict) -> list[dict]:
+        events: list[dict] = []
+        for pid, bomber in state["bombers"].items():
+            if not bomber.get("alive"):
+                continue
+            respawn = int(bomber.get("respawn_ticks", 0))
+            if respawn > 0:
+                bomber["respawn_ticks"] = respawn - 1
+                if bomber["respawn_ticks"] <= 0:
+                    bomber["invuln_ticks"] = INVULN_TICKS
+                    events.append(
+                        {
+                            "type": "player_active",
+                            "player_id": pid,
+                            "x": bomber["x"],
+                            "y": bomber["y"],
+                        }
+                    )
+                continue
+            invuln = int(bomber.get("invuln_ticks", 0))
+            if invuln > 0:
+                bomber["invuln_ticks"] = invuln - 1
+        return events
+
+    def _ring_cells(self, width: int, height: int, margin: int) -> list[tuple[int, int]]:
+        cells: list[tuple[int, int]] = []
+        if margin < 0 or width - 2 * margin < MIN_PLAYABLE_SPAN:
+            return cells
+        if height - 2 * margin < MIN_PLAYABLE_SPAN:
+            return cells
+        y0, y1 = margin, height - 1 - margin
+        x0, x1 = margin, width - 1 - margin
+        for x in range(x0, x1 + 1):
+            cells.append((x, y0))
+            cells.append((x, y1))
+        for y in range(y0 + 1, y1):
+            cells.append((x0, y))
+            cells.append((x1, y))
+        return cells
+
+    def _apply_sudden_death(self, state: dict) -> list[dict]:
+        events: list[dict] = []
+        start_tick = int(state.get("sudden_death_ticks", 0))
+        if start_tick <= 0:
+            return events
+        playing_tick = int(state.get("playing_tick", 0))
+        if playing_tick < start_tick:
+            return events
+
+        if not state.get("sudden_death_active"):
+            state["sudden_death_active"] = True
+            events.append({"type": "sudden_death_started"})
+
+        elapsed = playing_tick - start_tick
+        target_level = 1 + elapsed // SUDDEN_DEATH_INTERVAL_TICKS
+        current = int(state.get("shrink_level", 0))
+        width = int(state["grid_width"])
+        height = int(state["grid_height"])
+
+        while current < target_level:
+            ring = self._ring_cells(width, height, current)
+            if not ring:
+                break
+            current += 1
+            hardened: list[dict] = []
+            for x, y in ring:
+                if state["grid"][y][x] == TILE_HARD:
+                    continue
+                state["grid"][y][x] = TILE_HARD
+                hardened.append({"x": x, "y": y})
+            # Wipe soft drops / bombs / powerups on the new walls.
+            hard_set = {(c["x"], c["y"]) for c in hardened}
+            if hard_set:
+                state["powerups"] = [
+                    p
+                    for p in state.get("powerups") or []
+                    if (p["x"], p["y"]) not in hard_set
+                ]
+                state["bombs"] = [
+                    b
+                    for b in state.get("bombs") or []
+                    if (b["x"], b["y"]) not in hard_set
+                    or b.get("flight") in ("throw", "carried")
+                ]
+                for pid, bomber in state["bombers"].items():
+                    if not bomber.get("alive"):
+                        continue
+                    if (bomber["x"], bomber["y"]) in hard_set:
+                        events.extend(
+                            self._hurt_bomber(
+                                state, pid, reason="sudden_death", by=None
+                            )
+                        )
+                events.append(
+                    {
+                        "type": "arena_shrunk",
+                        "level": current,
+                        "cells": hardened,
+                    }
+                )
+            state["shrink_level"] = current
+            if width - 2 * current < MIN_PLAYABLE_SPAN or height - 2 * current < MIN_PLAYABLE_SPAN:
+                break
+        return events
+
     def _alive_ids(self, state: dict) -> list[str]:
         return [pid for pid, b in state["bombers"].items() if b.get("alive")]
 
+    def _teams_alive(self, state: dict) -> set[str]:
+        teams: set[str] = set()
+        for bomber in state["bombers"].values():
+            if bomber.get("alive") and bomber.get("team") in TEAMS:
+                teams.add(bomber["team"])
+        return teams
+
+    def _pick_most_kills(self, state: dict, candidates: list[str] | None = None) -> str:
+        pool = candidates if candidates is not None else list(state["bombers"].keys())
+        if not pool:
+            return next(iter(state["bombers"]))
+        scores = {
+            pid: int(state["bombers"][pid].get("kills", 0))
+            for pid in pool
+            if pid in state["bombers"]
+        }
+        max_kills = max(scores.values()) if scores else 0
+        winners = [pid for pid, k in scores.items() if k == max_kills]
+        return winners[0] if len(winners) == 1 else random.choice(winners)
+
+    def _finish(
+        self,
+        state: dict,
+        *,
+        winner: str | None,
+        win_reason: str,
+        winning_team: str | None = None,
+    ) -> None:
+        state["winner"] = winner
+        state["winning_team"] = winning_team
+        state["win_reason"] = win_reason
+        state["phase"] = "finished"
+
     def _resolve_winner(self, state: dict) -> None:
+        settings = state.get("settings") or {}
+        mode = settings.get("game_mode", state.get("game_mode", "classic"))
+
+        if mode == "team":
+            teams = self._teams_alive(state)
+            if len(teams) == 1:
+                team = next(iter(teams))
+                members = [
+                    pid
+                    for pid, b in state["bombers"].items()
+                    if b.get("team") == team
+                ]
+                self._finish(
+                    state,
+                    winner=self._pick_most_kills(state, members),
+                    win_reason="team_eliminated",
+                    winning_team=team,
+                )
+                return
+            if len(teams) == 0:
+                # Everyone wiped — most kills overall, report their team if any.
+                winner = self._pick_most_kills(state)
+                team = state["bombers"][winner].get("team")
+                self._finish(
+                    state,
+                    winner=winner,
+                    win_reason="most_kills",
+                    winning_team=team if team in TEAMS else None,
+                )
+            return
+
         alive = self._alive_ids(state)
         if len(alive) == 1:
-            state["winner"] = alive[0]
-            state["win_reason"] = "last_standing"
-            state["phase"] = "finished"
+            self._finish(state, winner=alive[0], win_reason="last_standing")
             return
         if len(alive) == 0:
-            # Most kills, then arbitrary
-            scores = {
-                pid: int(b.get("kills", 0)) for pid, b in state["bombers"].items()
-            }
-            max_kills = max(scores.values()) if scores else 0
-            winners = [pid for pid, k in scores.items() if k == max_kills]
-            state["winner"] = winners[0] if len(winners) == 1 else random.choice(winners)
-            state["win_reason"] = "most_kills"
-            state["phase"] = "finished"
+            self._finish(
+                state,
+                winner=self._pick_most_kills(state),
+                win_reason="most_kills",
+            )
 
     def _maybe_finish(self, state: dict) -> bool:
         if state.get("phase") == "finished":
             return True
+
+        settings = state.get("settings") or {}
+        mode = settings.get("game_mode", state.get("game_mode", "classic"))
+        kill_target = int(state.get("kill_target", settings.get("kill_target", 5)))
+        match_ticks = int(state.get("match_ticks", 0))
+        playing_tick = int(state.get("playing_tick", 0))
+
+        if mode == "kill_race":
+            for pid, bomber in state["bombers"].items():
+                if int(bomber.get("kills", 0)) >= kill_target:
+                    self._finish(state, winner=pid, win_reason="kill_race")
+                    return True
+            if match_ticks > 0 and playing_tick >= match_ticks:
+                self._finish(
+                    state,
+                    winner=self._pick_most_kills(state),
+                    win_reason="time_up",
+                )
+                return True
+            return False
+
+        if mode == "team":
+            if len(self._teams_alive(state)) <= 1:
+                self._resolve_winner(state)
+                return state.get("phase") == "finished"
+            if match_ticks > 0 and playing_tick >= match_ticks:
+                # Team with most combined kills (alive preferred).
+                team_kills = {"red": 0, "blue": 0}
+                for bomber in state["bombers"].values():
+                    team = bomber.get("team")
+                    if team in team_kills:
+                        team_kills[team] += int(bomber.get("kills", 0))
+                if team_kills["red"] == team_kills["blue"]:
+                    winner = self._pick_most_kills(state)
+                    team = state["bombers"][winner].get("team")
+                else:
+                    team = "red" if team_kills["red"] > team_kills["blue"] else "blue"
+                    members = [
+                        pid
+                        for pid, b in state["bombers"].items()
+                        if b.get("team") == team
+                    ]
+                    winner = self._pick_most_kills(state, members)
+                self._finish(
+                    state,
+                    winner=winner,
+                    win_reason="time_up",
+                    winning_team=team if team in TEAMS else None,
+                )
+                return True
+            return False
+
+        # Classic / stock (lives baked into alive flag).
         if len(self._alive_ids(state)) <= 1:
             self._resolve_winner(state)
             return state.get("phase") == "finished"
+
+        if match_ticks > 0 and playing_tick >= match_ticks:
+            alive = self._alive_ids(state)
+            self._finish(
+                state,
+                winner=self._pick_most_kills(state, alive or None),
+                win_reason="time_up",
+            )
+            return True
         return False
 
     def tick(self, state: dict) -> tuple[dict, list[dict]]:
@@ -1336,6 +1818,7 @@ class BombermanEngine(GamePlugin):
             state["tick"] += 1
             return state, events
 
+        events.extend(self._tick_respawns(state))
         events.extend(self._apply_ai_actions(state))
         events.extend(self._tick_diseases(state))
 
@@ -1347,7 +1830,7 @@ class BombermanEngine(GamePlugin):
         if state.get("phase") != "finished":
             bombers = state["bombers"]
             for bomber in bombers.values():
-                if not bomber.get("alive"):
+                if not self._bomber_controllable(bomber):
                     continue
                 bomber["move_credit"] = float(bomber.get("move_credit", 0.0)) + self._move_rate(
                     bomber
@@ -1359,7 +1842,7 @@ class BombermanEngine(GamePlugin):
                 moving = {
                     pid
                     for pid, bomber in bombers.items()
-                    if bomber.get("alive")
+                    if self._bomber_controllable(bomber)
                     and float(bomber.get("move_credit", 0.0)) >= 1.0 - 1e-9
                     and self._desired_move_direction(bomber) in DIRECTIONS
                 }
@@ -1389,43 +1872,61 @@ class BombermanEngine(GamePlugin):
                     if not bomber or not bomber.get("alive"):
                         continue
                     if (bomber["x"], bomber["y"]) in blast_now:
-                        self._drop_carried_bomb(state, bomber)
-                        bomber["alive"] = False
-                        events.append(
-                            {
-                                "type": "player_died",
-                                "player_id": pid,
-                                "reason": "explosion",
-                                "by": None,
-                            }
+                        events.extend(
+                            self._hurt_bomber(state, pid, reason="explosion", by=None)
                         )
 
             events.extend(self._spread_diseases(state))
+            events.extend(self._apply_sudden_death(state))
+
+        state["playing_tick"] = int(state.get("playing_tick", 0)) + 1
 
         if self._maybe_finish(state):
-            events.append({"type": "game_over", "winner": state["winner"]})
+            events.append(
+                {
+                    "type": "game_over",
+                    "winner": state["winner"],
+                    "winning_team": state.get("winning_team"),
+                    "win_reason": state.get("win_reason"),
+                }
+            )
 
         state["tick"] += 1
         return state, events
 
     def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
         settings = state.get("settings") or {}
+        match_ticks = int(state.get("match_ticks", 0))
+        playing_tick = int(state.get("playing_tick", 0))
+        tick_ms = int(state.get("tick_ms", settings.get("tick_ms", 150)))
+        time_remaining_sec = None
+        if match_ticks > 0 and state.get("phase") == "playing":
+            left = max(0, match_ticks - playing_tick)
+            time_remaining_sec = (left * tick_ms) // 1000
         return {
             "phase": state["phase"],
             "countdown_ends_at": state.get("countdown_ends_at"),
             "tick": state["tick"],
-            "tick_ms": state.get("tick_ms", settings.get("tick_ms", 150)),
+            "playing_tick": playing_tick,
+            "tick_ms": tick_ms,
             "grid_width": state["grid_width"],
             "grid_height": state["grid_height"],
             "grid": state["grid"],
             "map_id": state.get("map_id", settings.get("map_id", "classic")),
             "map_name": state.get("map_name", "Classic"),
+            "game_mode": state.get("game_mode", settings.get("game_mode", "classic")),
+            "kill_target": int(state.get("kill_target", settings.get("kill_target", 5))),
+            "match_ticks": match_ticks,
+            "time_remaining_sec": time_remaining_sec,
+            "sudden_death_active": bool(state.get("sudden_death_active")),
+            "shrink_level": int(state.get("shrink_level", 0)),
             "bombers": state["bombers"],
             "bombs": state.get("bombs") or [],
             "explosions": state.get("explosions") or [],
             "powerups": state.get("powerups") or [],
             "players": state["players"],
             "winner": state.get("winner"),
+            "winning_team": state.get("winning_team"),
             "win_reason": state.get("win_reason"),
             "last_action": state.get("last_action"),
             "viewer_id": viewer_player["id"] if viewer_player else None,

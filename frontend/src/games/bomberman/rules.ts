@@ -16,6 +16,10 @@ export const bombermanRules: GameRules = {
       body: 'Hold arrow keys or WASD to walk. Release the key to stop. Press Space to place a bomb (limited by your bomb count). You can walk off a bomb you just placed, but you cannot walk back onto it. With Throw (Power Glove): stand on a bomb or face an adjacent one and press Space to pick it up, then press Space again to throw it. With Kick, walk into a bomb to send it sliding along the floor.',
     },
     {
+      heading: 'Game modes',
+      body: 'Classic: last bomber standing. Team Battle: Red vs Blue — wipe the other team. Kill Race: respawn on death and race to a kill target (or most kills when the timer ends). Stock lives: start with multiple lives; each death costs one and respawns you until you’re out. Sudden death (optional): after a delay the arena shrinks with hard walls from the outside. Hosts can apply rule presets or tweak lives, timer, skulls, and starting kick/throw.',
+    },
+    {
       heading: 'Arena',
       body: 'Each lobby picks an arena layout (Classic, Fortress, Islands, The Narrows, and more). Arenas are larger than the screen — your bomber stays centered while the map scrolls. Hard walls are permanent; soft walls break and may drop power-ups. Explosions travel in four directions and stop at hard walls.',
     },
@@ -25,11 +29,11 @@ export const bombermanRules: GameRules = {
     },
     {
       heading: 'Skull diseases',
-      body: 'Skull (💀) curses you with a random temporary disease. You blink while cursed, but the exact disease is not named — discover it from how you move and bomb. Touch another player to pass the curse (and cure yourself). Diseases: crawl slowly, cannot plant bombs, auto-plant bombs every step, reversed controls, bombs with a short fuse, or perpetual motion (cannot stop).',
+      body: 'Skull (💀) curses you with a random temporary disease. You blink while cursed, but the exact disease is not named — discover it from how you move and bomb. Touch another player to pass the curse (and cure yourself). Diseases: crawl slowly, cannot plant bombs, auto-plant bombs every step, reversed controls, bombs with a short fuse, or perpetual motion (cannot stop). Hosts can disable skulls in the lobby.',
     },
     {
       heading: 'Winning',
-      body: 'Eliminate every other bomber. The last player standing wins. If everyone dies in the same blast, the player with the most kills wins.',
+      body: 'Classic / stock: eliminate every other bomber (or outlast their lives). Team: eliminate the other color. Kill race: reach the kill target first, or lead when time expires. If everyone dies in the same blast, most kills wins.',
     },
     {
       heading: 'AI & solo practice',

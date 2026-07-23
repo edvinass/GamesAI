@@ -208,6 +208,51 @@ const lives = computed({
   set: (val: number) => updateSettings({ lives: val }),
 })
 
+const bombermanGameMode = computed({
+  get: () => String(room.value?.settings?.game_mode ?? 'classic'),
+  set: (val: string) => updateSettings({ game_mode: val }),
+})
+
+const bombermanKillTarget = computed({
+  get: () => Number(room.value?.settings?.kill_target ?? 5),
+  set: (val: number) => updateSettings({ kill_target: val }),
+})
+
+const bombermanMatchTimeSec = computed({
+  get: () => Number(room.value?.settings?.match_time_sec ?? 0),
+  set: (val: number) => updateSettings({ match_time_sec: val }),
+})
+
+const bombermanSuddenDeathSec = computed({
+  get: () => Number(room.value?.settings?.sudden_death_sec ?? 0),
+  set: (val: number) => updateSettings({ sudden_death_sec: val }),
+})
+
+const bombermanAllowSkulls = computed({
+  get: () => room.value?.settings?.allow_skulls !== false,
+  set: (val: boolean) => updateSettings({ allow_skulls: val }),
+})
+
+const bombermanStartingKick = computed({
+  get: () => Boolean(room.value?.settings?.starting_kick),
+  set: (val: boolean) => updateSettings({ starting_kick: val }),
+})
+
+const bombermanStartingThrow = computed({
+  get: () => Boolean(room.value?.settings?.starting_throw),
+  set: (val: boolean) => updateSettings({ starting_throw: val }),
+})
+
+const bombermanRulePreset = computed({
+  get: () => String(room.value?.settings?.rule_preset ?? 'classic'),
+  set: (val: string) => updateSettings({ rule_preset: val }),
+})
+
+const bombermanLives = computed({
+  get: () => Number(room.value?.settings?.lives ?? 1),
+  set: (val: number) => updateSettings({ lives: val }),
+})
+
 const duelMatchFormat = computed({
   get: () => String(room.value?.settings?.match_format ?? 'best_of_5'),
   set: (val: string) => updateSettings({ match_format: val }),
@@ -430,6 +475,15 @@ function startGame() {
         v-model:solo-practice="soloPractice"
         v-model:tick-ms="tickMs"
         v-model:map-id="mapId"
+        v-model:game-mode="bombermanGameMode"
+        v-model:lives="bombermanLives"
+        v-model:kill-target="bombermanKillTarget"
+        v-model:match-time-sec="bombermanMatchTimeSec"
+        v-model:sudden-death-sec="bombermanSuddenDeathSec"
+        v-model:allow-skulls="bombermanAllowSkulls"
+        v-model:starting-kick="bombermanStartingKick"
+        v-model:starting-throw="bombermanStartingThrow"
+        v-model:rule-preset="bombermanRulePreset"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"
@@ -439,6 +493,7 @@ function startGame() {
         :validation-issues="lobbyValidation.issues"
         @add-ai="addAi()"
         @remove="removePlayer"
+        @apply-settings="updateSettings"
       />
 
       <PacmanLobby

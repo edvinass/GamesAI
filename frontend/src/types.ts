@@ -152,11 +152,15 @@ export type BombermanDisease =
 export interface BombermanBomber {
   x: number
   y: number
+  spawn_x?: number
+  spawn_y?: number
   direction: string
   next_direction: string
   facing?: string
   alive: boolean
   color: string
+  team?: 'red' | 'blue' | null
+  lives?: number
   max_bombs: number
   bomb_range: number
   speed_level: number
@@ -168,6 +172,8 @@ export interface BombermanBomber {
   passable_bomb_ids?: string[]
   disease?: BombermanDisease | null
   disease_ticks?: number
+  respawn_ticks?: number
+  invuln_ticks?: number
 }
 
 export interface BombermanBomb {
@@ -200,6 +206,7 @@ export interface BombermanGameState {
   phase: 'countdown' | 'playing' | 'finished'
   countdown_ends_at: string | null
   tick: number
+  playing_tick?: number
   tick_ms?: number
   grid_width: number
   grid_height: number
@@ -207,12 +214,19 @@ export interface BombermanGameState {
   grid: number[][]
   map_id?: string
   map_name?: string
+  game_mode?: 'classic' | 'team' | 'kill_race' | string
+  kill_target?: number
+  match_ticks?: number
+  time_remaining_sec?: number | null
+  sudden_death_active?: boolean
+  shrink_level?: number
   bombers: Record<string, BombermanBomber>
   bombs: BombermanBomb[]
   explosions: BombermanExplosion[]
   powerups: BombermanPowerup[]
   players: Player[]
   winner: string | null
+  winning_team?: 'red' | 'blue' | null
   win_reason: string | null
   last_action: Record<string, unknown> | null
   viewer_id: string | null

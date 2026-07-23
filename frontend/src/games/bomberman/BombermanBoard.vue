@@ -56,10 +56,14 @@ const touchDirection = ref<string | null>(null)
 
 const myBomber = computed(() => props.gameState.bombers[props.playerId])
 const isAlive = computed(() => myBomber.value?.alive ?? false)
+const isRespawning = computed(() => (myBomber.value?.respawn_ticks ?? 0) > 0)
 const isHost = computed(() => props.room.host_player_id === props.playerId)
 const isFinished = computed(() => props.gameState.phase === 'finished')
 const canControl = computed(
-  () => props.gameState.phase === 'playing' && isAlive.value,
+  () =>
+    props.gameState.phase === 'playing' &&
+    isAlive.value &&
+    !isRespawning.value,
 )
 
 const myNickname = computed(
@@ -87,6 +91,9 @@ function selfMarkerStrength(now = performance.now()): number {
 }
 
 const winnerName = computed(() => {
+  const team = props.gameState.winning_team
+  if (team === 'red') return 'Red team'
+  if (team === 'blue') return 'Blue team'
   const winnerId = props.gameState.winner
   if (!winnerId) return null
   return props.gameState.players.find((p) => p.id === winnerId)?.nickname ?? 'Unknown'
@@ -96,7 +103,27 @@ const winReasonLabel = computed(() => {
   const reason = props.gameState.win_reason
   if (reason === 'last_standing') return 'Last bomber standing'
   if (reason === 'most_kills') return 'Most kills'
+  if (reason === 'team_eliminated') return 'Team victory'
+  if (reason === 'kill_race') return 'Kill race'
+  if (reason === 'time_up') return 'Time up'
   return null
+})
+
+const modeChip = computed(() => {
+  const mode = props.gameState.game_mode ?? 'classic'
+  if (mode === 'team') return 'Team Battle'
+  if (mode === 'kill_race') return `Kill Race · ${props.gameState.kill_target ?? 5}`
+  const lives = myBomber.value?.lives
+  if (typeof lives === 'number' && lives > 1) return `Stock · ${lives} lives`
+  return null
+})
+
+const timerLabel = computed(() => {
+  const sec = props.gameState.time_remaining_sec
+  if (sec == null || props.gameState.phase !== 'playing') return null
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}:${String(s).padStart(2, '0')}`
 })
 
 const playerRows = computed(() =>
@@ -304,6 +331,8 @@ let prevSoundSnap: {
   explosionCount: number
   softCount: number
   alive: Record<string, boolean>
+  lives: Record<string, number>
+  respawning: Record<string, boolean>
   countdownSec: number | null
   myStats: {
     maxBombs: number
@@ -351,8 +380,12 @@ function playStateSounds(state: BombermanGameState) {
   const softCells = softCellKeys(state.grid)
   const explKeys = explosionKeys(state)
   const alive: Record<string, boolean> = {}
+  const lives: Record<string, number> = {}
+  const respawning: Record<string, boolean> = {}
   for (const [pid, b] of Object.entries(state.bombers)) {
     alive[pid] = Boolean(b.alive)
+    lives[pid] = Number(b.lives ?? 1)
+    respawning[pid] = Number(b.respawn_ticks ?? 0) > 0
   }
   const me = state.bombers[props.playerId]
   const countdownSec =
@@ -369,6 +402,8 @@ function playStateSounds(state: BombermanGameState) {
       explosionCount,
       softCount,
       alive: { ...alive },
+      lives: { ...lives },
+      respawning: { ...respawning },
       countdownSec,
       myStats: me
         ? {
@@ -508,9 +543,14 @@ function playStateSounds(state: BombermanGameState) {
     playStep()
   }
 
-  // Deaths — scream for every bomber that goes out
-  for (const [pid, wasAlive] of Object.entries(prev.alive)) {
-    if (wasAlive && !alive[pid]) {
+  // Deaths / life loss (stock & kill race keep alive=true while respawning)
+  for (const pid of new Set([...Object.keys(prev.alive), ...Object.keys(alive)])) {
+    const wasAlive = Boolean(prev.alive[pid])
+    const nowAlive = Boolean(alive[pid])
+    const lifeLost =
+      (prev.lives?.[pid] ?? 1) > (lives[pid] ?? 1) ||
+      (!prev.respawning?.[pid] && respawning[pid])
+    if ((wasAlive && !nowAlive) || (wasAlive && lifeLost)) {
       const dead = state.bombers[pid]
       playDeath()
       if (dead) {
@@ -522,7 +562,10 @@ function playStateSounds(state: BombermanGameState) {
 
   // Match end
   if (prev.phase !== 'finished' && state.phase === 'finished') {
-    if (state.winner === props.playerId) playWin()
+    const meBomber = state.bombers[props.playerId]
+    const myTeamWin =
+      state.winning_team && meBomber?.team && state.winning_team === meBomber.team
+    if (state.winner === props.playerId || myTeamWin) playWin()
     else playLose()
   }
 
@@ -533,6 +576,8 @@ function playStateSounds(state: BombermanGameState) {
     explosionCount,
     softCount,
     alive: { ...alive },
+    lives: { ...lives },
+    respawning: { ...respawning },
     countdownSec,
     myStats: me
       ? {
@@ -731,6 +776,13 @@ onUnmounted(() => {
       </div>
 
       <div
+        v-else-if="isAlive && isRespawning && gameState.phase === 'playing'"
+        class="spectate-banner"
+      >
+        <span class="spectate-label">Respawning…</span>
+      </div>
+
+      <div
         v-else-if="!isAlive && gameState.phase === 'playing'"
         class="spectate-banner"
       >
@@ -767,12 +819,20 @@ onUnmounted(() => {
         <span v-if="gameState.map_name" class="map-chip" :title="gameState.map_id">
           {{ gameState.map_name }}
         </span>
+        <span v-if="modeChip" class="map-chip mode-chip">{{ modeChip }}</span>
+        <span v-if="timerLabel" class="map-chip timer-chip">⏱ {{ timerLabel }}</span>
+        <span v-if="gameState.sudden_death_active" class="map-chip sd-chip">Sudden death</span>
         <ul class="player-scores">
           <li
             v-for="row in playerRows"
             :key="row.id"
             class="player-score-row"
-            :class="{ me: row.id === playerId, dead: !row.bomber?.alive }"
+            :class="{
+              me: row.id === playerId,
+              dead: !row.bomber?.alive,
+              'team-red': row.bomber?.team === 'red',
+              'team-blue': row.bomber?.team === 'blue',
+            }"
           >
             <span
               class="color-dot"
@@ -782,6 +842,16 @@ onUnmounted(() => {
               }"
             />
             <span class="name">{{ row.nickname }}</span>
+            <span
+              v-if="row.bomber?.team"
+              class="team-tag"
+              :class="row.bomber.team"
+            >{{ row.bomber.team === 'red' ? 'R' : 'B' }}</span>
+            <span
+              v-if="(row.bomber?.lives ?? 1) > 1"
+              class="lives"
+              title="Lives"
+            >♥{{ row.bomber?.lives }}</span>
             <span class="stat-pills" title="Bombs / Range / Speed / Throw / Kick">
               <span class="pill bomb">💣{{ row.bomber?.max_bombs ?? 1 }}</span>
               <span class="pill range">🔥{{ row.bomber?.bomb_range ?? 1 }}</span>
@@ -794,8 +864,12 @@ onUnmounted(() => {
                 title="Cursed — touch another player to pass it on"
               >💀</span>
             </span>
-            <span v-if="(row.bomber?.kills ?? 0) > 0" class="kills">×{{ row.bomber?.kills }}</span>
-            <span v-if="!row.bomber?.alive" class="status">out</span>
+            <span
+              v-if="gameState.game_mode === 'kill_race' || (row.bomber?.kills ?? 0) > 0"
+              class="kills"
+            >×{{ row.bomber?.kills ?? 0 }}</span>
+            <span v-if="(row.bomber?.respawn_ticks ?? 0) > 0" class="status">wait</span>
+            <span v-else-if="!row.bomber?.alive" class="status">out</span>
           </li>
         </ul>
       </div>
@@ -1101,6 +1175,42 @@ onUnmounted(() => {
   color: var(--bm-accent, #fdba74);
   background: rgba(var(--bm-accent-rgb, 249, 115, 22), 0.14);
   border: 1px solid rgba(var(--bm-accent-rgb, 249, 115, 22), 0.28);
+}
+
+.mode-chip,
+.timer-chip {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+.sd-chip {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.team-tag {
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+
+.team-tag.red {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.25);
+}
+
+.team-tag.blue {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.25);
+}
+
+.lives {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #f87171;
 }
 
 .player-scores {

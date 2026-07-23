@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { Room } from '@/types'
 import { getMapTheme } from './bombermanRender'
+import { BOMBERMAN_LOBBY_PRESETS } from './lobbyPresets'
 
 interface MapOption {
   id: string
@@ -25,10 +26,20 @@ const props = defineProps<{
 const soloPractice = defineModel<boolean>('soloPractice', { required: true })
 const tickMs = defineModel<number>('tickMs', { required: true })
 const mapId = defineModel<string>('mapId', { required: true })
+const gameMode = defineModel<string>('gameMode', { required: true })
+const lives = defineModel<number>('lives', { required: true })
+const killTarget = defineModel<number>('killTarget', { required: true })
+const matchTimeSec = defineModel<number>('matchTimeSec', { required: true })
+const suddenDeathSec = defineModel<number>('suddenDeathSec', { required: true })
+const allowSkulls = defineModel<boolean>('allowSkulls', { required: true })
+const startingKick = defineModel<boolean>('startingKick', { required: true })
+const startingThrow = defineModel<boolean>('startingThrow', { required: true })
+const rulePreset = defineModel<string>('rulePreset', { required: true })
 
 const emit = defineEmits<{
   addAi: []
   remove: [id: string]
+  applySettings: [settings: Record<string, unknown>]
 }>()
 
 const speedOptions = [
@@ -37,6 +48,28 @@ const speedOptions = [
   { label: 'Normal', value: 150 },
   { label: 'Slow', value: 200 },
   { label: 'Relaxed', value: 260 },
+]
+
+const modeOptions = [
+  { id: 'classic', label: 'Classic', hint: 'Last bomber standing' },
+  { id: 'team', label: 'Team', hint: 'Red vs Blue' },
+  { id: 'kill_race', label: 'Kill Race', hint: 'Respawns · race to kills' },
+]
+
+const livesOptions = [1, 2, 3, 4, 5]
+const killTargetOptions = [3, 5, 7, 10]
+const matchTimeOptions = [
+  { label: 'None', value: 0 },
+  { label: '2 min', value: 120 },
+  { label: '3 min', value: 180 },
+  { label: '5 min', value: 300 },
+]
+const suddenDeathOptions = [
+  { label: 'Off', value: 0 },
+  { label: '90s', value: 90 },
+  { label: '2 min', value: 120 },
+  { label: '2.5 min', value: 150 },
+  { label: '3 min', value: 180 },
 ]
 
 const FALLBACK_MAPS: MapOption[] = [
@@ -75,23 +108,130 @@ const difficultyClass = (difficulty: string) => {
   if (difficulty === 'hard') return 'diff-hard'
   return 'diff-standard'
 }
+
+function applyPreset(id: string) {
+  const preset = BOMBERMAN_LOBBY_PRESETS.find((p) => p.id === id)
+  if (!preset) return
+  emit('applySettings', { ...preset.settings })
+}
+
+function onModeSelect(id: string) {
+  gameMode.value = id
+  rulePreset.value = 'custom'
+  if (id === 'kill_race' && matchTimeSec.value <= 0) {
+    matchTimeSec.value = 180
+  }
+}
+
+const showKillTarget = computed(() => gameMode.value === 'kill_race')
+const showLives = computed(() => gameMode.value !== 'kill_race')
 </script>
 
 <template>
   <div class="bomberman-lobby">
+    <div v-if="isHost" class="presets-block card">
+      <span class="setting-label">Rule presets</span>
+      <div class="preset-grid">
+        <button
+          v-for="preset in BOMBERMAN_LOBBY_PRESETS"
+          :key="preset.id"
+          type="button"
+          class="preset-card"
+          :class="{ selected: rulePreset === preset.id }"
+          @click="applyPreset(preset.id)"
+        >
+          <span class="preset-name">{{ preset.label }}</span>
+          <span class="preset-desc">{{ preset.description }}</span>
+        </button>
+      </div>
+    </div>
+
     <div v-if="isHost" class="settings-block card">
       <label class="checkbox-label">
         <input v-model="soloPractice" type="checkbox" />
         Solo practice (play against 2 AI)
       </label>
-      <div class="speed-setting">
-        <span class="setting-label">Game speed</span>
-        <select v-model.number="tickMs" class="speed-select">
-          <option v-for="opt in speedOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }} ({{ opt.value }}ms)
-          </option>
-        </select>
+
+      <div class="mode-setting">
+        <span class="setting-label">Game mode</span>
+        <div class="mode-row">
+          <button
+            v-for="mode in modeOptions"
+            :key="mode.id"
+            type="button"
+            class="mode-chip"
+            :class="{ selected: gameMode === mode.id }"
+            @click="onModeSelect(mode.id)"
+          >
+            <span class="mode-label">{{ mode.label }}</span>
+            <span class="mode-hint">{{ mode.hint }}</span>
+          </button>
+        </div>
       </div>
+
+      <div class="settings-grid">
+        <div v-if="showLives" class="speed-setting">
+          <span class="setting-label">Lives (stock)</span>
+          <select v-model.number="lives" class="speed-select">
+            <option v-for="n in livesOptions" :key="n" :value="n">{{ n }}</option>
+          </select>
+        </div>
+        <div v-if="showKillTarget" class="speed-setting">
+          <span class="setting-label">Kill target</span>
+          <select v-model.number="killTarget" class="speed-select">
+            <option v-for="n in killTargetOptions" :key="n" :value="n">{{ n }} kills</option>
+          </select>
+        </div>
+        <div class="speed-setting">
+          <span class="setting-label">Match timer</span>
+          <select v-model.number="matchTimeSec" class="speed-select">
+            <option v-for="opt in matchTimeOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+        <div class="speed-setting">
+          <span class="setting-label">Sudden death</span>
+          <select v-model.number="suddenDeathSec" class="speed-select">
+            <option v-for="opt in suddenDeathOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+        <div class="speed-setting">
+          <span class="setting-label">Game speed</span>
+          <select v-model.number="tickMs" class="speed-select">
+            <option v-for="opt in speedOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }} ({{ opt.value }}ms)
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <div class="rule-toggles">
+        <label class="checkbox-label">
+          <input v-model="allowSkulls" type="checkbox" />
+          Skull diseases
+        </label>
+        <label class="checkbox-label">
+          <input v-model="startingKick" type="checkbox" />
+          Start with Kick
+        </label>
+        <label class="checkbox-label">
+          <input v-model="startingThrow" type="checkbox" />
+          Start with Throw
+        </label>
+      </div>
+    </div>
+
+    <div v-else class="settings-block card guest-summary">
+      <p>
+        <strong>{{ modeOptions.find((m) => m.id === gameMode)?.label ?? 'Classic' }}</strong>
+        <span v-if="lives > 1 && gameMode !== 'kill_race"> · {{ lives }} lives</span>
+        <span v-if="gameMode === 'kill_race'"> · first to {{ killTarget }}</span>
+        <span v-if="matchTimeSec > 0"> · {{ Math.round(matchTimeSec / 60) }} min</span>
+        <span v-if="suddenDeathSec > 0"> · sudden death {{ suddenDeathSec }}s</span>
+      </p>
     </div>
 
     <div class="map-block card">
@@ -136,12 +276,18 @@ const difficultyClass = (difficulty: string) => {
     </div>
 
     <div v-if="soloPractice" class="solo-notice card">
-      <p>Solo practice auto-adds 2 AI bombers when you start. Clear the arena and be the last one standing.</p>
+      <p>
+        Solo practice auto-adds 2 AI bombers when you start.
+        <span v-if="gameMode === 'team'"> You’ll be Red vs Blue AI.</span>
+        <span v-else-if="gameMode === 'kill_race'"> Race them to {{ killTarget }} kills.</span>
+        <span v-else> Clear the arena and be the last one standing.</span>
+      </p>
     </div>
 
     <template v-else>
       <p v-if="isHost" class="arrange-hint">
         Need 2–8 players. Add AI to fill empty seats, or share the room link.
+        <span v-if="gameMode === 'team'"> Teams auto-assign Red / Blue at start.</span>
       </p>
 
       <div class="player-list card">
@@ -191,10 +337,91 @@ const difficultyClass = (difficulty: string) => {
 }
 
 .settings-block,
-.map-block {
+.map-block,
+.presets-block {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+
+.preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-align: left;
+  padding: 0.65rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.preset-card.selected {
+  border-color: #f97316;
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.35);
+}
+
+.preset-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.preset-desc {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.mode-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.mode-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.mode-chip.selected {
+  border-color: #f97316;
+}
+
+.mode-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.mode-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.65rem;
+}
+
+.rule-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.1rem;
 }
 
 .speed-setting {
@@ -210,10 +437,20 @@ const difficultyClass = (difficulty: string) => {
 
 .speed-select {
   max-width: 220px;
+  width: 100%;
   padding: 0.4rem 0.6rem;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--surface);
+  color: var(--text);
+}
+
+.guest-summary {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.guest-summary strong {
   color: var(--text);
 }
 
@@ -278,28 +515,26 @@ const difficultyClass = (difficulty: string) => {
 
 .map-swatch {
   display: flex;
-  gap: 0.3rem;
+  gap: 4px;
   margin-bottom: 0.45rem;
 }
 
-.map-swatch span {
-  display: block;
-  width: 1.1rem;
-  height: 0.55rem;
+.swatch-floor,
+.swatch-hard,
+.swatch-soft {
+  width: 14px;
+  height: 14px;
   border-radius: 3px;
 }
 
 .swatch-floor {
   background: var(--map-floor, #1c2838);
-  border: 1px solid rgba(255, 255, 255, 0.08);
 }
-
 .swatch-hard {
-  background: var(--map-hard, #3d4656);
+  background: var(--map-hard, #64748b);
 }
-
 .swatch-soft {
-  background: var(--map-soft, #c47432);
+  background: var(--map-soft, #b45309);
 }
 
 .map-card-top {
@@ -307,48 +542,63 @@ const difficultyClass = (difficulty: string) => {
   align-items: center;
   justify-content: space-between;
   gap: 0.4rem;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.25rem;
 }
 
 .map-name {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 0.9rem;
-  color: color-mix(in srgb, var(--map-accent, #f97316) 55%, #f5f5f5);
 }
 
 .diff-badge {
   font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
   padding: 0.12rem 0.35rem;
   border-radius: 999px;
 }
 
 .diff-standard {
-  background: rgba(56, 189, 248, 0.15);
-  color: #7dd3fc;
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
 }
-
 .diff-hard {
-  background: rgba(249, 115, 22, 0.18);
-  color: #fdba74;
+  background: rgba(249, 115, 22, 0.15);
+  color: #fb923c;
 }
-
 .diff-brutal {
-  background: rgba(239, 68, 68, 0.18);
-  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
 }
 
 .map-desc {
   margin: 0;
   font-size: 0.75rem;
+  color: var(--text-muted);
   line-height: 1.35;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.solo-notice {
+  padding: 0.85rem 1rem;
+  font-size: 0.9rem;
   color: var(--text-muted);
 }
 
+.solo-notice p {
+  margin: 0;
+}
+
 .arrange-hint {
-  font-size: 0.9rem;
+  margin: 0;
+  font-size: 0.85rem;
   color: var(--text-muted);
 }
 
@@ -356,47 +606,50 @@ const difficultyClass = (difficulty: string) => {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  padding: 0.75rem;
 }
 
 .player-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.player-row:last-child {
-  border-bottom: none;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .player-info {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .nickname {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .ai-badge,
 .you-badge,
 .host-badge {
   font-size: 0.7rem;
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-  background: var(--surface-elevated);
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--text-muted);
 }
 
 .you-badge {
-  background: var(--accent-muted);
-  color: var(--accent);
+  background: rgba(249, 115, 22, 0.2);
+  color: #fb923c;
+}
+
+.host-badge {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
 }
 
 .remove-btn {
   font-size: 0.8rem;
-  padding: 0.3rem 0.6rem;
+  padding: 0.25rem 0.55rem;
 }
 
 .add-ai-btn {
@@ -407,37 +660,36 @@ const difficultyClass = (difficulty: string) => {
   display: flex;
   gap: 0.75rem;
   align-items: flex-start;
+  padding: 0.85rem 1rem;
 }
 
 .validation-banner.valid {
-  border-color: var(--success);
+  border-color: rgba(34, 197, 94, 0.35);
 }
 
 .validation-banner.invalid {
-  border-color: var(--warning, #e6a700);
+  border-color: rgba(239, 68, 68, 0.35);
 }
 
 .validation-icon {
-  font-size: 1.25rem;
   font-weight: 700;
 }
 
-.validation-issues {
-  margin-top: 0.35rem;
-  padding-left: 1.25rem;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.solo-notice {
+.validation-message {
+  margin: 0;
   font-size: 0.9rem;
+}
+
+.validation-issues {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
   color: var(--text-muted);
 }
 
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
+@media (max-width: 640px) {
+  .mode-row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -863,3 +863,125 @@ def test_disease_transfers_on_contact(engine: BombermanEngine, state: dict) -> N
     assert b.get("disease") == "reverse"
     assert b.get("disease_ticks") == 20
     assert any(e["type"] == "disease_infected" and e["player_id"] == p1 for e in events)
+
+
+def test_team_battle_assigns_teams_and_wins(engine: BombermanEngine) -> None:
+    players = make_players(4)
+    state = engine.create_initial_state(
+        players, {"game_mode": "team", "countdown_sec": 0}
+    )
+    state["phase"] = "playing"
+    teams = {b["team"] for b in state["bombers"].values()}
+    assert teams == {"red", "blue"}
+
+    # Wipe blue team
+    for pid, bomber in state["bombers"].items():
+        if bomber["team"] == "blue":
+            bomber["alive"] = False
+    state["bombs"] = []
+    state["explosions"] = []
+
+    state, events = engine.tick(state)
+    assert state["phase"] == "finished"
+    assert state["winning_team"] == "red"
+    assert state["win_reason"] == "team_eliminated"
+    assert any(e["type"] == "game_over" for e in events)
+
+
+def test_stock_lives_respawn(engine: BombermanEngine) -> None:
+    players = make_players(2)
+    state = engine.create_initial_state(
+        players, {"lives": 3, "countdown_sec": 0, "sudden_death_sec": 0}
+    )
+    state["phase"] = "playing"
+    p0 = players[0]["id"]
+    p1 = players[1]["id"]
+    # Keep p1 far away so match continues
+    state["bombers"][p1]["x"] = state["grid_width"] - 1
+    state["bombers"][p1]["y"] = state["grid_height"] - 1
+
+    events = engine._hurt_bomber(state, p0, reason="explosion", by=p1)
+    assert state["bombers"][p0]["alive"] is True
+    assert state["bombers"][p0]["lives"] == 2
+    assert state["bombers"][p0]["respawn_ticks"] > 0
+    assert any(e["type"] == "player_respawn" for e in events)
+    assert state["bombers"][p1]["kills"] == 1
+
+
+def test_kill_race_to_target(engine: BombermanEngine) -> None:
+    players = make_players(2)
+    state = engine.create_initial_state(
+        players,
+        {
+            "game_mode": "kill_race",
+            "kill_target": 2,
+            "match_time_sec": 180,
+            "countdown_sec": 0,
+            "sudden_death_sec": 0,
+        },
+    )
+    state["phase"] = "playing"
+    p0 = players[0]["id"]
+    p1 = players[1]["id"]
+
+    engine._hurt_bomber(state, p1, reason="explosion", by=p0)
+    assert state["bombers"][p1]["alive"] is True
+    assert state["bombers"][p0]["kills"] == 1
+    assert state["phase"] == "playing"
+
+    # Finish respawn delay so the next hit can land.
+    state["bombers"][p1]["respawn_ticks"] = 0
+    state["bombers"][p1]["invuln_ticks"] = 0
+
+    engine._hurt_bomber(state, p1, reason="explosion", by=p0)
+    # Finish check runs on tick
+    state, events = engine.tick(state)
+    assert state["phase"] == "finished"
+    assert state["winner"] == p0
+    assert state["win_reason"] == "kill_race"
+    assert any(e["type"] == "game_over" for e in events)
+
+
+def test_sudden_death_hardens_ring(engine: BombermanEngine) -> None:
+    players = make_players(2)
+    state = engine.create_initial_state(
+        players,
+        {
+            "sudden_death_sec": 1,
+            "tick_ms": 100,
+            "countdown_sec": 0,
+            "match_time_sec": 0,
+        },
+    )
+    state["phase"] = "playing"
+    # 1s at 100ms => sudden_death_ticks = 10
+    assert state["sudden_death_ticks"] == 10
+    state["playing_tick"] = 10
+    # Park players in the center so the outer ring does not kill them.
+    for bomber in state["bombers"].values():
+        bomber["x"] = state["grid_width"] // 2
+        bomber["y"] = state["grid_height"] // 2
+        bomber["alive"] = True
+
+    events = engine._apply_sudden_death(state)
+    assert state["sudden_death_active"] is True
+    assert state["shrink_level"] >= 1
+    assert any(e["type"] == "sudden_death_started" for e in events)
+    assert state["grid"][0][0] == TILE_HARD
+
+
+def test_rule_preset_fields_validated(engine: BombermanEngine) -> None:
+    settings = engine.validate_settings(
+        {
+            "rule_preset": "kill_race",
+            "game_mode": "kill_race",
+            "kill_target": 7,
+            "match_time_sec": 180,
+            "sudden_death_sec": 120,
+            "starting_kick": True,
+        }
+    )
+    assert settings["game_mode"] == "kill_race"
+    assert settings["kill_target"] == 7
+    assert settings["starting_kick"] is True
+    assert settings["sudden_death_sec"] == 120

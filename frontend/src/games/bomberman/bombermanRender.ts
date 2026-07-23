@@ -16,6 +16,7 @@ export interface BomberSnapshot {
   color: string
   direction: string
   disease?: string | null
+  respawn_ticks?: number
 }
 
 export interface SmoothBomber extends BomberSnapshot {
@@ -283,10 +284,14 @@ const VIEW_COLS = 15
 const VIEW_ROWS = 13
 
 function cellSize(displayW: number, displayH: number, gridW: number, gridH: number) {
-  // Size tiles as if fitting a classic-sized viewport (or the full map if smaller).
+  // Cover a classic-sized window so the arena fills the available area (no letterboxing).
+  // If the whole map fits in that window, contain-fit instead so edges aren't cropped.
   const cols = Math.min(gridW, VIEW_COLS)
   const rows = Math.min(gridH, VIEW_ROWS)
-  return Math.max(1, Math.floor(Math.min(displayW / cols, displayH / rows)))
+  if (gridW <= VIEW_COLS && gridH <= VIEW_ROWS) {
+    return Math.max(1, Math.floor(Math.min(displayW / gridW, displayH / gridH)))
+  }
+  return Math.max(1, Math.ceil(Math.max(displayW / cols, displayH / rows)))
 }
 
 function cameraOffset(
@@ -571,6 +576,7 @@ export function snapshotBombers(
       color: b.color,
       direction: b.direction,
       disease: b.disease ?? null,
+      respawn_ticks: b.respawn_ticks ?? 0,
     }
   }
   return out
@@ -1423,7 +1429,7 @@ export function renderFrame(
     x >= range.x0 - 1 && x < range.x1 + 1 && y >= range.y0 - 1 && y < range.y1 + 1
 
   ctx.clearRect(0, 0, displayW, displayH)
-  // Letterbox / off-map backdrop when the camera hits an edge.
+  // Off-map backdrop when the camera is clamped at a map edge.
   ctx.fillStyle = theme.wrapBottom
   ctx.fillRect(0, 0, displayW, displayH)
   drawFloor(ctx, ox, oy, boardW, boardH, s, theme, range, displayW, displayH)
@@ -1472,7 +1478,9 @@ export function renderFrame(
 
   drawParticles(ctx, particles, ox, oy, s)
 
-  const entries = Object.entries(bombers).filter(([, b]) => b.alive)
+  const entries = Object.entries(bombers).filter(
+    ([, b]) => b.alive && !(Number(b.respawn_ticks ?? 0) > 0),
+  )
   entries.sort(([a], [b]) => (a === playerId ? 1 : b === playerId ? -1 : 0))
   for (const [pid, b] of entries) {
     if (!inView(b.x, b.y)) continue

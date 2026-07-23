@@ -1,0 +1,100 @@
+export interface BombermanLobbyPreset {
+  id: string
+  label: string
+  description: string
+  settings: Record<string, unknown>
+}
+
+export const BOMBERMAN_LOBBY_PRESETS: BombermanLobbyPreset[] = [
+  {
+    id: 'classic',
+    label: 'Classic',
+    description: 'Last bomber standing · 1 life',
+    settings: {
+      rule_preset: 'classic',
+      game_mode: 'classic',
+      lives: 1,
+      kill_target: 5,
+      match_time_sec: 0,
+      sudden_death_sec: 0,
+      allow_skulls: true,
+      starting_bombs: 1,
+      starting_range: 1,
+      starting_kick: false,
+      starting_throw: false,
+    },
+  },
+  {
+    id: 'team_battle',
+    label: 'Team Battle',
+    description: 'Red vs Blue · last team standing',
+    settings: {
+      rule_preset: 'team_battle',
+      game_mode: 'team',
+      lives: 1,
+      kill_target: 5,
+      match_time_sec: 0,
+      sudden_death_sec: 0,
+      allow_skulls: true,
+      starting_bombs: 1,
+      starting_range: 1,
+      starting_kick: false,
+      starting_throw: false,
+    },
+  },
+  {
+    id: 'kill_race',
+    label: 'Kill Race',
+    description: 'Respawns · first to 5 kills · 3 min',
+    settings: {
+      rule_preset: 'kill_race',
+      game_mode: 'kill_race',
+      lives: 1,
+      kill_target: 5,
+      match_time_sec: 180,
+      sudden_death_sec: 120,
+      allow_skulls: true,
+      starting_bombs: 1,
+      starting_range: 1,
+      starting_kick: false,
+      starting_throw: false,
+    },
+  },
+  {
+    id: 'stock_lives',
+    label: 'Stock Lives',
+    description: '3 lives with respawns · sudden death',
+    settings: {
+      rule_preset: 'stock_lives',
+      game_mode: 'classic',
+      lives: 3,
+      kill_target: 5,
+      match_time_sec: 0,
+      sudden_death_sec: 150,
+      allow_skulls: true,
+      starting_bombs: 1,
+      starting_range: 1,
+      starting_kick: false,
+      starting_throw: false,
+    },
+  },
+  {
+    id: 'sudden_chaos',
+    label: 'Sudden Chaos',
+    description: 'Faster pace · kick start · walls close in',
+    settings: {
+      rule_preset: 'sudden_chaos',
+      game_mode: 'classic',
+      lives: 1,
+      kill_target: 5,
+      match_time_sec: 0,
+      sudden_death_sec: 90,
+      allow_skulls: true,
+      starting_bombs: 2,
+      starting_range: 2,
+      starting_kick: true,
+      starting_throw: false,
+      tick_ms: 120,
+    },
+  },
+]

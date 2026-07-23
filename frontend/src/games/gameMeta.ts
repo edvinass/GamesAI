@@ -68,7 +68,7 @@ const metaByGameType: Record<string, GameMeta> = {
     name: 'Bomberman',
     description: 'Plant bombs, break soft walls, grab power-ups — last bomber standing wins.',
     emoji: '💣',
-    lobbyHint: 'Need 2–8 players. Share the link or add AI to fill seats.',
+    lobbyHint: 'Classic, teams, kill race, or stock lives — pick a preset in the lobby.',
     category: 'arcade',
     players: '2–8',
     accent: '#f97316',
