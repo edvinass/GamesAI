@@ -21,6 +21,7 @@ TILE_SOFT = 2
 DEFAULT_FUSE = 14
 ESCAPE_MARGIN = 3
 MAX_ESCAPE_STEPS = DEFAULT_FUSE - ESCAPE_MARGIN
+THROW_LAND_DISTANCE = 5
 
 # Aggressive bomb rates (still gated by timed escape checks).
 BOMB_CHANCE_SOFT = 0.62
@@ -159,28 +160,41 @@ def _walkable(
     return True
 
 
+def _throw_cell_landable(state: dict, x: int, y: int) -> bool:
+    width = state["grid_width"]
+    height = state["grid_height"]
+    if not (0 <= x < width and 0 <= y < height):
+        return False
+    if state["grid"][y][x] != TILE_EMPTY:
+        return False
+    bomb = _bomb_cells(state).get((x, y))
+    if bomb is not None and bomb.get("flight") not in ("throw", "carried"):
+        return False
+    return True
+
+
 def _throw_landing(
     state: dict, start_x: int, start_y: int, direction: str
 ) -> tuple[int, int] | None:
-    """Match engine Power Glove landing: over walls, last empty before edge/bomb."""
+    """Match engine: land 5 tiles away, or next empty further if that tile is blocked."""
     if direction not in DIRECTIONS:
         return None
     dx, dy = DIRECTIONS[direction]
     width = state["grid_width"]
     height = state["grid_height"]
-    bombs = _bomb_cells(state)
-    last_empty: tuple[int, int] | None = None
+    short_empty: tuple[int, int] | None = None
     x, y = start_x, start_y
-    while True:
+    for dist in range(1, max(width, height) + 1):
         x, y = x + dx, y + dy
         if not (0 <= x < width and 0 <= y < height):
             break
-        other = bombs.get((x, y))
-        if other is not None and other.get("flight") not in ("throw", "carried"):
-            break
-        if state["grid"][y][x] == TILE_EMPTY:
-            last_empty = (x, y)
-    return last_empty
+        if not _throw_cell_landable(state, x, y):
+            continue
+        if dist < THROW_LAND_DISTANCE:
+            short_empty = (x, y)
+            continue
+        return (x, y)
+    return short_empty
 
 
 def _exit_count(

@@ -21,7 +21,7 @@ export const bombermanRules: GameRules = {
     },
     {
       heading: 'Power-ups',
-      body: 'Bomb (💣): carry more bombs at once. Range (🔥): longer explosions. Speed (⚡): move faster. Throw (🧤): Space on/facing a bomb to pick it up, then Space to throw — it flies over walls and soft blocks and lands on the farthest open tile. Kick (🦵): walk into a bomb to kick it along the ground until it hits a wall, soft block, or another bomb. Power-ups in a blast are destroyed.',
+      body: 'Bomb (💣): carry more bombs at once. Range (🔥): longer explosions. Speed (⚡): move faster. Throw (🧤): Space on/facing a bomb to pick it up, then Space to throw — it flies 5 tiles and lands there, or on the next empty tile past an obstacle/bomb. Kick (🦵): walk into a bomb to kick it along the ground until it hits a wall, soft block, or another bomb. Power-ups in a blast are destroyed.',
     },
     {
       heading: 'Winning',

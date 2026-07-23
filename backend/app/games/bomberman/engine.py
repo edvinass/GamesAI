@@ -43,6 +43,7 @@ SPEED_BONUS = 0.28
 MAX_BOMBS_CAP = 8
 MAX_RANGE_CAP = 8
 MAX_SPEED_LEVEL = 5
+THROW_LAND_DISTANCE = 5
 POWERUP_TYPES = ("bomb", "range", "speed", "throw", "kick")
 POWERUP_WEIGHTS = (26, 26, 22, 13, 13)
 
@@ -393,28 +394,40 @@ class BombermanEngine(GamePlugin):
                 return value
         return "right"
 
+    def _throw_cell_landable(self, state: dict, x: int, y: int) -> bool:
+        width = state["grid_width"]
+        height = state["grid_height"]
+        if not (0 <= x < width and 0 <= y < height):
+            return False
+        if state["grid"][y][x] != TILE_EMPTY:
+            return False
+        return self._bomb_at(state, x, y, grounded_only=True) is None
+
     def _find_throw_landing(
         self, state: dict, start_x: int, start_y: int, direction: str
     ) -> tuple[int, int] | None:
-        """Classic Power Glove: fly over hard/soft walls; land on last empty before edge/bomb."""
+        """Land 5 tiles away; if blocked, continue to the next empty tile in throw direction."""
         if direction not in DIRECTIONS:
             return None
         dx, dy = DIRECTIONS[direction]
         width = state["grid_width"]
         height = state["grid_height"]
-        last_empty: tuple[int, int] | None = None
+        short_empty: tuple[int, int] | None = None
         x, y = start_x, start_y
-        while True:
+        for dist in range(1, max(width, height) + 1):
             x, y = x + dx, y + dy
             if not (0 <= x < width and 0 <= y < height):
                 break
-            other = self._bomb_at(state, x, y, grounded_only=True)
-            if other is not None:
-                break
-            if state["grid"][y][x] == TILE_EMPTY:
-                last_empty = (x, y)
-            # Hard / soft: keep flying over them.
-        return last_empty
+            if not self._throw_cell_landable(state, x, y):
+                # Obstacle / bomb: keep flying and look further for an empty tile.
+                continue
+            if dist < THROW_LAND_DISTANCE:
+                short_empty = (x, y)
+                continue
+            # First empty tile at or beyond the preferred throw distance.
+            return (x, y)
+        # Near the map edge with no room for a full throw — land on the farthest empty.
+        return short_empty
 
     def _grant_passable_on_cell(self, state: dict, bomb_id: str, x: int, y: int) -> None:
         for bomber in state["bombers"].values():

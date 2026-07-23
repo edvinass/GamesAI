@@ -297,7 +297,7 @@ def test_throw_powerup_pickup_and_throw(engine: BombermanEngine, state: dict) ->
     assert bomb["flight"] == "throw"
     assert bomb["slide_dir"] == "right"
     assert bomb["x"] == 3 and bomb["y"] == 1
-    assert bomb["land_x"] is not None and bomb["land_x"] >= 3
+    assert bomb["land_x"] == 7 and bomb["land_y"] == 1
 
     # Continues flying toward landing each tick
     state, _ = engine.tick(state)
@@ -311,7 +311,7 @@ def test_throw_flies_over_soft_walls(engine: BombermanEngine, state: dict) -> No
     state["bombers"][other]["next_direction"] = "stop"
 
     bomber = state["bombers"][player["id"]]
-    # Corridor with soft walls mid-way, then empty, then a hard stop via another bomb.
+    # Soft walls between thrower and the preferred 5-tile landing.
     for x in range(1, 10):
         state["grid"][1][x] = TILE_EMPTY
     state["grid"][1][3] = TILE_SOFT
@@ -334,28 +334,16 @@ def test_throw_flies_over_soft_walls(engine: BombermanEngine, state: dict) -> No
             "land_x": None,
             "land_y": None,
         },
-        {
-            "id": "blocker",
-            "x": 8,
-            "y": 1,
-            "owner_id": other,
-            "range": 1,
-            "fuse": 20,
-            "flight": None,
-            "sliding": False,
-            "slide_dir": None,
-            "land_x": None,
-            "land_y": None,
-        },
     ]
     state["explosions"] = []
-    state["_bomb_seq"] = 2
+    state["_bomb_seq"] = 1
 
     state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
     assert any(e["type"] == "bomb_picked_up" for e in events)
     state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
     assert any(e["type"] == "bomb_thrown" for e in events)
     bomb = next(b for b in state["bombs"] if b["id"] == "bomb-1")
+    # 2 + 5 = 7 preferred landing (empty).
     assert bomb["land_x"] == 7
     assert bomb["land_y"] == 1
 
@@ -370,6 +358,121 @@ def test_throw_flies_over_soft_walls(engine: BombermanEngine, state: dict) -> No
     assert state["grid"][1][4] == TILE_SOFT
 
 
+def test_throw_skips_blocked_preferred_landing(engine: BombermanEngine, state: dict) -> None:
+    """If the 5-tile cell is blocked, land on the next empty tile beyond it."""
+    player = state["players"][0]
+    other = state["players"][1]["id"]
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["next_direction"] = "stop"
+
+    bomber = state["bombers"][player["id"]]
+    for x in range(1, 12):
+        state["grid"][1][x] = TILE_EMPTY
+    # Preferred landing (2+5=7) is a soft wall; next empty is 8, then a bomb at 9.
+    state["grid"][1][7] = TILE_SOFT
+    bomber["x"], bomber["y"] = 2, 1
+    bomber["facing"] = "right"
+    bomber["direction"] = "right"
+    bomber["can_throw"] = True
+    state["bombs"] = [
+        {
+            "id": "bomb-1",
+            "x": 2,
+            "y": 1,
+            "owner_id": player["id"],
+            "range": 1,
+            "fuse": 20,
+            "flight": None,
+            "sliding": False,
+            "slide_dir": None,
+            "land_x": None,
+            "land_y": None,
+        },
+        {
+            "id": "blocker",
+            "x": 9,
+            "y": 1,
+            "owner_id": other,
+            "range": 1,
+            "fuse": 20,
+            "flight": None,
+            "sliding": False,
+            "slide_dir": None,
+            "land_x": None,
+            "land_y": None,
+        },
+    ]
+    state["explosions"] = []
+    state["_bomb_seq"] = 2
+
+    state, _ = engine.apply_action(state, {"type": "place_bomb"}, player)
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert any(e["type"] == "bomb_thrown" for e in events)
+    bomb = next(b for b in state["bombs"] if b["id"] == "bomb-1")
+    assert bomb["land_x"] == 8
+    assert bomb["land_y"] == 1
+
+    for _ in range(12):
+        if bomb.get("flight") != "throw":
+            break
+        state, _ = engine.tick(state)
+    assert bomb["flight"] is None
+    assert bomb["x"] == 8 and bomb["y"] == 1
+
+
+def test_throw_skips_bomb_on_preferred_landing(engine: BombermanEngine, state: dict) -> None:
+    """If another bomb sits on the 5-tile cell, land on the next empty beyond it."""
+    player = state["players"][0]
+    other = state["players"][1]["id"]
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["next_direction"] = "stop"
+
+    bomber = state["bombers"][player["id"]]
+    for x in range(1, 12):
+        state["grid"][1][x] = TILE_EMPTY
+    bomber["x"], bomber["y"] = 2, 1
+    bomber["facing"] = "right"
+    bomber["direction"] = "right"
+    bomber["can_throw"] = True
+    state["bombs"] = [
+        {
+            "id": "bomb-1",
+            "x": 2,
+            "y": 1,
+            "owner_id": player["id"],
+            "range": 1,
+            "fuse": 20,
+            "flight": None,
+            "sliding": False,
+            "slide_dir": None,
+            "land_x": None,
+            "land_y": None,
+        },
+        {
+            "id": "blocker",
+            "x": 7,
+            "y": 1,
+            "owner_id": other,
+            "range": 1,
+            "fuse": 20,
+            "flight": None,
+            "sliding": False,
+            "slide_dir": None,
+            "land_x": None,
+            "land_y": None,
+        },
+    ]
+    state["explosions"] = []
+    state["_bomb_seq"] = 2
+
+    state, _ = engine.apply_action(state, {"type": "place_bomb"}, player)
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
+    assert any(e["type"] == "bomb_thrown" for e in events)
+    bomb = next(b for b in state["bombs"] if b["id"] == "bomb-1")
+    assert bomb["land_x"] == 8
+    assert bomb["land_y"] == 1
+
+
 def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     player = state["players"][0]
     other = state["players"][1]["id"]
@@ -377,7 +480,7 @@ def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     state["bombers"][other]["next_direction"] = "stop"
 
     bomber = state["bombers"][player["id"]]
-    for x in range(1, 6):
+    for x in range(1, 10):
         state["grid"][1][x] = TILE_EMPTY
     bomber["x"], bomber["y"] = 1, 1
     bomber["facing"] = "right"
@@ -422,6 +525,7 @@ def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     assert bomb["owner_id"] == other
     assert bomb["flight"] == "throw"
     assert bomb["x"] == 2
+    assert bomb["land_x"] == 6 and bomb["land_y"] == 1
 
 def test_throw_blocked_without_powerup(engine: BombermanEngine, state: dict) -> None:
     player = state["players"][0]
