@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, computed, watch, markRaw } from 'vue'
 import type { Room, PinballGameState } from '@/types'
 import {
   createPinballWorld,
@@ -71,7 +71,7 @@ interface TrailPoint {
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
-const physicsWorld = ref<PinballWorld | null>(null)
+const physicsWorld = shallowRef<PinballWorld | null>(null)
 const animationFrame = ref<number | null>(null)
 const displayScale = ref(1)
 
@@ -238,7 +238,7 @@ function restartGame() {
     physicsWorld.value.cleanup()
   }
   void unlockAudio()
-  physicsWorld.value = createPinballWorld(handleCollision, handleBallLost)
+  physicsWorld.value = markRaw(createPinballWorld(handleCollision, handleBallLost))
   score.value = 0
   ballsRemaining.value = 3
   gameOver.value = false
@@ -861,7 +861,7 @@ function gameLoop() {
 }
 
 onMounted(() => {
-  physicsWorld.value = createPinballWorld(handleCollision, handleBallLost)
+  physicsWorld.value = markRaw(createPinballWorld(handleCollision, handleBallLost))
   updateDisplayScale()
 
   window.addEventListener('keydown', handleKeyDown)

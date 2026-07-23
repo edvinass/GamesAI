@@ -21,7 +21,7 @@ TILE_SOFT = 2
 DEFAULT_FUSE = 14
 ESCAPE_MARGIN = 3
 MAX_ESCAPE_STEPS = DEFAULT_FUSE - ESCAPE_MARGIN
-THROW_LAND_DISTANCE = 5
+THROW_LAND_DISTANCE = 3
 
 # Aggressive bomb rates (still gated by timed escape checks).
 BOMB_CHANCE_SOFT = 0.62
@@ -176,7 +176,7 @@ def _throw_cell_landable(state: dict, x: int, y: int) -> bool:
 def _throw_landing(
     state: dict, start_x: int, start_y: int, direction: str
 ) -> tuple[int, int] | None:
-    """Match engine: land 5 tiles away, or next empty further if that tile is blocked."""
+    """Match engine: land 3 tiles away, or next empty further if that tile is blocked."""
     if direction not in DIRECTIONS:
         return None
     dx, dy = DIRECTIONS[direction]

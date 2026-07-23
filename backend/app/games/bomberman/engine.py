@@ -43,7 +43,7 @@ SPEED_BONUS = 0.28
 MAX_BOMBS_CAP = 8
 MAX_RANGE_CAP = 8
 MAX_SPEED_LEVEL = 5
-THROW_LAND_DISTANCE = 5
+THROW_LAND_DISTANCE = 3
 POWERUP_TYPES = ("bomb", "range", "speed", "throw", "kick")
 POWERUP_WEIGHTS = (26, 26, 22, 13, 13)
 
@@ -406,7 +406,7 @@ class BombermanEngine(GamePlugin):
     def _find_throw_landing(
         self, state: dict, start_x: int, start_y: int, direction: str
     ) -> tuple[int, int] | None:
-        """Land 5 tiles away; if blocked, continue to the next empty tile in throw direction."""
+        """Land 3 tiles away; if blocked, continue to the next empty tile in throw direction."""
         if direction not in DIRECTIONS:
             return None
         dx, dy = DIRECTIONS[direction]

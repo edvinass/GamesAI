@@ -169,6 +169,9 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
   const flipperY = 650
   const leftPivotX = 100
   const rightPivotX = 250
+  // Pixel-scale world: keep density tiny so motors can overcome inertia.
+  const flipperDensity = 0.002
+  const maxTorque = 200_000
 
   const leftAnchor = world.createBody({ type: 'static', position: planck.Vec2(leftPivotX, flipperY) })
   const rightAnchor = world.createBody({ type: 'static', position: planck.Vec2(rightPivotX, flipperY) })
@@ -176,9 +179,10 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
   const leftFlipper = world.createBody({
     type: 'dynamic',
     position: planck.Vec2(leftPivotX + level.flipperLength / 2 - 10, flipperY),
-    angle: 0.4,
+    angle: 0.45,
     bullet: true,
   })
+  leftFlipper.setSleepingAllowed(false)
   leftFlipper.createFixture(
     planck.Polygon([
       planck.Vec2(-level.flipperLength / 2, -level.flipperWidth / 2),
@@ -186,15 +190,16 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
       planck.Vec2(level.flipperLength / 2, level.flipperWidth / 3),
       planck.Vec2(-level.flipperLength / 2, level.flipperWidth / 2),
     ]),
-    { density: 1.5, friction: 0.3, restitution: 0.3 }
+    { density: flipperDensity, friction: 0.4, restitution: 0.15 }
   )
 
   const rightFlipper = world.createBody({
     type: 'dynamic',
     position: planck.Vec2(rightPivotX - level.flipperLength / 2 + 10, flipperY),
-    angle: -0.4,
+    angle: -0.45,
     bullet: true,
   })
+  rightFlipper.setSleepingAllowed(false)
   rightFlipper.createFixture(
     planck.Polygon([
       planck.Vec2(level.flipperLength / 2, -level.flipperWidth / 2),
@@ -202,38 +207,42 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
       planck.Vec2(-level.flipperLength / 2, level.flipperWidth / 3),
       planck.Vec2(level.flipperLength / 2, level.flipperWidth / 2),
     ]),
-    { density: 1.5, friction: 0.3, restitution: 0.3 }
+    { density: flipperDensity, friction: 0.4, restitution: 0.15 }
   )
 
-  const leftJoint = planck.RevoluteJoint(
-    {
-      enableLimit: true,
-      lowerAngle: -0.1,
-      upperAngle: 0.5,
-      enableMotor: true,
-      motorSpeed: -15,
-      maxMotorTorque: 800,
-    },
-    leftAnchor,
-    leftFlipper,
-    planck.Vec2(leftPivotX, flipperY)
-  )
-  world.createJoint(leftJoint)
+  // Joint limits are relative to the spawn pose (reference angle).
+  // Left rest = tip down (positive), flip = tip up (negative).
+  const leftJoint = world.createJoint(
+    planck.RevoluteJoint(
+      {
+        enableLimit: true,
+        lowerAngle: -0.85,
+        upperAngle: 0.15,
+        enableMotor: true,
+        motorSpeed: 18,
+        maxMotorTorque: maxTorque,
+      },
+      leftAnchor,
+      leftFlipper,
+      planck.Vec2(leftPivotX, flipperY)
+    )
+  ) as planck.RevoluteJoint
 
-  const rightJoint = planck.RevoluteJoint(
-    {
-      enableLimit: true,
-      lowerAngle: -0.5,
-      upperAngle: 0.1,
-      enableMotor: true,
-      motorSpeed: 15,
-      maxMotorTorque: 800,
-    },
-    rightAnchor,
-    rightFlipper,
-    planck.Vec2(rightPivotX, flipperY)
-  )
-  world.createJoint(rightJoint)
+  const rightJoint = world.createJoint(
+    planck.RevoluteJoint(
+      {
+        enableLimit: true,
+        lowerAngle: -0.15,
+        upperAngle: 0.85,
+        enableMotor: true,
+        motorSpeed: -18,
+        maxMotorTorque: maxTorque,
+      },
+      rightAnchor,
+      rightFlipper,
+      planck.Vec2(rightPivotX, flipperY)
+    )
+  ) as planck.RevoluteJoint
 
   return { leftBody: leftFlipper, rightBody: rightFlipper, leftJoint, rightJoint }
 }
@@ -334,10 +343,11 @@ export function createPinballWorld(
       state.ballLaunched = true
     },
     activateLeftFlipper: (active: boolean) => {
-      leftJoint.setMotorSpeed(active ? 35 : -15)
+      // Negative speed flips tip up; positive returns tip down.
+      leftJoint.setMotorSpeed(active ? -45 : 18)
     },
     activateRightFlipper: (active: boolean) => {
-      rightJoint.setMotorSpeed(active ? -35 : 15)
+      rightJoint.setMotorSpeed(active ? 45 : -18)
     },
     resetBall: () => {
       if (state.ballBody) {
