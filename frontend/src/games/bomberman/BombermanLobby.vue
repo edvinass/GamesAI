@@ -45,8 +45,8 @@ const FALLBACK_MAPS: MapOption[] = [
     name: 'Classic',
     description: 'Standard pillar grid — balanced and familiar.',
     difficulty: 'standard',
-    width: 15,
-    height: 13,
+    width: 25,
+    height: 21,
   },
 ]
 
@@ -60,8 +60,8 @@ const mapOptions = computed<MapOption[]>(() => {
       name: String(m.name ?? m.id ?? 'Map'),
       description: String(m.description ?? ''),
       difficulty: String(m.difficulty ?? 'standard'),
-      width: Number(m.width ?? 15),
-      height: Number(m.height ?? 13),
+      width: Number(m.width ?? 25),
+      height: Number(m.height ?? 21),
     }))
     .filter((m) => m.id)
 })

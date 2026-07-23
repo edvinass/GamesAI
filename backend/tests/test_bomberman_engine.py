@@ -51,8 +51,8 @@ def test_initial_state_spawns(engine: BombermanEngine) -> None:
     state = engine.create_initial_state(players, {})
     assert len(state["bombers"]) == 4
     assert state["phase"] == "countdown"
-    assert state["grid_width"] == 15
-    assert state["grid_height"] == 13
+    assert state["grid_width"] == 25
+    assert state["grid_height"] == 21
 
     occupied: set[tuple[int, int]] = set()
     for bomber in state["bombers"].values():
@@ -287,7 +287,7 @@ def test_throw_powerup_pickup_and_throw(engine: BombermanEngine, state: dict) ->
     bomber = state["bombers"][pid]
     other = state["players"][1]["id"]
     # Keep both alive so the match does not end mid-test.
-    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = state["grid_width"] - 2, state["grid_height"] - 2
     state["bombers"][other]["next_direction"] = "stop"
 
     for y in range(1, 4):
@@ -337,7 +337,7 @@ def test_throw_powerup_pickup_and_throw(engine: BombermanEngine, state: dict) ->
 def test_throw_flies_over_soft_walls(engine: BombermanEngine, state: dict) -> None:
     player = state["players"][0]
     other = state["players"][1]["id"]
-    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = state["grid_width"] - 2, state["grid_height"] - 2
     state["bombers"][other]["next_direction"] = "stop"
 
     bomber = state["bombers"][player["id"]]
@@ -392,7 +392,7 @@ def test_throw_skips_blocked_preferred_landing(engine: BombermanEngine, state: d
     """If the 3-tile cell is blocked, land on the next empty tile beyond it."""
     player = state["players"][0]
     other = state["players"][1]["id"]
-    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = state["grid_width"] - 2, state["grid_height"] - 2
     state["bombers"][other]["next_direction"] = "stop"
 
     bomber = state["bombers"][player["id"]]
@@ -454,7 +454,7 @@ def test_throw_skips_bomb_on_preferred_landing(engine: BombermanEngine, state: d
     """If another bomb sits on the 3-tile cell, land on the next empty beyond it."""
     player = state["players"][0]
     other = state["players"][1]["id"]
-    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = state["grid_width"] - 2, state["grid_height"] - 2
     state["bombers"][other]["next_direction"] = "stop"
 
     bomber = state["bombers"][player["id"]]
@@ -560,7 +560,7 @@ def test_throw_landing_treats_bomb_as_obstacle(engine: BombermanEngine, state: d
 def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     player = state["players"][0]
     other = state["players"][1]["id"]
-    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = state["grid_width"] - 2, state["grid_height"] - 2
     state["bombers"][other]["next_direction"] = "stop"
 
     bomber = state["bombers"][player["id"]]
@@ -616,7 +616,7 @@ def test_throw_blocked_without_powerup(engine: BombermanEngine, state: dict) -> 
     pid = player["id"]
     bomber = state["bombers"][pid]
     other = state["players"][1]["id"]
-    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = state["grid_width"] - 2, state["grid_height"] - 2
     bomber["can_throw"] = False
     bomber["x"], bomber["y"] = 1, 1
     for x in range(1, 4):
@@ -633,7 +633,7 @@ def test_throw_blocked_without_powerup(engine: BombermanEngine, state: dict) -> 
 def test_kick_bomb_along_ground(engine: BombermanEngine, state: dict) -> None:
     player = state["players"][0]
     other = state["players"][1]["id"]
-    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = state["grid_width"] - 2, state["grid_height"] - 2
     state["bombers"][other]["next_direction"] = "stop"
 
     bomber = state["bombers"][player["id"]]
@@ -686,7 +686,7 @@ def test_kick_bomb_along_ground(engine: BombermanEngine, state: dict) -> None:
 def test_kick_stops_at_hard_wall(engine: BombermanEngine, state: dict) -> None:
     player = state["players"][0]
     other = state["players"][1]["id"]
-    state["bombers"][other]["x"], state["bombers"][other]["y"] = 13, 11
+    state["bombers"][other]["x"], state["bombers"][other]["y"] = state["grid_width"] - 2, state["grid_height"] - 2
 
     bomber = state["bombers"][player["id"]]
     bomber["can_kick"] = True

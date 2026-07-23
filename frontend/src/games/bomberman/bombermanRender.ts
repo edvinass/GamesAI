@@ -278,8 +278,64 @@ export function getMapTheme(mapId?: string | null): MapTheme {
   return CLASSIC_THEME
 }
 
+/** Preferred on-screen window in cells — keeps tiles large on big arenas. */
+const VIEW_COLS = 15
+const VIEW_ROWS = 13
+
 function cellSize(displayW: number, displayH: number, gridW: number, gridH: number) {
-  return Math.floor(Math.min(displayW / gridW, displayH / gridH))
+  // Size tiles as if fitting a classic-sized viewport (or the full map if smaller).
+  const cols = Math.min(gridW, VIEW_COLS)
+  const rows = Math.min(gridH, VIEW_ROWS)
+  return Math.max(1, Math.floor(Math.min(displayW / cols, displayH / rows)))
+}
+
+function cameraOffset(
+  displayW: number,
+  displayH: number,
+  gridW: number,
+  gridH: number,
+  s: number,
+  focusX: number,
+  focusY: number,
+): { ox: number; oy: number } {
+  const boardW = s * gridW
+  const boardH = s * gridH
+
+  let ox: number
+  if (boardW <= displayW) {
+    ox = Math.floor((displayW - boardW) / 2)
+  } else {
+    // Keep focus cell centered; clamp so the camera never leaves the map.
+    ox = Math.floor(displayW / 2 - (focusX + 0.5) * s)
+    ox = Math.max(displayW - boardW, Math.min(0, ox))
+  }
+
+  let oy: number
+  if (boardH <= displayH) {
+    oy = Math.floor((displayH - boardH) / 2)
+  } else {
+    oy = Math.floor(displayH / 2 - (focusY + 0.5) * s)
+    oy = Math.max(displayH - boardH, Math.min(0, oy))
+  }
+
+  return { ox, oy }
+}
+
+function visibleTileRange(
+  displayW: number,
+  displayH: number,
+  gridW: number,
+  gridH: number,
+  s: number,
+  ox: number,
+  oy: number,
+): { x0: number; x1: number; y0: number; y1: number } {
+  const pad = 1
+  const x0 = Math.max(0, Math.floor(-ox / s) - pad)
+  const y0 = Math.max(0, Math.floor(-oy / s) - pad)
+  const x1 = Math.min(gridW, Math.ceil((displayW - ox) / s) + pad)
+  const y1 = Math.min(gridH, Math.ceil((displayH - oy) / s) + pad)
+  return { x0, x1, y0, y1 }
 }
 
 function drawRoundRect(
@@ -1285,10 +1341,11 @@ function drawFloor(
   oy: number,
   boardW: number,
   boardH: number,
-  gridW: number,
-  gridH: number,
   s: number,
   theme: MapTheme,
+  range: { x0: number; x1: number; y0: number; y1: number },
+  displayW: number,
+  displayH: number,
 ) {
   const floor = ctx.createLinearGradient(ox, oy, ox, oy + boardH)
   floor.addColorStop(0, theme.floorTop)
@@ -1296,8 +1353,8 @@ function drawFloor(
   ctx.fillStyle = floor
   ctx.fillRect(ox, oy, boardW, boardH)
 
-  for (let y = 0; y < gridH; y++) {
-    for (let x = 0; x < gridW; x++) {
+  for (let y = range.y0; y < range.y1; y++) {
+    for (let x = range.x0; x < range.x1; x++) {
       const px = ox + x * s
       const py = oy + y * s
       if ((x + y) % 2 === 0) {
@@ -1310,18 +1367,19 @@ function drawFloor(
     }
   }
 
+  // Screen-space vignette so large maps don't look washed out at the edges.
   const vig = ctx.createRadialGradient(
-    ox + boardW / 2,
-    oy + boardH / 2,
-    boardH * 0.2,
-    ox + boardW / 2,
-    oy + boardH / 2,
-    boardW * 0.72,
+    displayW / 2,
+    displayH / 2,
+    Math.min(displayW, displayH) * 0.2,
+    displayW / 2,
+    displayH / 2,
+    Math.max(displayW, displayH) * 0.72,
   )
   vig.addColorStop(0, 'rgba(0,0,0,0)')
   vig.addColorStop(1, theme.vignette)
   ctx.fillStyle = vig
-  ctx.fillRect(ox, oy, boardW, boardH)
+  ctx.fillRect(0, 0, displayW, displayH)
 }
 
 export function renderFrame(
@@ -1349,28 +1407,38 @@ export function renderFrame(
   const s = cellSize(displayW, displayH, gridW, gridH)
   const boardW = s * gridW
   const boardH = s * gridH
-  let ox = Math.floor((displayW - boardW) / 2)
-  let oy = Math.floor((displayH - boardH) / 2)
+
+  const me = bombers[playerId]
+  const focusX = me ? me.x : (gridW - 1) / 2
+  const focusY = me ? me.y : (gridH - 1) / 2
+  let { ox, oy } = cameraOffset(displayW, displayH, gridW, gridH, s, focusX, focusY)
 
   if (shake > 0.01) {
     ox += Math.sin(time * 0.08) * shake * 4
     oy += Math.cos(time * 0.11) * shake * 3
   }
 
-  ctx.clearRect(0, 0, displayW, displayH)
-  drawFloor(ctx, ox, oy, boardW, boardH, gridW, gridH, s, theme)
+  const range = visibleTileRange(displayW, displayH, gridW, gridH, s, ox, oy)
+  const inView = (x: number, y: number) =>
+    x >= range.x0 - 1 && x < range.x1 + 1 && y >= range.y0 - 1 && y < range.y1 + 1
 
-  for (let y = 0; y < gridH; y++) {
+  ctx.clearRect(0, 0, displayW, displayH)
+  // Letterbox / off-map backdrop when the camera hits an edge.
+  ctx.fillStyle = theme.wrapBottom
+  ctx.fillRect(0, 0, displayW, displayH)
+  drawFloor(ctx, ox, oy, boardW, boardH, s, theme, range, displayW, displayH)
+
+  for (let y = range.y0; y < range.y1; y++) {
     const row = grid[y] ?? []
-    for (let x = 0; x < gridW; x++) {
+    for (let x = range.x0; x < range.x1; x++) {
       if ((row[x] ?? TILE_EMPTY) === TILE_SOFT) {
         drawSoftBlock(ctx, ox + x * s, oy + y * s, s, time, theme)
       }
     }
   }
-  for (let y = 0; y < gridH; y++) {
+  for (let y = range.y0; y < range.y1; y++) {
     const row = grid[y] ?? []
-    for (let x = 0; x < gridW; x++) {
+    for (let x = range.x0; x < range.x1; x++) {
       if ((row[x] ?? TILE_EMPTY) === TILE_HARD) {
         drawHardBlock(ctx, ox + x * s, oy + y * s, s, theme)
       }
@@ -1378,11 +1446,13 @@ export function renderFrame(
   }
 
   for (const p of powerups) {
+    if (!inView(p.x, p.y)) continue
     drawPowerup(ctx, ox + p.x * s, oy + p.y * s, s, p.type, time)
   }
 
   for (const b of bombs) {
     if (b.flight === 'carried') continue
+    if (!inView(b.x, b.y)) continue
     drawBomb(
       ctx,
       ox + b.x * s,
@@ -1396,6 +1466,7 @@ export function renderFrame(
   }
 
   for (const e of explosions) {
+    if (!inView(e.x, e.y)) continue
     drawExplosion(ctx, ox + e.x * s, oy + e.y * s, s, e.ttl, time)
   }
 
@@ -1404,6 +1475,7 @@ export function renderFrame(
   const entries = Object.entries(bombers).filter(([, b]) => b.alive)
   entries.sort(([a], [b]) => (a === playerId ? 1 : b === playerId ? -1 : 0))
   for (const [pid, b] of entries) {
+    if (!inView(b.x, b.y)) continue
     const isMe = pid === playerId
     drawBomber(
       ctx,
@@ -1422,6 +1494,7 @@ export function renderFrame(
 
   for (const b of bombs) {
     if (b.flight !== 'carried') continue
+    if (!inView(b.x, b.y)) continue
     drawBomb(
       ctx,
       ox + b.x * s,
