@@ -297,9 +297,6 @@ class BombermanEngine(GamePlugin):
             return False
         bomb = self._bomb_at(state, x, y, grounded_only=True)
         if bomb is not None:
-            # Power Glove: walk onto any grounded bomb to pick it up.
-            if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
-                return True
             passable = set(bomber.get("passable_bomb_ids") or [])
             if bomb["id"] not in passable:
                 return False
@@ -339,10 +336,19 @@ class BombermanEngine(GamePlugin):
         x, y = bomber["x"], bomber["y"]
         bomb_here = self._bomb_at(state, x, y, grounded_only=True)
         if bomb_here is not None:
-            # Classic glove: Space on a bomb picks it up.
+            # Power Glove: Space while standing on a bomb picks it up.
             if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
                 return self._pick_up_bomb(state, player_id, bomber, bomb_here)
             return events
+
+        # Power Glove: Space while facing an adjacent bomb picks it up.
+        if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
+            facing = self._throw_facing(bomber)
+            if facing in DIRECTIONS:
+                dx, dy = DIRECTIONS[facing]
+                adjacent = self._bomb_at(state, x + dx, y + dy, grounded_only=True)
+                if adjacent is not None:
+                    return self._pick_up_bomb(state, player_id, bomber, adjacent)
 
         if bomber.get("carrying_bomb_id"):
             return events
@@ -747,11 +753,9 @@ class BombermanEngine(GamePlugin):
             dx, dy = DIRECTIONS[direction]
             nx, ny = bomber["x"] + dx, bomber["y"] + dy
             bomb = self._bomb_at(state, nx, ny, grounded_only=True)
-            # Classic kick only when glove is not about to pick the bomb up.
             if (
                 bomb is not None
                 and bomber.get("can_kick")
-                and not (bomber.get("can_throw") and not bomber.get("carrying_bomb_id"))
                 and self._can_kick_bomb(state, bomb, direction)
             ):
                 return direction
@@ -786,7 +790,6 @@ class BombermanEngine(GamePlugin):
             if (
                 bomb is not None
                 and bomber.get("can_kick")
-                and not (bomber.get("can_throw") and not bomber.get("carrying_bomb_id"))
                 and self._can_kick_bomb(state, bomb, direction)
             ):
                 events.extend(self._kick_bomb(state, pid, direction, bomb))
@@ -801,12 +804,6 @@ class BombermanEngine(GamePlugin):
             bomber["facing"] = direction
             moved.add(pid)
             events.extend(self._pickup_powerup(state, bomber, nx, ny))
-
-            # Classic glove: walking onto a bomb picks it up.
-            if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
-                landed = self._bomb_at(state, nx, ny, grounded_only=True)
-                if landed is not None:
-                    events.extend(self._pick_up_bomb(state, pid, bomber, landed))
 
             if bomber.get("carrying_bomb_id"):
                 self._sync_carried_bomb(state, bomber)

@@ -116,22 +116,41 @@ function onTouchDirectionEnd(direction: string) {
   emit('action', { type: 'set_direction', direction: 'stop' })
 }
 
+function isGroundedBomb(b: BombermanBomb): boolean {
+  return b.flight !== 'throw' && b.flight !== 'kick' && b.flight !== 'carried'
+}
+
+const DIR_DELTAS: Record<string, [number, number]> = {
+  up: [0, -1],
+  down: [0, 1],
+  left: [-1, 0],
+  right: [1, 0],
+}
+
+/** True when Space will pick up or throw rather than plant (skip plant SFX). */
+function spaceIsGloveAction(): boolean {
+  const me = myBomber.value
+  if (!me?.can_throw) return false
+  if (me.carrying_bomb_id) return true
+  const bombs = props.gameState.bombs ?? []
+  if (bombs.some((b) => b.x === me.x && b.y === me.y && isGroundedBomb(b))) {
+    return true
+  }
+  const facing =
+    (me.direction && DIR_DELTAS[me.direction] ? me.direction : null) ||
+    (me.next_direction && DIR_DELTAS[me.next_direction] ? me.next_direction : null) ||
+    me.facing ||
+    'right'
+  const delta = DIR_DELTAS[facing]
+  if (!delta) return false
+  const [dx, dy] = delta
+  return bombs.some((b) => b.x === me.x + dx && b.y === me.y + dy && isGroundedBomb(b))
+}
+
 function onTouchBomb() {
   if (!canControl.value) return
   void unlockAudio()
-  const me = myBomber.value
-  const carrying = Boolean(me?.carrying_bomb_id)
-  const standingOnBomb =
-    me &&
-    (props.gameState.bombs ?? []).some(
-      (b) =>
-        b.x === me.x &&
-        b.y === me.y &&
-        b.flight !== 'throw' &&
-        b.flight !== 'kick' &&
-        b.flight !== 'carried',
-    )
-  if (!(me?.can_throw && (carrying || standingOnBomb))) {
+  if (!spaceIsGloveAction()) {
     playBombPlace()
   }
   emit('action', { type: 'place_bomb' })
@@ -186,20 +205,8 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault()
     if (!e.repeat) {
       void unlockAudio()
-      const me = myBomber.value
-      const carrying = Boolean(me?.carrying_bomb_id)
-      const standingOnBomb =
-        me &&
-        (props.gameState.bombs ?? []).some(
-          (b) =>
-            b.x === me.x &&
-            b.y === me.y &&
-            b.flight !== 'throw' &&
-            b.flight !== 'kick' &&
-            b.flight !== 'carried',
-        )
       // Place SFX only for planting; pick up / throw come from state sync.
-      if (!(me?.can_throw && (carrying || standingOnBomb))) {
+      if (!spaceIsGloveAction()) {
         playBombPlace()
       }
       emit('action', { type: 'place_bomb' })

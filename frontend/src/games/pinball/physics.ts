@@ -5,7 +5,12 @@ type PlanckBody = planck.Body
 
 const FIXED_TIMESTEP = 1 / 60
 const PHYSICS_TIME_SCALE = 1.5
-const GRAVITY = 35
+/** Arcade gravity — Planck clamps linear speed to ~120, so high g makes launches fail. */
+const GRAVITY = 24
+/** Sustained plunger speed (at Planck's velocity cap). */
+const PLUNGER_SPEED = 110
+/** When the ball clears this Y in the shooter lane, gate it into the playfield. */
+const LAUNCH_EXIT_Y = 315
 
 export interface BumperSpec {
   x: number
@@ -75,8 +80,8 @@ export interface PinballWorld {
 const DEFAULT_LEVEL: PinballLevel = {
   worldWidth: 400,
   worldHeight: 700,
-  ballRadius: 12,
-  launchX: 375,
+  ballRadius: 10,
+  launchX: 372,
   launchY: 600,
   flipperLength: 70,
   flipperWidth: 14,
@@ -109,20 +114,26 @@ function createWalls(world: PlanckWorld, level: PinballLevel): void {
   const topWallBody = world.createBody({ type: 'static', position: planck.Vec2(worldWidth / 2, 0) })
   topWallBody.createFixture(planck.Box(worldWidth / 2, wallThickness / 2), { friction: 0.3, restitution: 0.6 })
 
-  const launchGuide = world.createBody({ type: 'static', position: planck.Vec2(350, 500) })
-  launchGuide.createFixture(planck.Box(3, 200), { friction: 0.2, restitution: 0.3 })
+  // Shooter lane wall (top at y≈320). Ball is gated into play above this.
+  const launchGuide = world.createBody({ type: 'static', position: planck.Vec2(350, 510) })
+  launchGuide.createFixture(planck.Box(3, 190), { friction: 0.1, restitution: 0.2 })
+
+  // Roof over the shooter lane so balls in play cannot fall back into it.
+  const laneRoof = world.createBody({ type: 'static', position: planck.Vec2(375, 270) })
+  laneRoof.createFixture(planck.Box(22, 4), { friction: 0.2, restitution: 0.3 })
 
   const leftRamp = world.createBody({ type: 'static', position: planck.Vec2(60, 550), angle: 0.5 })
   leftRamp.createFixture(planck.Box(70, 8), { friction: 0.3, restitution: 0.4 })
 
-  const rightRamp = world.createBody({ type: 'static', position: planck.Vec2(290, 550), angle: -0.5 })
-  rightRamp.createFixture(planck.Box(70, 8), { friction: 0.3, restitution: 0.4 })
+  // Keep clear of the shooter lane (x > 350).
+  const rightRamp = world.createBody({ type: 'static', position: planck.Vec2(285, 550), angle: -0.5 })
+  rightRamp.createFixture(planck.Box(50, 8), { friction: 0.3, restitution: 0.4 })
 
   const leftOutlane = world.createBody({ type: 'static', position: planck.Vec2(25, 620), angle: 0.3 })
   leftOutlane.createFixture(planck.Box(40, 5), { friction: 0.3, restitution: 0.3 })
 
-  const rightOutlane = world.createBody({ type: 'static', position: planck.Vec2(325, 620), angle: -0.3 })
-  rightOutlane.createFixture(planck.Box(40, 5), { friction: 0.3, restitution: 0.3 })
+  const rightOutlane = world.createBody({ type: 'static', position: planck.Vec2(295, 620), angle: -0.3 })
+  rightOutlane.createFixture(planck.Box(28, 5), { friction: 0.3, restitution: 0.3 })
 }
 
 function createBumpers(world: PlanckWorld, level: PinballLevel): Map<PlanckBody, BumperSpec> {
@@ -240,6 +251,9 @@ export function createPinballWorld(
   const targetBodies = createTargets(world, level)
   const { leftBody, rightBody, leftJoint, rightJoint } = createFlippers(world, level)
 
+  /** True while the plunger is driving the ball up the shooter lane. */
+  let plungerActive = false
+
   const state: PinballWorld = {
     world,
     level,
@@ -261,7 +275,28 @@ export function createPinballWorld(
     step: () => {
       for (let i = 0; i < PHYSICS_TIME_SCALE; i++) {
         state.simTime += FIXED_TIMESTEP
+
+        // Planck clamps speed (~120). Re-apply plunger thrust each substep so the
+        // ball can climb the shooter lane against gravity, then gate into play.
+        if (state.ballBody && plungerActive) {
+          const pos = state.ballBody.getPosition()
+          if (pos.y > LAUNCH_EXIT_Y) {
+            state.ballBody.setLinearVelocity(planck.Vec2(0, -PLUNGER_SPEED))
+          }
+        }
+
         world.step(FIXED_TIMESTEP)
+
+        if (state.ballBody && plungerActive) {
+          const pos = state.ballBody.getPosition()
+          if (pos.y <= LAUNCH_EXIT_Y) {
+            state.ballBody.setTransform(planck.Vec2(300, 90), 0)
+            state.ballBody.setLinearVelocity(
+              planck.Vec2(-45 - Math.random() * 15, 25 + Math.random() * 20)
+            )
+            plungerActive = false
+          }
+        }
       }
 
       if (state.ballBody && state.ballInPlay) {
@@ -269,6 +304,7 @@ export function createPinballWorld(
         if (pos.y > level.worldHeight + 50) {
           state.ballInPlay = false
           state.ballLaunched = false
+          plungerActive = false
           world.destroyBody(state.ballBody)
           state.ballBody = null
           state.ballsRemaining--
@@ -283,17 +319,17 @@ export function createPinballWorld(
         type: 'dynamic',
         position: planck.Vec2(level.launchX, level.launchY),
         bullet: true,
-        linearDamping: 0.1,
-        angularDamping: 0.2,
+        linearDamping: 0.04,
+        angularDamping: 0.15,
       })
       state.ballBody.createFixture(planck.Circle(level.ballRadius), {
-        density: 1.2,
-        friction: 0.3,
+        density: 1.0,
+        friction: 0.2,
         restitution: 0.5,
       })
-      
-      const launchPower = 35 + Math.random() * 10
-      state.ballBody.setLinearVelocity(planck.Vec2(-2, -launchPower))
+
+      state.ballBody.setLinearVelocity(planck.Vec2(0, -PLUNGER_SPEED))
+      plungerActive = true
       state.ballInPlay = true
       state.ballLaunched = true
     },
@@ -308,10 +344,12 @@ export function createPinballWorld(
         world.destroyBody(state.ballBody)
         state.ballBody = null
       }
+      plungerActive = false
       state.ballInPlay = false
       state.ballLaunched = false
     },
     cleanup: () => {
+      plungerActive = false
       if (state.ballBody) {
         world.destroyBody(state.ballBody)
       }
@@ -385,6 +423,21 @@ export function createPinballWorld(
         y: pos.y,
         points: 0,
         intensity: 0.5,
+      })
+      return
+    }
+
+    // Rail / wall / lane contacts (for SFX).
+    const pos = state.ballBody.getPosition()
+    const vel = state.ballBody.getLinearVelocity()
+    const speed = Math.hypot(vel.x, vel.y)
+    if (speed > 8) {
+      onCollision({
+        type: 'wall',
+        x: pos.x,
+        y: pos.y,
+        points: 0,
+        intensity: Math.min(1, speed / 40),
       })
     }
   })

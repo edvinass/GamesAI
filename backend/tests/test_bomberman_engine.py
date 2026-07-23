@@ -382,8 +382,8 @@ def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     bomber["x"], bomber["y"] = 1, 1
     bomber["facing"] = "right"
     bomber["can_throw"] = True
-    bomber["next_direction"] = "right"
-    bomber["move_credit"] = 1.0
+    bomber["next_direction"] = "stop"
+    bomber["move_credit"] = 0.0
     state["bombs"] = [
         {
             "id": "enemy-bomb",
@@ -400,10 +400,19 @@ def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     ]
     state["explosions"] = []
 
-    # With throw, walk onto the opponent bomb → auto pick up
-    assert engine._is_walkable(state, bomber, 2, 1)
+    # Walking onto a bomb no longer picks it up — bombs block without kick/passable.
+    assert not engine._is_walkable(state, bomber, 2, 1)
+    bomber["next_direction"] = "right"
+    bomber["move_credit"] = 1.0
     state, events = engine.tick(state)
-    assert bomber["x"] == 2 and bomber["y"] == 1
+    assert bomber["x"] == 1 and bomber["y"] == 1
+    assert bomber["carrying_bomb_id"] is None
+    assert not any(e["type"] == "bomb_picked_up" for e in events)
+
+    # Face the bomb and press Space to pick it up.
+    bomber["facing"] = "right"
+    bomber["next_direction"] = "stop"
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
     assert bomber["carrying_bomb_id"] == "enemy-bomb"
     assert any(e["type"] == "bomb_picked_up" for e in events)
 
@@ -412,8 +421,7 @@ def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     bomb = state["bombs"][0]
     assert bomb["owner_id"] == other
     assert bomb["flight"] == "throw"
-    assert bomb["x"] == 3
-
+    assert bomb["x"] == 2
 
 def test_throw_blocked_without_powerup(engine: BombermanEngine, state: dict) -> None:
     player = state["players"][0]

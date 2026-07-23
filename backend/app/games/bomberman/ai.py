@@ -148,8 +148,6 @@ def _walkable(
         # Airborne thrown / carried bombs do not block the floor.
         if bomb.get("flight") in ("throw", "carried"):
             return True
-        if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
-            return True
         # Kick holders can path through bombs (they'll push them when adjacent).
         if bomber.get("can_kick") and not bomb.get("flight"):
             return True
@@ -604,6 +602,20 @@ def choose_ai_action(
             and bomb_here.get("flight") not in ("throw", "kick", "carried")
         ):
             return bomber.get("facing") if bomber.get("facing") in DIRECTIONS else "right", True
+        # Face an adjacent bomb and pick it up to escape the blast.
+        if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
+            for face in (
+                bomber.get("facing"),
+                bomber.get("direction"),
+                bomber.get("next_direction"),
+                *DIRECTIONS,
+            ):
+                if face not in DIRECTIONS:
+                    continue
+                dx, dy = DIRECTIONS[face]
+                adj = _bomb_cells(state).get((pos[0] + dx, pos[1] + dy))
+                if adj and adj.get("flight") not in ("throw", "kick", "carried"):
+                    return face, True
         flee_dir, _ = _find_escape(
             state, bomber, danger, max_steps=MAX_ESCAPE_STEPS + 3
         )
@@ -638,15 +650,19 @@ def choose_ai_action(
         and bomb_here is None
         and not bomber.get("carrying_bomb_id")
     )
-    # Glove: pick up a bomb underfoot when useful.
-    if (
-        bomber.get("can_throw")
-        and not bomber.get("carrying_bomb_id")
-        and bomb_here
-        and bomb_here.get("flight") not in ("throw", "kick", "carried")
-        and random.random() < 0.45
-    ):
-        return bomber.get("facing") if bomber.get("facing") in DIRECTIONS else "right", True
+    # Glove: pick up a bomb underfoot or facing when useful.
+    if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
+        pick_target = bomb_here
+        face = bomber.get("facing") if bomber.get("facing") in DIRECTIONS else "right"
+        if pick_target is None or pick_target.get("flight") in ("throw", "kick", "carried"):
+            dx, dy = DIRECTIONS[face]
+            pick_target = _bomb_cells(state).get((pos[0] + dx, pos[1] + dy))
+        if (
+            pick_target
+            and pick_target.get("flight") not in ("throw", "kick", "carried")
+            and random.random() < 0.45
+        ):
+            return face, True
 
     # 2) Bombing decisions — traps first, then enemy line, then soft.
     if can_bomb:

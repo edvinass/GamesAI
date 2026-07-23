@@ -13,7 +13,7 @@ export const bombermanRules: GameRules = {
   sections: [
     {
       heading: 'Controls',
-      body: 'Hold arrow keys or WASD to walk. Release the key to stop. Press Space to place a bomb (limited by your bomb count). You can walk off a bomb you just placed, but you cannot walk back onto it. With Throw (Power Glove): walk onto a bomb to pick it up, then press Space to throw it. With Kick, walk into a bomb to send it sliding along the floor.',
+      body: 'Hold arrow keys or WASD to walk. Release the key to stop. Press Space to place a bomb (limited by your bomb count). You can walk off a bomb you just placed, but you cannot walk back onto it. With Throw (Power Glove): stand on a bomb or face an adjacent one and press Space to pick it up, then press Space again to throw it. With Kick, walk into a bomb to send it sliding along the floor.',
     },
     {
       heading: 'Arena',
@@ -21,7 +21,7 @@ export const bombermanRules: GameRules = {
     },
     {
       heading: 'Power-ups',
-      body: 'Bomb (💣): carry more bombs at once. Range (🔥): longer explosions. Speed (⚡): move faster. Throw (🧤): walk onto a bomb to pick it up, then Space to throw — it flies over walls and soft blocks and lands on the farthest open tile. Kick (🦵): walk into a bomb to kick it along the ground until it hits a wall, soft block, or another bomb. Power-ups in a blast are destroyed.',
+      body: 'Bomb (💣): carry more bombs at once. Range (🔥): longer explosions. Speed (⚡): move faster. Throw (🧤): Space on/facing a bomb to pick it up, then Space to throw — it flies over walls and soft blocks and lands on the farthest open tile. Kick (🦵): walk into a bomb to kick it along the ground until it hits a wall, soft block, or another bomb. Power-ups in a blast are destroyed.',
     },
     {
       heading: 'Winning',
