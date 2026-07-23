@@ -566,17 +566,17 @@ function render() {
   }
   drawWedge(
     [
-      [12, 520],
-      [125, 595],
-      [12, 645],
+      [12, 510],
+      [115, 580],
+      [12, 640],
     ],
     'rgba(40, 10, 30, 0.95)',
     '#ff006e'
   )
   drawWedge(
     [
-      [340, 520],
-      [255, 595],
+      [340, 510],
+      [260, 580],
       [340, 635],
     ],
     'rgba(10, 30, 40, 0.95)',
@@ -584,34 +584,75 @@ function render() {
   )
 
   // Shooter lane
-  const laneGrad = ctx.createLinearGradient(350, 280, 400, 700)
-  laneGrad.addColorStop(0, 'rgba(255, 190, 11, 0.15)')
+  const laneGrad = ctx.createLinearGradient(350, 200, 400, 700)
+  laneGrad.addColorStop(0, 'rgba(255, 190, 11, 0.2)')
   laneGrad.addColorStop(1, 'rgba(255, 0, 110, 0.08)')
   ctx.fillStyle = laneGrad
-  ctx.fillRect(353, 280, 35, 400)
+  ctx.fillRect(353, 200, 35, 480)
 
   ctx.fillStyle = '#1e293b'
-  ctx.fillRect(347, 320, 6, 380)
+  ctx.fillRect(347, 200, 6, 480)
   ctx.shadowColor = '#fee440'
   ctx.shadowBlur = 8
   ctx.fillStyle = '#fee440'
   ctx.globalAlpha = 0.7 + Math.sin(animTime * 5) * 0.3
-  ctx.fillRect(348, 320, 4, 380)
+  ctx.fillRect(348, 200, 4, 480)
   ctx.globalAlpha = 1
   ctx.shadowBlur = 0
 
-  // Lane roof
-  ctx.fillStyle = '#334155'
-  ctx.fillRect(353, 266, 44, 8)
-  ctx.fillStyle = '#00f5d4'
+  // One-way lane gate (closed after ball enters play — classic pinball)
+  if (world.laneGateClosed) {
+    ctx.fillStyle = '#1e293b'
+    ctx.fillRect(347, 20, 6, 185)
+    ctx.shadowColor = '#00f5d4'
+    ctx.shadowBlur = 10
+    ctx.fillStyle = '#00f5d4'
+    ctx.globalAlpha = 0.85
+    ctx.fillRect(348, 20, 4, 185)
+    ctx.globalAlpha = 1
+    ctx.shadowBlur = 0
+
+    // Wire gate flap at the mouth
+    ctx.save()
+    ctx.strokeStyle = '#fee440'
+    ctx.lineWidth = 3
+    ctx.lineCap = 'round'
+    ctx.shadowColor = '#fee440'
+    ctx.shadowBlur = 8
+    ctx.beginPath()
+    ctx.moveTo(350, 198)
+    ctx.lineTo(388, 188)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(350, 205)
+    ctx.lineTo(385, 198)
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  // Top curve rails (visual match for physics deflectors)
+  ctx.save()
+  ctx.strokeStyle = '#00f5d4'
+  ctx.lineWidth = 5
+  ctx.lineCap = 'round'
   ctx.shadowColor = '#00f5d4'
-  ctx.shadowBlur = 10
-  ctx.fillRect(353, 268, 44, 3)
-  ctx.shadowBlur = 0
+  ctx.shadowBlur = 12
+  ctx.beginPath()
+  ctx.moveTo(390, 160)
+  ctx.quadraticCurveTo(395, 90, 340, 45)
+  ctx.stroke()
+  ctx.strokeStyle = '#fee440'
+  ctx.lineWidth = 3
+  ctx.shadowColor = '#fee440'
+  ctx.beginPath()
+  ctx.moveTo(395, 175)
+  ctx.quadraticCurveTo(400, 110, 360, 60)
+  ctx.stroke()
+  ctx.restore()
 
   // Lane chevrons
   ctx.fillStyle = 'rgba(254, 228, 64, 0.35)'
-  for (let y = 360; y < 620; y += 36) {
+  for (let y = 280; y < 620; y += 36) {
     ctx.beginPath()
     ctx.moveTo(365, y)
     ctx.lineTo(372, y + 10)

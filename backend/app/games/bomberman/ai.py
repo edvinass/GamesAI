@@ -12,6 +12,7 @@ DIRECTIONS = {
     "left": (-1, 0),
     "right": (1, 0),
 }
+OPPOSITE = {"up": "down", "down": "up", "left": "right", "right": "left"}
 
 TILE_EMPTY = 0
 TILE_HARD = 1
@@ -22,19 +23,31 @@ DEFAULT_FUSE = 14
 ESCAPE_MARGIN = 3
 MAX_ESCAPE_STEPS = DEFAULT_FUSE - ESCAPE_MARGIN
 THROW_LAND_DISTANCE = 3
+PREDICT_STEPS = 2
 
 # Aggressive bomb rates (still gated by timed escape checks).
 BOMB_CHANCE_SOFT = 0.62
-BOMB_CHANCE_ENEMY = 0.92
+BOMB_CHANCE_ENEMY = 0.95
 BOMB_CHANCE_TRAP = 1.0
+
+# Power-up preference when missing that capability.
+POWERUP_BASE = {
+    "throw": 12,
+    "kick": 10,
+    "bomb": 9,
+    "range": 8,
+    "speed": 7,
+}
 
 
 def _bomb_cells(state: dict) -> dict[tuple[int, int], dict]:
-    return {(b["x"], b["y"]): b for b in state.get("bombs") or []}
-
-
-def _powerup_cells(state: dict) -> set[tuple[int, int]]:
-    return {(p["x"], p["y"]) for p in state.get("powerups") or []}
+    cells: dict[tuple[int, int], dict] = {}
+    for b in state.get("bombs") or []:
+        # Carried / mid-throw bombs don't occupy the floor for pathing.
+        if b.get("flight") in ("throw", "carried"):
+            continue
+        cells[(b["x"], b["y"])] = b
+    return cells
 
 
 def _alive_enemies(state: dict, player_id: str) -> list[tuple[str, dict]]:
@@ -47,6 +60,64 @@ def _alive_enemies(state: dict, player_id: str) -> list[tuple[str, dict]]:
 
 def _manhattan(ax: int, ay: int, bx: int, by: int) -> int:
     return abs(ax - bx) + abs(ay - by)
+
+
+def _enemy_move_dir(enemy: dict) -> str | None:
+    nxt = enemy.get("next_direction")
+    if nxt == "stop":
+        return None
+    if nxt in DIRECTIONS:
+        return nxt
+    for key in ("direction", "facing"):
+        value = enemy.get(key)
+        if value in DIRECTIONS:
+            return value
+    return None
+
+
+def _predicted_enemy_cells(state: dict, enemy: dict) -> set[tuple[int, int]]:
+    """Current tile plus a short lookahead along facing / next_direction."""
+    cells: set[tuple[int, int]] = {(enemy["x"], enemy["y"])}
+    move = _enemy_move_dir(enemy)
+    if move is None:
+        return cells
+    dx, dy = DIRECTIONS[move]
+    x, y = enemy["x"], enemy["y"]
+    width, height = state["grid_width"], state["grid_height"]
+    for _ in range(PREDICT_STEPS):
+        x, y = x + dx, y + dy
+        if not (0 <= x < width and 0 <= y < height):
+            break
+        if state["grid"][y][x] != TILE_EMPTY:
+            break
+        # Don't predict through grounded bombs.
+        blocked = False
+        for bomb in state.get("bombs") or []:
+            if bomb.get("flight") in ("throw", "carried"):
+                continue
+            if bomb["x"] == x and bomb["y"] == y:
+                blocked = True
+                break
+        if blocked:
+            break
+        cells.add((x, y))
+    return cells
+
+
+def _enemy_threat_cells(state: dict, player_id: str) -> set[tuple[int, int]]:
+    cells: set[tuple[int, int]] = set()
+    for _pid, enemy in _alive_enemies(state, player_id):
+        cells |= _predicted_enemy_cells(state, enemy)
+    return cells
+
+
+def _blast_origin(bomb: dict) -> tuple[int, int]:
+    """Prefer planned throw landing when scoring future blasts."""
+    if bomb.get("flight") == "throw":
+        lx, ly = bomb.get("land_x"), bomb.get("land_y")
+        if lx is not None and ly is not None:
+            return int(lx), int(ly)
+    return int(bomb["x"]), int(bomb["y"])
 
 
 def _blast_cells_for(
@@ -77,23 +148,26 @@ def _detonation_times(
 ) -> dict[str, int]:
     if not bombs:
         return {}
-    by_id = {b["id"]: b for b in bombs}
-    det_at = {b["id"]: max(0, int(b.get("fuse", DEFAULT_FUSE))) for b in bombs}
+    grounded = [b for b in bombs if b.get("flight") != "carried"]
+    by_id = {b["id"]: b for b in grounded}
+    det_at = {b["id"]: max(0, int(b.get("fuse", DEFAULT_FUSE))) for b in grounded}
     changed = True
     while changed:
         changed = False
         for bid, bomb in by_id.items():
             t = det_at[bid]
+            ox, oy = _blast_origin(bomb)
             cell_set = set(
                 _blast_cells_for(
-                    grid, width, height, bomb["x"], bomb["y"], int(bomb.get("range", 1))
+                    grid, width, height, ox, oy, int(bomb.get("range", 1))
                 )
             )
-            for other in bombs:
+            for other in grounded:
                 oid = other["id"]
                 if oid == bid:
                     continue
-                if (other["x"], other["y"]) not in cell_set:
+                opos = _blast_origin(other)
+                if opos not in cell_set:
                     continue
                 if t < det_at[oid]:
                     det_at[oid] = t
@@ -118,15 +192,33 @@ def _danger_times(
     if extra_bomb is not None:
         bombs = bombs + [extra_bomb]
 
+    # Carried bombs explode with the carrier; treat origin as current x/y.
+    # Thrown bombs are scored from their planned landing for pathing foresight.
     det_at = _detonation_times(bombs, grid, width, height)
     for bomb in bombs:
+        if bomb.get("flight") == "carried":
+            continue
         t = det_at.get(bomb["id"], max(0, int(bomb.get("fuse", DEFAULT_FUSE))))
+        ox, oy = _blast_origin(bomb)
         for x, y in _blast_cells_for(
-            grid, width, height, bomb["x"], bomb["y"], int(bomb.get("range", 1))
+            grid, width, height, ox, oy, int(bomb.get("range", 1))
         ):
             prev = danger.get((x, y))
             if prev is None or t < prev:
                 danger[(x, y)] = t
+        # Mid-throw: also mark current tile blast if fuse is short.
+        if bomb.get("flight") == "throw" and t <= ESCAPE_MARGIN:
+            for x, y in _blast_cells_for(
+                grid,
+                width,
+                height,
+                int(bomb["x"]),
+                int(bomb["y"]),
+                int(bomb.get("range", 1)),
+            ):
+                prev = danger.get((x, y))
+                if prev is None or t < prev:
+                    danger[(x, y)] = t
     return danger
 
 
@@ -418,25 +510,32 @@ def _clear_line(
     return True
 
 
-def _enemy_in_blast_line(state: dict, bomber: dict, player_id: str) -> bool:
+def _blast_from(
+    state: dict, bx: int, by: int, brange: int
+) -> set[tuple[int, int]]:
+    return set(
+        _blast_cells_for(
+            state["grid"],
+            state["grid_width"],
+            state["grid_height"],
+            bx,
+            by,
+            brange,
+        )
+    )
+
+
+def _enemy_in_blast_line(
+    state: dict,
+    bomber: dict,
+    player_id: str,
+    *,
+    at: tuple[int, int] | None = None,
+) -> bool:
     brange = int(bomber.get("bomb_range", 1))
-    bx, by = bomber["x"], bomber["y"]
-    enemies = {(b["x"], b["y"]) for _, b in _alive_enemies(state, player_id)}
-    if (bx, by) in enemies:
-        return True
-    for dx, dy in DIRECTIONS.values():
-        for step in range(1, brange + 1):
-            x, y = bx + dx * step, by + dy * step
-            if not (0 <= x < state["grid_width"] and 0 <= y < state["grid_height"]):
-                break
-            tile = state["grid"][y][x]
-            if tile == TILE_HARD:
-                break
-            if (x, y) in enemies:
-                return True
-            if tile == TILE_SOFT:
-                break
-    return False
+    bx, by = at if at is not None else (bomber["x"], bomber["y"])
+    threats = _enemy_threat_cells(state, player_id)
+    return bool(_blast_from(state, bx, by, brange) & threats)
 
 
 def _open_exits(
@@ -458,12 +557,17 @@ def _can_escape_after_bomb(
 
 
 def _can_escape_after_bomb_with_steps(
-    state: dict, player_id: str, bomber: dict
+    state: dict,
+    player_id: str,
+    bomber: dict,
+    *,
+    at: tuple[int, int] | None = None,
 ) -> tuple[bool, str | None, int | None]:
+    px, py = at if at is not None else (bomber["x"], bomber["y"])
     probe = {
         "id": "__ai_probe__",
-        "x": bomber["x"],
-        "y": bomber["y"],
+        "x": px,
+        "y": py,
         "owner_id": player_id,
         "range": int(bomber.get("bomb_range", 1)),
         "fuse": DEFAULT_FUSE,
@@ -473,13 +577,14 @@ def _can_escape_after_bomb_with_steps(
         **state,
         "bombs": list(state.get("bombs") or []) + [probe],
     }
+    standing = {**bomber, "x": px, "y": py}
     danger = _danger_times(fake)
-    if _open_exits(fake, bomber, bomber["x"], bomber["y"], passable_extra) < 1:
+    if _open_exits(fake, standing, px, py, passable_extra) < 1:
         return False, None, None
 
     direction, steps = _find_escape(
         fake,
-        bomber,
+        standing,
         danger,
         passable_extra=passable_extra,
         max_steps=MAX_ESCAPE_STEPS,
@@ -491,45 +596,188 @@ def _can_escape_after_bomb_with_steps(
     return True, direction, steps
 
 
-def _enemy_escape_after_our_bomb(
-    state: dict, player_id: str, bomber: dict, enemy: dict
+def _enemy_escape_after_bomb_at(
+    state: dict,
+    player_id: str,
+    bomber: dict,
+    enemy: dict,
+    bx: int,
+    by: int,
 ) -> bool:
-    """True if the enemy still has a timed escape after we plant at our feet."""
+    """True if the enemy still has a timed escape after we plant at (bx, by)."""
     probe = {
         "id": "__ai_probe__",
-        "x": bomber["x"],
-        "y": bomber["y"],
+        "x": bx,
+        "y": by,
         "owner_id": player_id,
         "range": int(bomber.get("bomb_range", 1)),
         "fuse": DEFAULT_FUSE,
     }
     fake = {**state, "bombs": list(state.get("bombs") or []) + [probe]}
     danger = _danger_times(fake)
-    # Enemy not even threatened → not a trap
-    if danger.get((enemy["x"], enemy["y"])) is None:
+    # Threatened if current or predicted cells are in the blast.
+    threatened = False
+    for cell in _predicted_enemy_cells(state, enemy):
+        if danger.get(cell) is not None:
+            threatened = True
+            break
+    if not threatened:
         return True
     flee, _steps = _find_escape(fake, enemy, danger, max_steps=MAX_ESCAPE_STEPS + 2)
     return flee is not None and flee != "stop"
 
 
-def _is_trap_bomb(state: dict, player_id: str, bomber: dict) -> bool:
-    if not _enemy_in_blast_line(state, bomber, player_id):
+def _is_trap_at(
+    state: dict, player_id: str, bomber: dict, bx: int, by: int
+) -> bool:
+    brange = int(bomber.get("bomb_range", 1))
+    blast = _blast_from(state, bx, by, brange)
+    if not blast & _enemy_threat_cells(state, player_id):
         return False
     for _pid, enemy in _alive_enemies(state, player_id):
-        if (enemy["x"], enemy["y"]) not in set(
-            _blast_cells_for(
-                state["grid"],
-                state["grid_width"],
-                state["grid_height"],
-                bomber["x"],
-                bomber["y"],
-                int(bomber.get("bomb_range", 1)),
-            )
-        ):
+        if not (_predicted_enemy_cells(state, enemy) & blast):
             continue
-        if not _enemy_escape_after_our_bomb(state, player_id, bomber, enemy):
+        if not _enemy_escape_after_bomb_at(state, player_id, bomber, enemy, bx, by):
             return True
     return False
+
+
+def _is_trap_bomb(state: dict, player_id: str, bomber: dict) -> bool:
+    return _is_trap_at(state, player_id, bomber, bomber["x"], bomber["y"])
+
+
+def _score_landing_blast(
+    state: dict,
+    player_id: str,
+    bomber: dict,
+    lx: int,
+    ly: int,
+    brange: int,
+) -> int:
+    """Higher is better for throwing / kicking a bomb onto (lx, ly)."""
+    blast = _blast_from(state, lx, ly, brange)
+    score = 0
+    threats = _enemy_threat_cells(state, player_id)
+    hits = blast & threats
+    score += 50 * len(hits)
+    if hits:
+        # Trap check is expensive; only run when we already threaten someone.
+        if _is_trap_at(state, player_id, bomber, lx, ly):
+            score += 60
+    # Soft clears are a mild bonus.
+    for x, y in blast:
+        if (x, y) == (lx, ly):
+            continue
+        if 0 <= x < state["grid_width"] and 0 <= y < state["grid_height"]:
+            if state["grid"][y][x] == TILE_SOFT:
+                score += 3
+    # Never "throw" onto our own tile; mild penalty if we're still in the lane
+    # (fuse leaves time to walk off after a glove toss).
+    if (lx, ly) == (bomber["x"], bomber["y"]):
+        score -= 80
+    elif (bomber["x"], bomber["y"]) in blast:
+        score -= 6
+    # Prefer landings farther from us so we keep escape room.
+    score += min(6, _manhattan(bomber["x"], bomber["y"], lx, ly))
+    return score
+
+
+def _best_throw_direction(
+    state: dict,
+    player_id: str,
+    bomber: dict,
+    *,
+    avoid_dir: str | None = None,
+) -> str | None:
+    """Pick a throw direction that maximizes enemy blast / trap value."""
+    brange = int(bomber.get("bomb_range", 1))
+    pos = (bomber["x"], bomber["y"])
+    ignore_id = bomber.get("carrying_bomb_id")
+    scored: list[tuple[int, str]] = []
+    for direction in DIRECTIONS:
+        landing = _throw_landing(
+            state, pos[0], pos[1], direction, ignore_bomb_id=ignore_id
+        )
+        if landing is None:
+            continue
+        score = _score_landing_blast(
+            state, player_id, bomber, landing[0], landing[1], brange
+        )
+        if direction == avoid_dir:
+            score -= 15  # don't throw into our flee path if we can help it
+        if direction == bomber.get("facing"):
+            score += 1
+        scored.append((score, direction))
+    if not scored:
+        return None
+    scored.sort(key=lambda t: -t[0])
+    return scored[0][1]
+
+
+def _kick_bomb_stop(
+    state: dict, bx: int, by: int, direction: str
+) -> tuple[int, int] | None:
+    """Approximate where a kicked bomb comes to rest along a lane."""
+    if direction not in DIRECTIONS:
+        return None
+    dx, dy = DIRECTIONS[direction]
+    width, height = state["grid_width"], state["grid_height"]
+    x, y = bx + dx, by + dy
+    if not (0 <= x < width and 0 <= y < height):
+        return None
+    if state["grid"][y][x] != TILE_EMPTY:
+        return None
+    last = (x, y)
+    while True:
+        nx, ny = x + dx, y + dy
+        if not (0 <= nx < width and 0 <= ny < height):
+            return last
+        if state["grid"][ny][nx] != TILE_EMPTY:
+            return last
+        for other in state.get("bombs") or []:
+            if other.get("flight") in ("throw", "carried"):
+                continue
+            if other["x"] == nx and other["y"] == ny:
+                return last
+        x, y = nx, ny
+        last = (x, y)
+        # Cap scan so we don't walk the whole map every tick.
+        if _manhattan(bx, by, x, y) > 12:
+            return last
+
+
+def _best_kick_direction(
+    state: dict, player_id: str, bomber: dict, danger: dict[tuple[int, int], int]
+) -> str | None:
+    """If adjacent to a kickable bomb, walk into it toward a strong landing."""
+    if not bomber.get("can_kick"):
+        return None
+    pos = (bomber["x"], bomber["y"])
+    brange = 1
+    # Use the bomb's own range when known.
+    best: tuple[int, str] | None = None
+    for direction, (dx, dy) in DIRECTIONS.items():
+        nx, ny = pos[0] + dx, pos[1] + dy
+        bomb = _bomb_cells(state).get((nx, ny))
+        if bomb is None or bomb.get("flight") or bomb.get("sliding"):
+            continue
+        if not _safe_step_ok(state, bomber, danger, nx, ny, min_lethal=2):
+            # Walking onto the bomb tile is required to kick; allow slightly hotter tiles.
+            if not _walkable(state, nx, ny, bomber):
+                continue
+        stop = _kick_bomb_stop(state, nx, ny, direction)
+        if stop is None:
+            continue
+        bomb_range = int(bomb.get("range", brange))
+        score = _score_landing_blast(
+            state, player_id, bomber, stop[0], stop[1], bomb_range
+        )
+        # Only kick when it creates real pressure.
+        if score < 40:
+            continue
+        if best is None or score > best[0]:
+            best = (score, direction)
+    return best[1] if best else None
 
 
 def _hunting_positions(
@@ -538,14 +786,13 @@ def _hunting_positions(
     bomber: dict,
     danger: dict[tuple[int, int], int],
 ) -> set[tuple[int, int]]:
-    """Cells from which a bomb would hit an enemy along a clear lane."""
+    """Cells from which a bomb would hit an enemy (current or predicted)."""
     brange = int(bomber.get("bomb_range", 1))
     targets: set[tuple[int, int]] = set()
     width, height = state["grid_width"], state["grid_height"]
 
-    for _pid, enemy in _alive_enemies(state, player_id):
-        ex, ey = enemy["x"], enemy["y"]
-        # Stand on same row/col within range with clear line
+    threat_cells = _enemy_threat_cells(state, player_id)
+    for ex, ey in threat_cells:
         for dist in range(1, brange + 1):
             for dx, dy in DIRECTIONS.values():
                 sx, sy = ex - dx * dist, ey - dy * dist
@@ -557,18 +804,95 @@ def _hunting_positions(
                     continue
                 if not _clear_line(state, sx, sy, ex, ey):
                     continue
-                # Prefer tiles with an escape hatch
-                if _exit_count(state, bomber, sx, sy) >= 2:
+                if _exit_count(state, bomber, sx, sy) >= 1:
                     targets.add((sx, sy))
-                elif _exit_count(state, bomber, sx, sy) >= 1:
-                    targets.add((sx, sy))
-        # Also approach adjacent tiles for close pressure
         for dx, dy in DIRECTIONS.values():
             ax, ay = ex + dx, ey + dy
             if 0 <= ax < width and 0 <= ay < height and state["grid"][ay][ax] == TILE_EMPTY:
                 if danger.get((ax, ay)) is None or danger[(ax, ay)] > ESCAPE_MARGIN:
                     targets.add((ax, ay))
     return targets
+
+
+def _trap_positions(
+    state: dict,
+    player_id: str,
+    bomber: dict,
+    danger: dict[tuple[int, int], int],
+) -> set[tuple[int, int]]:
+    """Hunt tiles where planting would deny the enemy an escape."""
+    traps: set[tuple[int, int]] = set()
+    for sx, sy in _hunting_positions(state, player_id, bomber, danger):
+        if _is_trap_at(state, player_id, bomber, sx, sy):
+            # Must be able to escape after planting there.
+            ok, _, _ = _can_escape_after_bomb_with_steps(
+                state, player_id, bomber, at=(sx, sy)
+            )
+            if ok:
+                traps.add((sx, sy))
+    return traps
+
+
+def _best_plant_approach(
+    state: dict,
+    player_id: str,
+    bomber: dict,
+    danger: dict[tuple[int, int], int],
+) -> str | None:
+    """One-ply: step onto an adjacent tile that yields a trap / kill plant next tick."""
+    pos = (bomber["x"], bomber["y"])
+    best: tuple[int, str] | None = None
+    for direction, (dx, dy) in DIRECTIONS.items():
+        nx, ny = pos[0] + dx, pos[1] + dy
+        if not _safe_step_ok(state, bomber, danger, nx, ny):
+            continue
+        ok, _, esc_steps = _can_escape_after_bomb_with_steps(
+            state, player_id, bomber, at=(nx, ny)
+        )
+        if not ok:
+            continue
+        trap = _is_trap_at(state, player_id, bomber, nx, ny)
+        hit = _enemy_in_blast_line(state, bomber, player_id, at=(nx, ny))
+        if not trap and not hit:
+            continue
+        score = 100 if trap else 50
+        if esc_steps is not None:
+            score += max(0, 8 - esc_steps)
+        if best is None or score > best[0]:
+            best = (score, direction)
+    return best[1] if best else None
+
+
+def _priority_powerup_targets(
+    state: dict,
+    bomber: dict,
+    danger: dict[tuple[int, int], int],
+) -> set[tuple[int, int]]:
+    """Prefer combat power-ups the bomber still lacks."""
+    scored: list[tuple[int, tuple[int, int]]] = []
+    for p in state.get("powerups") or []:
+        cell = (p["x"], p["y"])
+        if danger.get(cell) is not None and danger.get(cell, 0) <= ESCAPE_MARGIN:
+            continue
+        ptype = p.get("type")
+        score = POWERUP_BASE.get(ptype, 4)
+        if ptype == "throw" and bomber.get("can_throw"):
+            score = 2
+        elif ptype == "kick" and bomber.get("can_kick"):
+            score = 2
+        elif ptype == "bomb" and int(bomber.get("max_bombs", 1)) >= 4:
+            score = 3
+        elif ptype == "range" and int(bomber.get("bomb_range", 1)) >= 5:
+            score = 3
+        elif ptype == "speed" and int(bomber.get("speed_level", 0)) >= 4:
+            score = 3
+        scored.append((score, cell))
+    if not scored:
+        return set()
+    scored.sort(key=lambda t: -t[0])
+    top = scored[0][0]
+    # Take the best tier (and near-ties) so BFS still has options.
+    return {c for s, c in scored if s >= top - 2}
 
 
 def _soft_targets(
@@ -599,16 +923,22 @@ def choose_ai_action(
     here_lethal = danger.get(pos)
 
     # 1) Flee any blast covering us — never bomb while threatened.
-    #    Power Glove: if carrying, throw away from escape; if standing on a bomb, pick it up.
+    #    Power Glove: if carrying, throw (aimed); if standing on a bomb, pick it up.
     if here_lethal is not None:
         if bomber.get("can_throw") and bomber.get("carrying_bomb_id"):
             flee_dir, _ = _find_escape(
                 state, bomber, danger, max_steps=MAX_ESCAPE_STEPS + 3
             )
-            opposite = {"up": "down", "down": "up", "left": "right", "right": "left"}
+            avoid = flee_dir if flee_dir in DIRECTIONS else None
+            throw_dir = _best_throw_direction(
+                state, player_id, bomber, avoid_dir=avoid
+            )
+            if throw_dir:
+                return throw_dir, True
+            # Fallback: throw opposite of flee, then any legal dir.
             preferred: list[str] = []
             if flee_dir in DIRECTIONS:
-                preferred.append(opposite[flee_dir])
+                preferred.append(OPPOSITE[flee_dir])
             for key in ("facing", "direction", "next_direction"):
                 value = bomber.get(key)
                 if value in DIRECTIONS and value not in preferred:
@@ -616,10 +946,9 @@ def choose_ai_action(
             for d in DIRECTIONS:
                 if d not in preferred:
                     preferred.append(d)
-            for throw_dir in preferred:
-                if _throw_landing(state, pos[0], pos[1], throw_dir) is None:
-                    continue
-                return throw_dir, True
+            for d in preferred:
+                if _throw_landing(state, pos[0], pos[1], d) is not None:
+                    return d, True
         bomb_here = _bomb_cells(state).get(pos)
         if (
             bomb_here
@@ -649,24 +978,15 @@ def choose_ai_action(
             return flee_dir, False
         return _best_safe_direction(state, bomber, danger), False
 
-    # Avoid stepping into enemy bomb lanes that are about to go (lookahead).
-    # If a neighbor is safer and current tile will be hit soon by a distant bomb...
-    # (already handled when here_lethal is set)
-
-    # Throw a carried bomb promptly (classic glove — don't walk around holding forever).
+    # Aimed throw while safe — don't wander holding a bomb.
     if bomber.get("can_throw") and bomber.get("carrying_bomb_id"):
-        preferred: list[str] = []
-        for key in ("facing", "direction", "next_direction"):
-            value = bomber.get(key)
-            if value in DIRECTIONS and value not in preferred:
-                preferred.append(value)
-        for d in DIRECTIONS:
-            if d not in preferred:
-                preferred.append(d)
-        for throw_dir in preferred:
-            if _throw_landing(state, pos[0], pos[1], throw_dir) is None:
-                continue
+        throw_dir = _best_throw_direction(state, player_id, bomber)
+        if throw_dir:
             return throw_dir, True
+        for key in ("facing", "direction", "next_direction", *DIRECTIONS):
+            value = key if key in DIRECTIONS else bomber.get(key)
+            if value in DIRECTIONS and _throw_landing(state, pos[0], pos[1], value):
+                return value, True
 
     active = sum(1 for b in state.get("bombs") or [] if b.get("owner_id") == player_id)
     max_bombs = int(bomber.get("max_bombs", 1))
@@ -676,6 +996,12 @@ def choose_ai_action(
         and bomb_here is None
         and not bomber.get("carrying_bomb_id")
     )
+
+    # Kick a bomb toward enemies when it creates real pressure.
+    kick_dir = _best_kick_direction(state, player_id, bomber, danger)
+    if kick_dir:
+        return kick_dir, False
+
     # Glove: pick up a bomb underfoot or facing when useful.
     if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
         pick_target = bomb_here
@@ -702,70 +1028,77 @@ def choose_ai_action(
             if trap:
                 chance = BOMB_CHANCE_TRAP
             elif hit_enemy:
-                chance = BOMB_CHANCE_ENEMY
-                # Prefer bombing when escape is short (safer aggression)
+                # Free / safe kills: plant deterministically.
                 if esc_steps is not None and esc_steps <= 4:
-                    chance = min(1.0, chance + 0.08)
+                    chance = 1.0
+                else:
+                    chance = BOMB_CHANCE_ENEMY
             elif hit_soft:
                 chance = BOMB_CHANCE_SOFT
-                # Early game: clear space faster
                 if int(bomber.get("bomb_range", 1)) <= 2:
                     chance = max(chance, 0.7)
 
             if active > 0:
-                # Still chain aggressively for traps / kills
                 chance *= 0.85 if (trap or hit_enemy) else 0.55
 
             if chance > 0 and random.random() < chance:
                 return esc, True
 
-    # 3) Power-ups — race to them hard (especially speed/bomb).
-    powerups = {
-        c
-        for c in _powerup_cells(state)
-        if danger.get(c) is None or danger.get(c, 0) > ESCAPE_MARGIN
-    }
+    # 2b) One-ply plant: step onto a tile that yields a trap/kill next tick.
+    approach = _best_plant_approach(state, player_id, bomber, danger)
+    if approach:
+        return approach, False
+
+    # 3) Priority power-ups (throw/kick/bomb before filler).
+    powerups = _priority_powerup_targets(state, bomber, danger)
     move, dist = _bfs_to_targets(state, bomber, danger, powerups, max_dist=18)
     if move and move != "stop" and dist is not None and dist <= 12:
         return move, False
 
-    # 4) Hunt enemies — get onto a bombing line.
     enemies = _alive_enemies(state, player_id)
     nearest_enemy_dist = min(
         (_manhattan(pos[0], pos[1], e["x"], e["y"]) for _, e in enemies),
         default=99,
     )
 
+    # 4) Path to trap tiles before ordinary hunting lines.
+    traps = _trap_positions(state, player_id, bomber, danger)
+    move, dist = _bfs_to_targets(state, bomber, danger, traps, max_dist=24)
+    if move and move != "stop":
+        if dist == 0:
+            return "stop", False
+        return move, False
+
+    # 5) Hunt enemies — get onto a bombing line (uses predicted positions).
     hunt = _hunting_positions(state, player_id, bomber, danger)
     move, dist = _bfs_to_targets(state, bomber, danger, hunt, max_dist=24)
     if move and move != "stop":
-        # If already on a hunt tile, hold / micro-adjust then bomb next ticks
         if dist == 0:
-            # Stay ready; nudge toward more exits if current is cramped
             if _exit_count(state, bomber, pos[0], pos[1]) < 2:
                 return _best_safe_direction(state, bomber, danger), False
             return "stop", False
         return move, False
 
-    # 5) Soft-wall farming when enemies are far or map is clogged.
+    # 6) Soft-wall farming when enemies are far or map is clogged.
     if nearest_enemy_dist > 6 or int(bomber.get("bomb_range", 1)) < 2:
         soft = _soft_targets(state, danger)
         move, _ = _bfs_to_targets(state, bomber, danger, soft, max_dist=20)
         if move and move != "stop":
             return move, False
 
-    # 6) Close the gap — path toward enemy tile neighborhood.
+    # 7) Close the gap — path toward enemy tile neighborhood (incl. predicted).
     if enemies:
-        approach: set[tuple[int, int]] = set()
+        approach_cells: set[tuple[int, int]] = set()
         for _pid, enemy in enemies:
-            for dx, dy in DIRECTIONS.values():
-                approach.add((enemy["x"] + dx, enemy["y"] + dy))
-                approach.add((enemy["x"] + dx * 2, enemy["y"] + dy * 2))
-        move, _ = _bfs_to_targets(state, bomber, danger, approach, max_dist=30)
+            for cell in _predicted_enemy_cells(state, enemy):
+                for dx, dy in DIRECTIONS.values():
+                    approach_cells.add((cell[0] + dx, cell[1] + dy))
+                    approach_cells.add((cell[0] + dx * 2, cell[1] + dy * 2))
+        move, _ = _bfs_to_targets(state, bomber, danger, approach_cells, max_dist=30)
         if move and move != "stop":
             return move, False
 
-    # 7) Soft walls as fallback
+    # 8) Soft walls as fallback
     soft = _soft_targets(state, danger)
     move, _ = _bfs_to_targets(state, bomber, danger, soft, max_dist=25)
     if move and move != "stop":

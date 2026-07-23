@@ -2,8 +2,11 @@
 
 from app.games.bomberman.ai import (
     choose_ai_action,
+    _best_throw_direction,
     _can_escape_after_bomb,
     _danger_times,
+    _predicted_enemy_cells,
+    _trap_positions,
 )
 from app.games.bomberman.engine import TILE_EMPTY, TILE_HARD, TILE_SOFT, BombermanEngine
 
@@ -195,3 +198,128 @@ def test_danger_times_marks_blast_lane() -> None:
     assert danger.get((2, 1)) == 5
     assert danger.get((3, 1)) == 5
     assert danger.get((4, 1)) == 5
+
+
+def test_predicted_enemy_cells_follow_facing() -> None:
+    state = _empty_corridor_state()
+    # Force an open lane (including hard pillars).
+    for y in range(1, 5):
+        for x in range(1, 8):
+            state["grid"][y][x] = TILE_EMPTY
+    human = state["bombers"]["human"]
+    human["x"], human["y"] = 2, 2
+    human["next_direction"] = "right"
+    human["facing"] = "right"
+    cells = _predicted_enemy_cells(state, human)
+    assert (2, 2) in cells
+    assert (3, 2) in cells
+    assert (4, 2) in cells
+
+
+def test_aimed_throw_prefers_enemy_lane() -> None:
+    state = _empty_corridor_state()
+    bomber = state["bombers"]["ai"]
+    human = state["bombers"]["human"]
+    for y in range(1, 6):
+        for x in range(1, 10):
+            state["grid"][y][x] = TILE_EMPTY
+    bomber["x"], bomber["y"] = 2, 2
+    bomber["bomb_range"] = 3
+    bomber["can_throw"] = True
+    bomber["carrying_bomb_id"] = "held"
+    human["x"], human["y"] = 6, 2
+    human["alive"] = True
+    state["bombs"] = [
+        {
+            "id": "held",
+            "x": 2,
+            "y": 2,
+            "owner_id": "ai",
+            "range": 3,
+            "fuse": 10,
+            "flight": "carried",
+        }
+    ]
+
+    direction = _best_throw_direction(state, "ai", bomber)
+    assert direction == "right"
+
+
+def test_ai_throws_toward_enemy_when_carrying() -> None:
+    state = _empty_corridor_state()
+    bomber = state["bombers"]["ai"]
+    human = state["bombers"]["human"]
+    for y in range(1, 6):
+        for x in range(1, 10):
+            state["grid"][y][x] = TILE_EMPTY
+    state["powerups"] = []
+    bomber["x"], bomber["y"] = 2, 2
+    bomber["bomb_range"] = 3
+    bomber["can_throw"] = True
+    bomber["carrying_bomb_id"] = "held"
+    human["x"], human["y"] = 6, 2
+    human["alive"] = True
+    state["bombs"] = [
+        {
+            "id": "held",
+            "x": 2,
+            "y": 2,
+            "owner_id": "ai",
+            "range": 3,
+            "fuse": 10,
+            "flight": "carried",
+        }
+    ]
+
+    direction, place = choose_ai_action(state, "ai", bomber)
+    assert place is True
+    assert direction == "right"
+
+
+def test_trap_positions_include_choke_tile() -> None:
+    state = _empty_corridor_state()
+    bomber = state["bombers"]["ai"]
+    human = state["bombers"]["human"]
+    # Dead-end pocket: enemy at (2,2) with only escape through (3,2); AI can plant at (4,2).
+    for y in range(0, 7):
+        for x in range(0, 8):
+            state["grid"][y][x] = TILE_HARD
+    state["grid"][2][2] = TILE_EMPTY
+    state["grid"][2][3] = TILE_EMPTY
+    state["grid"][2][4] = TILE_EMPTY
+    state["grid"][2][5] = TILE_EMPTY
+    state["grid"][3][4] = TILE_EMPTY  # AI escape south
+    state["grid"][4][4] = TILE_EMPTY
+    bomber["x"], bomber["y"] = 5, 2
+    bomber["bomb_range"] = 3
+    human["x"], human["y"] = 2, 2
+    human["alive"] = True
+    human["next_direction"] = "stop"
+    human["facing"] = "right"
+
+    danger = _danger_times(state)
+    traps = _trap_positions(state, "ai", bomber, danger)
+    assert (4, 2) in traps or (3, 2) in traps
+
+
+def test_ai_steps_onto_kill_tile_before_bombing() -> None:
+    state = _empty_corridor_state()
+    bomber = state["bombers"]["ai"]
+    human = state["bombers"]["human"]
+    for y in range(1, 6):
+        for x in range(1, 9):
+            state["grid"][y][x] = TILE_EMPTY
+    state["powerups"] = []
+    state["bombs"] = []
+    # Current tile does not cover enemy (or predicted path); one step right does.
+    bomber["x"], bomber["y"] = 3, 2
+    bomber["bomb_range"] = 2
+    bomber["max_bombs"] = 1
+    human["x"], human["y"] = 6, 2
+    human["alive"] = True
+    human["next_direction"] = "stop"
+    human["facing"] = "right"  # predicts away from AI
+
+    direction, place = choose_ai_action(state, "ai", bomber)
+    assert place is False
+    assert direction == "right"

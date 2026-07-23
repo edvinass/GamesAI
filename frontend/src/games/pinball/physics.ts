@@ -6,18 +6,21 @@ type PlanckBody = planck.Body
 const FIXED_TIMESTEP = 1 / 60
 const PHYSICS_TIME_SCALE = 1.5
 /** Arcade gravity — Planck clamps linear speed to ~120, so high g makes launches fail. */
-const GRAVITY = 24
+const GRAVITY = 18
 /** Sustained plunger speed (at Planck's velocity cap). */
 const PLUNGER_SPEED = 110
-/** When the ball clears this Y in the shooter lane, gate it into the playfield. */
-const LAUNCH_EXIT_Y = 315
+/** Stop forcing plunger thrust once the ball reaches the top curve. */
+const PLUNGER_RELEASE_Y = 160
 
 /** Flipper rest / raised angles (absolute body angles). */
 const LEFT_REST_ANGLE = 0.55
-const LEFT_ACTIVE_ANGLE = -0.35
+const LEFT_ACTIVE_ANGLE = -0.4
 const RIGHT_REST_ANGLE = -0.55
-const RIGHT_ACTIVE_ANGLE = 0.35
-const FLIPPER_SPEED = 28
+const RIGHT_ACTIVE_ANGLE = 0.4
+const FLIPPER_SPEED = 65
+/** Extra kick applied on flipper contact while the flipper is raised/swinging. */
+const FLIPPER_KICK_MIN = 55
+const FLIPPER_KICK_MAX = 115
 
 export interface BumperSpec {
   x: number
@@ -74,6 +77,8 @@ export interface PinballWorld {
   ballLaunched: boolean
   leftFlipperActive: boolean
   rightFlipperActive: boolean
+  /** True once the ball has left the shooter lane and the one-way gate has closed. */
+  laneGateClosed: boolean
   onCollision: (event: CollisionEvent) => void
   onBallLost: () => void
   step: () => void
@@ -121,26 +126,31 @@ function createWalls(world: PlanckWorld, level: PinballLevel): void {
   const topWallBody = world.createBody({ type: 'static', position: planck.Vec2(worldWidth / 2, 0) })
   topWallBody.createFixture(planck.Box(worldWidth / 2, wallThickness / 2), { friction: 0.3, restitution: 0.6 })
 
-  // Shooter lane wall (top at y≈320). Ball is gated into play above this.
-  const launchGuide = world.createBody({ type: 'static', position: planck.Vec2(350, 510) })
-  launchGuide.createFixture(planck.Box(3, 190), { friction: 0.1, restitution: 0.2 })
+  // Shooter lane wall — opens near the top so the ball can curve into play.
+  // Guide spans y≈200..700 (center 450, half-height 250).
+  const launchGuide = world.createBody({ type: 'static', position: planck.Vec2(350, 450) })
+  launchGuide.createFixture(planck.Box(3, 250), { friction: 0.05, restitution: 0.1 })
 
-  // Roof over the shooter lane so balls in play cannot fall back into it.
-  const laneRoof = world.createBody({ type: 'static', position: planck.Vec2(375, 270) })
-  laneRoof.createFixture(planck.Box(22, 4), { friction: 0.2, restitution: 0.3 })
+  // Top-right curve: sends a launched ball left into the playfield (no teleport).
+  const laneCurveA = world.createBody({ type: 'static', position: planck.Vec2(378, 120), angle: 0.95 })
+  laneCurveA.createFixture(planck.Box(55, 5), { friction: 0.05, restitution: 0.45 })
 
-  const leftRamp = world.createBody({ type: 'static', position: planck.Vec2(60, 550), angle: 0.5 })
-  leftRamp.createFixture(planck.Box(70, 8), { friction: 0.3, restitution: 0.4 })
+  const laneCurveB = world.createBody({ type: 'static', position: planck.Vec2(355, 55), angle: 0.4 })
+  laneCurveB.createFixture(planck.Box(35, 5), { friction: 0.05, restitution: 0.4 })
 
-  // Keep clear of the shooter lane (x > 350).
-  const rightRamp = world.createBody({ type: 'static', position: planck.Vec2(285, 550), angle: -0.5 })
-  rightRamp.createFixture(planck.Box(50, 8), { friction: 0.3, restitution: 0.4 })
+  // Inlanes / outlanes: dead (near-zero restitution) so they guide the ball
+  // toward the flippers instead of slingshotting it around weirdly.
+  const leftRamp = world.createBody({ type: 'static', position: planck.Vec2(50, 540), angle: 0.6 })
+  leftRamp.createFixture(planck.Box(48, 4), { friction: 0.55, restitution: 0.02 })
 
-  const leftOutlane = world.createBody({ type: 'static', position: planck.Vec2(25, 620), angle: 0.3 })
-  leftOutlane.createFixture(planck.Box(40, 5), { friction: 0.3, restitution: 0.3 })
+  const rightRamp = world.createBody({ type: 'static', position: planck.Vec2(300, 540), angle: -0.6 })
+  rightRamp.createFixture(planck.Box(40, 4), { friction: 0.55, restitution: 0.02 })
 
-  const rightOutlane = world.createBody({ type: 'static', position: planck.Vec2(295, 620), angle: -0.3 })
-  rightOutlane.createFixture(planck.Box(28, 5), { friction: 0.3, restitution: 0.3 })
+  const leftOutlane = world.createBody({ type: 'static', position: planck.Vec2(22, 625), angle: 0.35 })
+  leftOutlane.createFixture(planck.Box(32, 4), { friction: 0.5, restitution: 0.02 })
+
+  const rightOutlane = world.createBody({ type: 'static', position: planck.Vec2(300, 625), angle: -0.35 })
+  rightOutlane.createFixture(planck.Box(28, 4), { friction: 0.5, restitution: 0.02 })
 }
 
 function createBumpers(world: PlanckWorld, level: PinballLevel): Map<PlanckBody, BumperSpec> {
@@ -189,7 +199,7 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
       planck.Vec2(level.flipperLength, level.flipperWidth / 3),
       planck.Vec2(0, level.flipperWidth / 2),
     ]),
-    { friction: 0.4, restitution: 0.35 }
+    { friction: 0.85, restitution: 0.05 }
   )
 
   const rightFlipper = world.createBody({
@@ -204,7 +214,7 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
       planck.Vec2(-level.flipperLength, level.flipperWidth / 3),
       planck.Vec2(0, level.flipperWidth / 2),
     ]),
-    { friction: 0.4, restitution: 0.35 }
+    { friction: 0.85, restitution: 0.05 }
   )
 
   return { leftBody: leftFlipper, rightBody: rightFlipper }
@@ -223,8 +233,27 @@ export function createPinballWorld(
   const targetBodies = createTargets(world, level)
   const { leftBody, rightBody } = createFlippers(world, level)
 
+  // Classic one-way shooter-lane gate: when closed, extends the lane wall up to
+  // the top curves so the ball cannot fall back in from the playfield.
+  // Starts open so the plunge can exit left through the curve.
+  const laneGate = world.createBody({ type: 'static', position: planck.Vec2(350, 115) })
+  laneGate.createFixture(planck.Box(3, 95), { friction: 0.2, restitution: 0.15 })
+  laneGate.setActive(false)
+
   /** True while the plunger is driving the ball up the shooter lane. */
   let plungerActive = false
+  /** Queued flipper kick applied after the physics step (solver would overwrite it otherwise). */
+  let pendingFlipperKick: { vx: number; vy: number } | null = null
+
+  const openLaneGate = () => {
+    laneGate.setActive(false)
+    state.laneGateClosed = false
+  }
+  const closeLaneGate = () => {
+    if (state.laneGateClosed) return
+    laneGate.setActive(true)
+    state.laneGateClosed = true
+  }
 
   const state: PinballWorld = {
     world,
@@ -242,46 +271,63 @@ export function createPinballWorld(
     ballLaunched: false,
     leftFlipperActive: false,
     rightFlipperActive: false,
+    laneGateClosed: false,
     onCollision,
     onBallLost,
     step: () => {
-      // Drive kinematic flippers toward rest / active angles.
+      // Drive kinematic flippers toward rest / active angles each substep so they
+      // don't overshoot when PHYSICS_TIME_SCALE > 1.
       const driveFlipper = (body: PlanckBody, active: boolean, rest: number, raised: number) => {
         const target = active ? raised : rest
-        const diff = target - body.getAngle()
-        if (Math.abs(diff) < 0.01) {
+        const current = body.getAngle()
+        const diff = target - current
+        const maxDelta = FLIPPER_SPEED * FIXED_TIMESTEP
+        if (Math.abs(diff) <= maxDelta) {
           body.setAngle(target)
           body.setAngularVelocity(0)
         } else {
-          body.setAngularVelocity(Math.max(-FLIPPER_SPEED, Math.min(FLIPPER_SPEED, diff * 45)))
+          const step = Math.sign(diff) * maxDelta
+          body.setAngle(current + step)
+          // Angular velocity feeds tip speed into ball collisions.
+          body.setAngularVelocity(step / FIXED_TIMESTEP)
         }
       }
-      driveFlipper(leftBody, state.leftFlipperActive, LEFT_REST_ANGLE, LEFT_ACTIVE_ANGLE)
-      driveFlipper(rightBody, state.rightFlipperActive, RIGHT_REST_ANGLE, RIGHT_ACTIVE_ANGLE)
 
       for (let i = 0; i < PHYSICS_TIME_SCALE; i++) {
         state.simTime += FIXED_TIMESTEP
 
-        // Planck clamps speed (~120). Re-apply plunger thrust each substep so the
-        // ball can climb the shooter lane against gravity, then gate into play.
+        driveFlipper(leftBody, state.leftFlipperActive, LEFT_REST_ANGLE, LEFT_ACTIVE_ANGLE)
+        driveFlipper(rightBody, state.rightFlipperActive, RIGHT_REST_ANGLE, RIGHT_ACTIVE_ANGLE)
+
+        // Planck clamps speed (~120). Re-apply plunger thrust while climbing the
+        // shooter lane; release near the top curve so the ball rolls into play visibly.
         if (state.ballBody && plungerActive) {
           const pos = state.ballBody.getPosition()
-          if (pos.y > LAUNCH_EXIT_Y) {
+          if (pos.y > PLUNGER_RELEASE_Y && pos.x > 345) {
             state.ballBody.setLinearVelocity(planck.Vec2(0, -PLUNGER_SPEED))
+          } else {
+            plungerActive = false
           }
         }
 
         world.step(FIXED_TIMESTEP)
 
-        if (state.ballBody && plungerActive) {
-          const pos = state.ballBody.getPosition()
-          if (pos.y <= LAUNCH_EXIT_Y) {
-            state.ballBody.setTransform(planck.Vec2(300, 90), 0)
+        if (state.ballBody && pendingFlipperKick) {
+          const cur = state.ballBody.getLinearVelocity()
+          // Don't stack kicks if already rocketing up-table.
+          if (cur.y > -85) {
             state.ballBody.setLinearVelocity(
-              planck.Vec2(-45 - Math.random() * 15, 25 + Math.random() * 20)
+              planck.Vec2(pendingFlipperKick.vx, pendingFlipperKick.vy)
             )
-            plungerActive = false
           }
+          pendingFlipperKick = null
+        }
+
+        // Close the one-way gate only after the ball has crossed left into the
+        // playfield (classic pinball: can't fall back in after exiting the lane).
+        if (state.ballBody && state.ballLaunched && !plungerActive && !state.laneGateClosed) {
+          const pos = state.ballBody.getPosition()
+          if (pos.x < 340) closeLaneGate()
         }
       }
 
@@ -291,6 +337,8 @@ export function createPinballWorld(
           state.ballInPlay = false
           state.ballLaunched = false
           plungerActive = false
+          pendingFlipperKick = null
+          openLaneGate()
           world.destroyBody(state.ballBody)
           state.ballBody = null
           state.ballsRemaining--
@@ -301,17 +349,19 @@ export function createPinballWorld(
     launchBall: () => {
       if (state.ballInPlay || state.ballsRemaining <= 0) return
 
+      openLaneGate()
+
       state.ballBody = world.createBody({
         type: 'dynamic',
         position: planck.Vec2(level.launchX, level.launchY),
         bullet: true,
-        linearDamping: 0.04,
-        angularDamping: 0.15,
+        linearDamping: 0.015,
+        angularDamping: 0.1,
       })
       state.ballBody.createFixture(planck.Circle(level.ballRadius), {
-        density: 1.0,
-        friction: 0.2,
-        restitution: 0.5,
+        density: 0.45,
+        friction: 0.08,
+        restitution: 0.3,
       })
 
       state.ballBody.setLinearVelocity(planck.Vec2(0, -PLUNGER_SPEED))
@@ -333,9 +383,11 @@ export function createPinballWorld(
       plungerActive = false
       state.ballInPlay = false
       state.ballLaunched = false
+      openLaneGate()
     },
     cleanup: () => {
       plungerActive = false
+      openLaneGate()
       if (state.ballBody) {
         world.destroyBody(state.ballBody)
       }
@@ -403,12 +455,31 @@ export function createPinballWorld(
 
     if (otherBody === leftBody || otherBody === rightBody) {
       const pos = state.ballBody.getPosition()
+      const isLeft = otherBody === leftBody
+      const flipperActive = isLeft ? state.leftFlipperActive : state.rightFlipperActive
+      const flipperBody = isLeft ? leftBody : rightBody
+
+      if (flipperActive) {
+        const fp = flipperBody.getPosition()
+        const ang = flipperBody.getAngle()
+        const dx = pos.x - fp.x
+        const dy = pos.y - fp.y
+        const localX = Math.abs(dx * Math.cos(ang) + dy * Math.sin(ang))
+        const along = Math.min(1, Math.max(0.35, localX / level.flipperLength))
+        const power = FLIPPER_KICK_MIN + along * (FLIPPER_KICK_MAX - FLIPPER_KICK_MIN)
+        // Up-table is -Y. Left flipper also kicks right; right kicks left.
+        pendingFlipperKick = {
+          vx: (isLeft ? 1 : -1) * (12 + along * 40),
+          vy: -power,
+        }
+      }
+
       onCollision({
         type: 'flipper',
         x: pos.x,
         y: pos.y,
         points: 0,
-        intensity: 0.5,
+        intensity: flipperActive ? 1 : 0.4,
       })
       return
     }
