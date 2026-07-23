@@ -30,12 +30,8 @@ import {
   playLose,
   playPowerup,
   playSoftDestroy,
-  playScreamVariant,
   playStep,
   playWin,
-  SCREAM_VARIANTS,
-  getSelectedScreamVariant,
-  setSelectedScreamVariant,
   setSoundMuted,
   unlockAudio,
   type PowerupSoundKind,
@@ -56,19 +52,6 @@ const canvasWrapRef = ref<HTMLElement | null>(null)
 const soundMuted = ref(isSoundMuted())
 const showTouchControls = ref(false)
 const touchDirection = ref<string | null>(null)
-const selectedScream = ref(getSelectedScreamVariant())
-const showScreamTester = ref(true)
-
-async function previewScream(id: number) {
-  selectedScream.value = id
-  setSelectedScreamVariant(id)
-  if (soundMuted.value) {
-    setSoundMuted(false)
-    soundMuted.value = false
-  }
-  await unlockAudio()
-  playScreamVariant(id)
-}
 
 const myBomber = computed(() => props.gameState.bombers[props.playerId])
 const isAlive = computed(() => myBomber.value?.alive ?? false)
@@ -825,14 +808,6 @@ onUnmounted(() => {
         >
           {{ soundMuted ? '🔇' : '🔊' }}
         </button>
-        <button
-          type="button"
-          class="btn-secondary mute-btn scream-toggle"
-          :title="showScreamTester ? 'Hide scream tester' : 'Show scream tester'"
-          @click="showScreamTester = !showScreamTester"
-        >
-          😱
-        </button>
         <p v-if="canControl && showTouchControls">
           <strong>Hold</strong> D-pad to move ·
           <strong>💣</strong> bomb<span v-if="myBomber?.can_throw">
@@ -858,27 +833,6 @@ onUnmounted(() => {
         </ul>
       </div>
     </aside>
-
-    <div v-if="showScreamTester" class="scream-tester">
-      <div class="scream-tester-head">
-        <span class="scream-tester-title">Scream tester</span>
-        <span class="scream-tester-hint">Click to preview · selected plays on death</span>
-      </div>
-      <div class="scream-grid">
-        <button
-          v-for="v in SCREAM_VARIANTS"
-          :key="v.id"
-          type="button"
-          class="scream-btn"
-          :class="{ selected: selectedScream === v.id }"
-          :title="v.description"
-          @click="previewScream(v.id)"
-        >
-          <span class="scream-num">{{ v.id }}</span>
-          <span class="scream-name">{{ v.name }}</span>
-        </button>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -1317,96 +1271,10 @@ onUnmounted(() => {
   border-color: rgba(239, 68, 68, 0.5);
 }
 
-.scream-tester {
-  flex-shrink: 0;
-  padding: 0.55rem 0.65rem 0.65rem;
-  border-radius: calc(var(--radius) + 2px);
-  border: 1px solid rgba(var(--bm-accent-rgb, 249, 115, 22), 0.28);
-  background: rgba(10, 12, 16, 0.72);
-}
-
-.scream-tester-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.45rem;
-}
-
-.scream-tester-title {
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(255, 220, 180, 0.85);
-}
-
-.scream-tester-hint {
-  font-size: 0.68rem;
-  color: var(--text-muted);
-}
-
-.scream-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-  gap: 0.35rem;
-}
-
-.scream-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  text-align: left;
-  padding: 0.4rem 0.5rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(20, 22, 28, 0.85);
-  color: var(--text);
-  cursor: pointer;
-  transition:
-    border-color 0.12s ease,
-    background 0.12s ease,
-    transform 0.12s ease;
-}
-
-.scream-btn:hover {
-  border-color: rgba(var(--bm-accent-rgb, 249, 115, 22), 0.55);
-  transform: translateY(-1px);
-}
-
-.scream-btn.selected {
-  border-color: rgba(var(--bm-accent-rgb, 249, 115, 22), 0.85);
-  background: rgba(var(--bm-accent-rgb, 249, 115, 22), 0.16);
-  box-shadow: 0 0 0 1px rgba(var(--bm-accent-rgb, 249, 115, 22), 0.25);
-}
-
-.scream-num {
-  flex-shrink: 0;
-  width: 1.25rem;
-  height: 1.25rem;
-  border-radius: 4px;
-  display: grid;
-  place-items: center;
-  font-size: 0.68rem;
-  font-weight: 800;
-  background: rgba(var(--bm-accent-rgb, 249, 115, 22), 0.22);
-  color: var(--bm-accent, #fdba74);
-}
-
-.scream-name {
-  font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
 @media (max-width: 720px) {
   .player-bar {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .scream-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>
