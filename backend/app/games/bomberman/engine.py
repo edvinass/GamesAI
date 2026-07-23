@@ -233,10 +233,6 @@ class BombermanEngine(GamePlugin):
             humans = [p for p in players if not p.get("is_ai")]
             if len(humans) != 1:
                 return "Solo practice requires exactly one human player"
-            if settings.get("game_mode") == "team":
-                # Solo practice always ends as 1 human + 2 AI → odd teams.
-                # Allow it: auto-balance as 2v1 at start.
-                return None
             return None
 
         count = len(players)
@@ -244,8 +240,13 @@ class BombermanEngine(GamePlugin):
             return f"Need at least {settings['min_players']} players"
         if count > settings["max_players"]:
             return f"Maximum {settings['max_players']} players allowed"
-        if settings.get("game_mode") == "team" and count < 2:
-            return "Team battle needs at least 2 players"
+        if settings.get("game_mode") == "team":
+            if count < 2:
+                return "Team battle needs at least 2 players"
+            assigned = self._assign_teams(players, settings)
+            sides = {t for t in assigned.values() if t in TEAMS}
+            if sides != {"red", "blue"}:
+                return "Need at least one player on Red and one on Blue"
         return None
 
     def create_initial_state(self, players: list[dict], settings: dict) -> dict:
@@ -351,10 +352,32 @@ class BombermanEngine(GamePlugin):
     def _assign_teams(self, players: list[dict], settings: dict) -> dict[str, str | None]:
         if settings.get("game_mode") != "team":
             return {p["id"]: None for p in players}
-        # Alternate seats so corners/spawns mix both sides.
+
         teams: dict[str, str | None] = {}
-        for i, player in enumerate(players):
-            teams[player["id"]] = TEAMS[i % 2]
+        red_count = 0
+        blue_count = 0
+        unassigned: list[str] = []
+
+        for player in players:
+            raw = player.get("team")
+            team = raw if raw in TEAMS else None
+            if team == "red":
+                teams[player["id"]] = "red"
+                red_count += 1
+            elif team == "blue":
+                teams[player["id"]] = "blue"
+                blue_count += 1
+            else:
+                unassigned.append(player["id"])
+
+        # Fill empty seats onto the smaller side so both colors can start.
+        for pid in unassigned:
+            if red_count <= blue_count:
+                teams[pid] = "red"
+                red_count += 1
+            else:
+                teams[pid] = "blue"
+                blue_count += 1
         return teams
 
     def _next_bomb_id(self, state: dict) -> str:

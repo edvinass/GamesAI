@@ -37,8 +37,9 @@ const startingThrow = defineModel<boolean>('startingThrow', { required: true })
 const rulePreset = defineModel<string>('rulePreset', { required: true })
 
 const emit = defineEmits<{
-  addAi: []
+  addAi: [team?: 'red' | 'blue']
   remove: [id: string]
+  assignTeam: [playerId: string, team: 'red' | 'blue']
   applySettings: [settings: Record<string, unknown>]
 }>()
 
@@ -113,6 +114,9 @@ function applyPreset(id: string) {
   const preset = BOMBERMAN_LOBBY_PRESETS.find((p) => p.id === id)
   if (!preset) return
   emit('applySettings', { ...preset.settings })
+  if (preset.settings.game_mode === 'team' && props.isHost) {
+    balanceTeams()
+  }
 }
 
 function onModeSelect(id: string) {
@@ -121,10 +125,42 @@ function onModeSelect(id: string) {
   if (id === 'kill_race' && matchTimeSec.value <= 0) {
     matchTimeSec.value = 180
   }
+  if (id === 'team' && props.isHost && unassignedPlayers.value.length === props.room.players.length) {
+    // First time entering team mode with everyone unassigned — split seats.
+    balanceTeams()
+  }
 }
 
 const showKillTarget = computed(() => gameMode.value === 'kill_race')
 const showLives = computed(() => gameMode.value !== 'kill_race')
+const isTeamMode = computed(() => gameMode.value === 'team')
+
+const redPlayers = computed(() =>
+  props.room.players.filter((p) => p.team === 'red'),
+)
+const bluePlayers = computed(() =>
+  props.room.players.filter((p) => p.team === 'blue'),
+)
+const unassignedPlayers = computed(() =>
+  props.room.players.filter((p) => p.team !== 'red' && p.team !== 'blue'),
+)
+
+function canMovePlayer(playerId: string) {
+  return props.isHost || playerId === props.currentPlayerId
+}
+
+function setTeam(playerId: string, team: 'red' | 'blue') {
+  if (!canMovePlayer(playerId)) return
+  emit('assignTeam', playerId, team)
+}
+
+function balanceTeams() {
+  if (!props.isHost) return
+  const ordered = [...props.room.players]
+  ordered.forEach((player, i) => {
+    emit('assignTeam', player.id, i % 2 === 0 ? 'red' : 'blue')
+  })
+}
 </script>
 
 <template>
@@ -227,7 +263,7 @@ const showLives = computed(() => gameMode.value !== 'kill_race')
     <div v-else class="settings-block card guest-summary">
       <p>
         <strong>{{ modeOptions.find((m) => m.id === gameMode)?.label ?? 'Classic' }}</strong>
-        <span v-if="lives > 1 && gameMode !== 'kill_race"> · {{ lives }} lives</span>
+        <span v-if="lives > 1 && gameMode !== 'kill_race'"> · {{ lives }} lives</span>
         <span v-if="gameMode === 'kill_race'"> · first to {{ killTarget }}</span>
         <span v-if="matchTimeSec > 0"> · {{ Math.round(matchTimeSec / 60) }} min</span>
         <span v-if="suddenDeathSec > 0"> · sudden death {{ suddenDeathSec }}s</span>
@@ -278,7 +314,7 @@ const showLives = computed(() => gameMode.value !== 'kill_race')
     <div v-if="soloPractice" class="solo-notice card">
       <p>
         Solo practice auto-adds 2 AI bombers when you start.
-        <span v-if="gameMode === 'team'"> You’ll be Red vs Blue AI.</span>
+        <span v-if="gameMode === 'team'"> You’ll be Red vs 2 Blue AI.</span>
         <span v-else-if="gameMode === 'kill_race'"> Race them to {{ killTarget }} kills.</span>
         <span v-else> Clear the arena and be the last one standing.</span>
       </p>
@@ -287,31 +323,171 @@ const showLives = computed(() => gameMode.value !== 'kill_race')
     <template v-else>
       <p v-if="isHost" class="arrange-hint">
         Need 2–8 players. Add AI to fill empty seats, or share the room link.
-        <span v-if="gameMode === 'team'"> Teams auto-assign Red / Blue at start.</span>
+        <span v-if="isTeamMode"> Assign players to Red / Blue below.</span>
       </p>
 
-      <div class="player-list card">
-        <div v-for="player in room.players" :key="player.id" class="player-row">
+      <div v-if="isTeamMode" class="team-boards">
+        <section class="team-board red">
+          <header class="team-header">
+            <h3>Red</h3>
+            <span class="team-count">{{ redPlayers.length }}</span>
+          </header>
+          <ul class="team-list">
+            <li v-for="player in redPlayers" :key="player.id" class="team-player">
+              <div class="player-info">
+                <span class="nickname">{{ player.nickname }}</span>
+                <span v-if="player.is_ai" class="ai-badge">AI</span>
+                <span v-if="player.id === currentPlayerId" class="you-badge">You</span>
+                <span v-if="player.id === hostPlayerId" class="host-badge">Host</span>
+              </div>
+              <div class="team-actions">
+                <button
+                  v-if="canMovePlayer(player.id)"
+                  type="button"
+                  class="btn-secondary team-btn"
+                  @click="setTeam(player.id, 'blue')"
+                >
+                  To Blue
+                </button>
+                <button
+                  v-if="isHost && player.is_ai"
+                  type="button"
+                  class="btn-secondary remove-btn"
+                  @click="emit('remove', player.id)"
+                >
+                  Remove
+                </button>
+              </div>
+            </li>
+            <li v-if="redPlayers.length === 0" class="empty-team">No players yet</li>
+          </ul>
+          <button
+            v-if="isHost"
+            type="button"
+            class="btn-secondary add-ai-btn"
+            @click="emit('addAi', 'red')"
+          >
+            + AI on Red
+          </button>
+        </section>
+
+        <section class="team-board blue">
+          <header class="team-header">
+            <h3>Blue</h3>
+            <span class="team-count">{{ bluePlayers.length }}</span>
+          </header>
+          <ul class="team-list">
+            <li v-for="player in bluePlayers" :key="player.id" class="team-player">
+              <div class="player-info">
+                <span class="nickname">{{ player.nickname }}</span>
+                <span v-if="player.is_ai" class="ai-badge">AI</span>
+                <span v-if="player.id === currentPlayerId" class="you-badge">You</span>
+                <span v-if="player.id === hostPlayerId" class="host-badge">Host</span>
+              </div>
+              <div class="team-actions">
+                <button
+                  v-if="canMovePlayer(player.id)"
+                  type="button"
+                  class="btn-secondary team-btn"
+                  @click="setTeam(player.id, 'red')"
+                >
+                  To Red
+                </button>
+                <button
+                  v-if="isHost && player.is_ai"
+                  type="button"
+                  class="btn-secondary remove-btn"
+                  @click="emit('remove', player.id)"
+                >
+                  Remove
+                </button>
+              </div>
+            </li>
+            <li v-if="bluePlayers.length === 0" class="empty-team">No players yet</li>
+          </ul>
+          <button
+            v-if="isHost"
+            type="button"
+            class="btn-secondary add-ai-btn"
+            @click="emit('addAi', 'blue')"
+          >
+            + AI on Blue
+          </button>
+        </section>
+      </div>
+
+      <div v-if="isTeamMode && unassignedPlayers.length" class="unassigned card">
+        <div class="unassigned-header">
+          <span class="setting-label">Unassigned</span>
+          <button
+            v-if="isHost"
+            type="button"
+            class="btn-secondary team-btn"
+            @click="balanceTeams"
+          >
+            Balance teams
+          </button>
+        </div>
+        <div v-for="player in unassignedPlayers" :key="player.id" class="player-row">
           <div class="player-info">
             <span class="nickname">{{ player.nickname }}</span>
             <span v-if="player.is_ai" class="ai-badge">AI</span>
             <span v-if="player.id === currentPlayerId" class="you-badge">You</span>
             <span v-if="player.id === hostPlayerId" class="host-badge">Host</span>
           </div>
-          <button
-            v-if="isHost && player.is_ai"
-            type="button"
-            class="btn-secondary remove-btn"
-            @click="emit('remove', player.id)"
-          >
-            Remove
-          </button>
+          <div class="team-actions">
+            <button
+              v-if="canMovePlayer(player.id)"
+              type="button"
+              class="btn-secondary team-btn red-btn"
+              @click="setTeam(player.id, 'red')"
+            >
+              Join Red
+            </button>
+            <button
+              v-if="canMovePlayer(player.id)"
+              type="button"
+              class="btn-secondary team-btn blue-btn"
+              @click="setTeam(player.id, 'blue')"
+            >
+              Join Blue
+            </button>
+            <button
+              v-if="isHost && player.is_ai"
+              type="button"
+              class="btn-secondary remove-btn"
+              @click="emit('remove', player.id)"
+            >
+              Remove
+            </button>
+          </div>
         </div>
       </div>
 
-      <button v-if="isHost" type="button" class="btn-secondary add-ai-btn" @click="emit('addAi')">
-        + Add AI player
-      </button>
+      <template v-if="!isTeamMode">
+        <div class="player-list card">
+          <div v-for="player in room.players" :key="player.id" class="player-row">
+            <div class="player-info">
+              <span class="nickname">{{ player.nickname }}</span>
+              <span v-if="player.is_ai" class="ai-badge">AI</span>
+              <span v-if="player.id === currentPlayerId" class="you-badge">You</span>
+              <span v-if="player.id === hostPlayerId" class="host-badge">Host</span>
+            </div>
+            <button
+              v-if="isHost && player.is_ai"
+              type="button"
+              class="btn-secondary remove-btn"
+              @click="emit('remove', player.id)"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+
+        <button v-if="isHost" type="button" class="btn-secondary add-ai-btn" @click="emit('addAi')">
+          + Add AI player
+        </button>
+      </template>
 
       <div
         class="validation-banner card"
@@ -607,6 +783,104 @@ const showLives = computed(() => gameMode.value !== 'kill_race')
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem;
+}
+
+.team-boards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.team-board {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.team-board.red {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: linear-gradient(160deg, rgba(239, 68, 68, 0.1), transparent 55%);
+}
+
+.team-board.blue {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: linear-gradient(160deg, rgba(59, 130, 246, 0.1), transparent 55%);
+}
+
+.team-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.team-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.team-count {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.team-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+}
+
+.team-player,
+.player-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.team-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.team-btn {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+}
+
+.empty-team {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.unassigned {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.85rem;
+}
+
+.unassigned-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .team-boards {
+    grid-template-columns: 1fr;
+  }
 }
 
 .player-row {

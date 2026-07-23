@@ -299,11 +299,14 @@ class RoomService:
                 raise ValueError(f"Maximum {settings['max_players']} players allowed")
 
             token = generate_session_token()
+            team_enum = None
+            if room.game_type == "bomberman" and team in ("red", "blue"):
+                team_enum = Team(team)
             player = RoomPlayer(
                 room_id=room.id,
                 nickname=_generate_ai_nickname(),
                 session_token_hash=hash_session_token(token),
-                team=None,
+                team=team_enum,
                 role=None,
                 is_ai=True,
                 is_connected=True,
@@ -393,10 +396,20 @@ class RoomService:
         room = await self._load_room(room_id)
         if not room:
             raise ValueError("Room not found")
-        if room.host_player_id != host_id:
-            raise ValueError("Only host can rearrange teams")
         if room.status != RoomStatus.LOBBY:
             raise ValueError("Cannot rearrange teams after game started")
+
+        is_host = room.host_player_id == host_id
+        is_self = host_id == target_id
+        # Bomberman team battle: players may move themselves; host may move anyone.
+        bomberman_self_team = (
+            room.game_type == "bomberman"
+            and is_self
+            and team in ("red", "blue")
+            and role is None
+        )
+        if not is_host and not bomberman_self_team:
+            raise ValueError("Only host can rearrange teams")
 
         target = next((p for p in room.players if p.id == target_id), None)
         if not target:
@@ -419,6 +432,8 @@ class RoomService:
             target.team = new_team
 
         if role is not None:
+            if not is_host:
+                raise ValueError("Only host can change roles")
             new_role = Role(role)
             if new_role == Role.SPYMASTER:
                 for p in room.players:
@@ -624,6 +639,12 @@ class RoomService:
                 await self.db.delete(p)
         await self.db.flush()
 
+        settings = get_game("bomberman").validate_settings(room.settings or {})
+        team_mode = settings.get("game_mode") == "team"
+        for human in room.players:
+            if not human.is_ai and team_mode:
+                human.team = Team.RED
+
         for i in range(2):
             token = generate_session_token()
             self.db.add(
@@ -631,7 +652,7 @@ class RoomService:
                     room_id=room.id,
                     nickname=f"🤖 AI Player {i + 1}",
                     session_token_hash=hash_session_token(token),
-                    team=None,
+                    team=Team.BLUE if team_mode else None,
                     role=None,
                     is_ai=True,
                     is_connected=True,

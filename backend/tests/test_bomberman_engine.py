@@ -888,6 +888,27 @@ def test_team_battle_assigns_teams_and_wins(engine: BombermanEngine) -> None:
     assert any(e["type"] == "game_over" for e in events)
 
 
+def test_team_battle_respects_lobby_teams(engine: BombermanEngine) -> None:
+    players = make_players(4)
+    players[0]["team"] = "blue"
+    players[1]["team"] = "blue"
+    players[2]["team"] = "red"
+    players[3]["team"] = "red"
+    state = engine.create_initial_state(
+        players, {"game_mode": "team", "countdown_sec": 0}
+    )
+    assert state["bombers"]["p0"]["team"] == "blue"
+    assert state["bombers"]["p1"]["team"] == "blue"
+    assert state["bombers"]["p2"]["team"] == "red"
+    assert state["bombers"]["p3"]["team"] == "red"
+    assert engine.validate_lobby(players, {"game_mode": "team"}) is None
+
+    players_all_red = make_players(2)
+    players_all_red[0]["team"] = "red"
+    players_all_red[1]["team"] = "red"
+    assert engine.validate_lobby(players_all_red, {"game_mode": "team"}) is not None
+
+
 def test_stock_lives_respawn(engine: BombermanEngine) -> None:
     players = make_players(2)
     state = engine.create_initial_state(

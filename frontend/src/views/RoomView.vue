@@ -359,6 +359,8 @@ function setAiDifficulty(playerId: string, difficulty: string) {
 function addAi(team?: string, role?: string) {
   if (team && role) {
     send({ type: 'add_ai_player', team, role })
+  } else if (team) {
+    send({ type: 'add_ai_player', team })
   } else {
     send({ type: 'add_ai_player' })
   }
@@ -382,6 +384,10 @@ function assignPlayer(
   role: 'spymaster' | 'operative',
 ) {
   send({ type: 'update_player', player_id: playerId, team, role })
+}
+
+function assignBombermanTeam(playerId: string, team: 'red' | 'blue') {
+  send({ type: 'update_player', player_id: playerId, team })
 }
 
 function startGame() {
@@ -491,8 +497,9 @@ function startGame() {
         :validation-message="lobbyValidation.message"
         :validation-valid="lobbyValidation.valid"
         :validation-issues="lobbyValidation.issues"
-        @add-ai="addAi()"
+        @add-ai="addAi"
         @remove="removePlayer"
+        @assign-team="assignBombermanTeam"
         @apply-settings="updateSettings"
       />
 

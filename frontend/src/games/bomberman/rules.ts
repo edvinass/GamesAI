@@ -17,7 +17,7 @@ export const bombermanRules: GameRules = {
     },
     {
       heading: 'Game modes',
-      body: 'Classic: last bomber standing. Team Battle: Red vs Blue — wipe the other team. Kill Race: respawn on death and race to a kill target (or most kills when the timer ends). Stock lives: start with multiple lives; each death costs one and respawns you until you’re out. Sudden death (optional): after a delay the arena shrinks with hard walls from the outside. Hosts can apply rule presets or tweak lives, timer, skulls, and starting kick/throw.',
+      body: 'Classic: last bomber standing. Team Battle: pick Red/Blue in the lobby (host can move anyone; you can move yourself), then wipe the other team. Kill Race: respawn on death and race to a kill target (or most kills when the timer ends). Stock lives: start with multiple lives; each death costs one and respawns you until you’re out. Sudden death (optional): after a delay the arena shrinks with hard walls from the outside. Hosts can apply rule presets or tweak lives, timer, skulls, and starting kick/throw.',
     },
     {
       heading: 'Arena',
