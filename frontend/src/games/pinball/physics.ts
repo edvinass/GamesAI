@@ -98,18 +98,21 @@ const DEFAULT_LEVEL: PinballLevel = {
   flipperLength: 80,
   flipperWidth: 16,
   bumpers: [
-    { x: 120, y: 180, radius: 30, points: 100, color: '#ff4757' },
-    { x: 280, y: 180, radius: 30, points: 100, color: '#ff4757' },
-    { x: 200, y: 120, radius: 35, points: 150, color: '#ffa502' },
-    { x: 140, y: 300, radius: 25, points: 75, color: '#2ed573' },
-    { x: 260, y: 300, radius: 25, points: 75, color: '#2ed573' },
+    // Top triangle of Space Cadet–style pop bumpers
+    { x: 200, y: 105, radius: 26, points: 150, color: '#ff3b4a' },
+    { x: 155, y: 160, radius: 24, points: 100, color: '#2ecc71' },
+    { x: 245, y: 160, radius: 24, points: 100, color: '#ff3b4a' },
+    // Mid-left bumper cluster
+    { x: 95, y: 290, radius: 16, points: 75, color: '#f0f4f8' },
+    { x: 130, y: 320, radius: 14, points: 75, color: '#2ecc71' },
+    { x: 80, y: 335, radius: 14, points: 75, color: '#ff3b4a' },
   ],
   targets: [
-    { id: 't1', x: 60, y: 100, width: 40, height: 12, points: 500, color: '#5352ed' },
-    { id: 't2', x: 340, y: 100, width: 40, height: 12, points: 500, color: '#5352ed' },
-    { id: 't3', x: 80, y: 220, width: 12, height: 50, points: 250, color: '#ff6b81' },
-    { id: 't4', x: 320, y: 220, width: 12, height: 50, points: 250, color: '#ff6b81' },
-    { id: 't5', x: 200, y: 50, width: 60, height: 12, points: 1000, color: '#eccc68' },
+    { id: 't1', x: 55, y: 95, width: 36, height: 12, points: 500, color: '#f5c542' },
+    { id: 't2', x: 320, y: 95, width: 36, height: 12, points: 500, color: '#f5c542' },
+    { id: 't3', x: 70, y: 230, width: 12, height: 44, points: 250, color: '#ff5a6a' },
+    { id: 't4', x: 310, y: 230, width: 12, height: 44, points: 250, color: '#ff5a6a' },
+    { id: 't5', x: 200, y: 48, width: 70, height: 10, points: 1000, color: '#7ec8ff' },
   ],
 }
 

@@ -99,6 +99,9 @@ const highScore = computed(() => {
   return stored ? parseInt(stored, 10) : 0
 })
 
+/** Space Cadet–style ball counter (Ball 1 / 2 / 3). */
+const currentBallNumber = computed(() => Math.min(3, Math.max(1, 4 - ballsRemaining.value)))
+
 function formatScore(n: number): string {
   return n.toLocaleString()
 }
@@ -375,30 +378,76 @@ function drawChromeRail(
   ctx.restore()
 }
 
-function drawNeonArc(
+function drawChromeCurve(
   ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  r: number,
-  start: number,
-  end: number,
-  color: string,
+  points: [number, number][],
   width: number
 ) {
+  if (points.length < 2) return
   ctx.save()
-  ctx.beginPath()
-  ctx.arc(cx, cy, r, start, end)
-  ctx.strokeStyle = color
-  ctx.lineWidth = width
-  ctx.shadowColor = color
-  ctx.shadowBlur = 18
   ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = width + 3
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'
+  ctx.beginPath()
+  ctx.moveTo(points[0][0], points[0][1])
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1])
   ctx.stroke()
-  ctx.shadowBlur = 0
-  ctx.lineWidth = width * 0.35
-  ctx.strokeStyle = '#fff'
-  ctx.globalAlpha = 0.55
+
+  const last = points[points.length - 1]
+  const g = ctx.createLinearGradient(points[0][0], points[0][1], last[0], last[1])
+  g.addColorStop(0, '#e8eef5')
+  g.addColorStop(0.4, '#8a97a8')
+  g.addColorStop(0.7, '#d5dde8')
+  g.addColorStop(1, '#6b7788')
+  ctx.lineWidth = width
+  ctx.strokeStyle = g
+  ctx.beginPath()
+  ctx.moveTo(points[0][0], points[0][1])
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1])
   ctx.stroke()
+  ctx.restore()
+}
+
+function drawLightningCracks(
+  ctx: CanvasRenderingContext2D,
+  t: number
+) {
+  const cracks: [number, number][][] = [
+    [[40, 200], [90, 250], [70, 310], [130, 360], [110, 420], [160, 470]],
+    [[220, 180], [250, 240], [230, 300], [270, 360], [255, 430]],
+    [[300, 220], [320, 280], [300, 340], [330, 400]],
+    [[80, 120], [120, 150], [100, 190]],
+  ]
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  for (let i = 0; i < cracks.length; i++) {
+    const pulse = 0.3 + 0.28 * Math.sin(t * 1.8 + i)
+    ctx.strokeStyle = `rgba(150, 80, 220, ${pulse})`
+    ctx.lineWidth = 2.4
+    ctx.shadowColor = '#a855f7'
+    ctx.shadowBlur = 10
+    ctx.beginPath()
+    const pts = cracks[i]
+    ctx.moveTo(pts[0][0], pts[0][1])
+    for (let j = 1; j < pts.length; j++) ctx.lineTo(pts[j][0], pts[j][1])
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function drawStarfield(ctx: CanvasRenderingContext2D, w: number, h: number, t: number) {
+  ctx.save()
+  for (let i = 0; i < 48; i++) {
+    const x = (i * 73) % w
+    const y = ((i * 131) % (h * 0.85)) + 20
+    const twinkle = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * 3 + i * 1.7))
+    ctx.globalAlpha = twinkle * 0.7
+    ctx.fillStyle = i % 5 === 0 ? '#a5d8ff' : '#ffffff'
+    const s = i % 7 === 0 ? 1.8 : 1.1
+    ctx.fillRect(x, y, s, s)
+  }
   ctx.restore()
 }
 
@@ -477,148 +526,243 @@ function render() {
   ctx.save()
   ctx.scale(scale, scale)
 
-  // Felt / playfield base
-  const felt = ctx.createLinearGradient(0, 0, 0, level.worldHeight)
-  felt.addColorStop(0, '#1a0a14')
-  felt.addColorStop(0.35, '#120818')
-  felt.addColorStop(0.7, '#0c0612')
-  felt.addColorStop(1, '#08040c')
+  // —— Space Cadet playfield ——
+  const W = level.worldWidth
+  const H = level.worldHeight
+
+  const felt = ctx.createLinearGradient(0, 0, 0, H)
+  felt.addColorStop(0, '#0a1a3a')
+  felt.addColorStop(0.25, '#0c2048')
+  felt.addColorStop(0.55, '#081530')
+  felt.addColorStop(0.8, '#0a1838')
+  felt.addColorStop(1, '#050d1c')
   ctx.fillStyle = felt
-  ctx.fillRect(0, 0, level.worldWidth, level.worldHeight)
+  ctx.fillRect(0, 0, W, H)
 
-  // Soft vignette
-  const vignette = ctx.createRadialGradient(
-    level.worldWidth * 0.45,
-    level.worldHeight * 0.35,
-    40,
-    level.worldWidth * 0.5,
-    level.worldHeight * 0.5,
-    level.worldHeight * 0.75
-  )
-  vignette.addColorStop(0, 'rgba(255, 40, 80, 0.08)')
-  vignette.addColorStop(0.55, 'rgba(0, 200, 255, 0.03)')
-  vignette.addColorStop(1, 'rgba(0, 0, 0, 0.55)')
-  ctx.fillStyle = vignette
-  ctx.fillRect(0, 0, level.worldWidth, level.worldHeight)
+  // Nebula glow
+  const nebula = ctx.createRadialGradient(W * 0.35, H * 0.28, 20, W * 0.4, H * 0.35, 220)
+  nebula.addColorStop(0, 'rgba(90, 40, 160, 0.35)')
+  nebula.addColorStop(0.5, 'rgba(40, 60, 140, 0.12)')
+  nebula.addColorStop(1, 'transparent')
+  ctx.fillStyle = nebula
+  ctx.fillRect(0, 0, W, H)
 
-  // Decorative neon circuit lines
-  ctx.save()
-  ctx.globalAlpha = 0.18 + Math.sin(animTime * 2) * 0.04
-  ctx.strokeStyle = '#00f5d4'
-  ctx.lineWidth = 1.5
-  ctx.setLineDash([6, 10])
-  ctx.beginPath()
-  ctx.moveTo(30, 80)
-  ctx.quadraticCurveTo(200, 40, 320, 90)
-  ctx.stroke()
-  ctx.strokeStyle = '#ff006e'
-  ctx.beginPath()
-  ctx.moveTo(40, 260)
-  ctx.quadraticCurveTo(180, 220, 300, 280)
-  ctx.stroke()
-  ctx.setLineDash([])
-  ctx.restore()
+  const nebula2 = ctx.createRadialGradient(W * 0.7, H * 0.55, 10, W * 0.65, H * 0.5, 160)
+  nebula2.addColorStop(0, 'rgba(30, 80, 160, 0.2)')
+  nebula2.addColorStop(1, 'transparent')
+  ctx.fillStyle = nebula2
+  ctx.fillRect(0, 0, W, H)
 
-  // Top arch neon
-  drawNeonArc(ctx, 200, 40, 160, Math.PI * 0.12, Math.PI * 0.88, '#ff006e', 3)
-  drawNeonArc(ctx, 200, 40, 145, Math.PI * 0.18, Math.PI * 0.82, '#00f5d4', 2)
+  drawStarfield(ctx, W, H, animTime)
+  drawLightningCracks(ctx, animTime)
 
-  // Pulsing light bulbs along top
-  for (let i = 0; i < 7; i++) {
-    const lx = 55 + i * 48
-    const ly = 28
-    const pulse = 0.45 + 0.55 * Math.sin(animTime * 4 + i * 0.7)
-    const color = i % 2 === 0 ? '#fee440' : '#00f5d4'
+  // Center mission light array (decorative)
+  {
+    const cx = 200
+    const cy = 430
+    ctx.save()
     ctx.beginPath()
-    ctx.arc(lx, ly, 4.5, 0, Math.PI * 2)
-    ctx.fillStyle = color
-    ctx.shadowColor = color
-    ctx.shadowBlur = 8 + pulse * 14
-    ctx.globalAlpha = 0.55 + pulse * 0.45
+    ctx.arc(cx, cy, 58, 0, Math.PI * 2)
+    const ring = ctx.createRadialGradient(cx, cy, 10, cx, cy, 58)
+    ring.addColorStop(0, 'rgba(40, 180, 255, 0.35)')
+    ring.addColorStop(0.45, 'rgba(20, 80, 180, 0.18)')
+    ring.addColorStop(1, 'transparent')
+    ctx.fillStyle = ring
     ctx.fill()
-    ctx.globalAlpha = 1
+
+    ctx.beginPath()
+    ctx.arc(cx, cy, 22, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(60, 200, 255, ${0.45 + 0.25 * Math.sin(animTime * 3)})`
+    ctx.shadowColor = '#3cc8ff'
+    ctx.shadowBlur = 22
+    ctx.fill()
     ctx.shadowBlur = 0
+
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + animTime * 0.15
+      const lx = cx + Math.cos(a) * 42
+      const ly = cy + Math.sin(a) * 42
+      const on = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(animTime * 4 + i))
+      ctx.beginPath()
+      ctx.arc(lx, ly, 3.2, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(100, 200, 255, ${on})`
+      ctx.shadowColor = '#6ec8ff'
+      ctx.shadowBlur = 8
+      ctx.fill()
+    }
+    ctx.shadowBlur = 0
+    ctx.restore()
   }
 
-  // Side neon rails
-  drawNeonArc(ctx, 15, 320, 40, -Math.PI * 0.4, Math.PI * 0.5, '#8338ec', 2.5)
-  drawNeonArc(ctx, 385, 200, 35, Math.PI * 0.5, Math.PI * 1.4, '#ffbe0b', 2.5)
+  // Left purple ramp (decorative Space Cadet ramp)
+  {
+    ctx.save()
+    ctx.beginPath()
+    ctx.moveTo(18, 160)
+    ctx.quadraticCurveTo(55, 220, 48, 320)
+    ctx.quadraticCurveTo(42, 400, 70, 470)
+    ctx.lineTo(95, 465)
+    ctx.quadraticCurveTo(70, 390, 78, 310)
+    ctx.quadraticCurveTo(85, 220, 42, 155)
+    ctx.closePath()
+    const rampGrad = ctx.createLinearGradient(20, 160, 100, 470)
+    rampGrad.addColorStop(0, '#6b2db3')
+    rampGrad.addColorStop(0.5, '#8b3fd4')
+    rampGrad.addColorStop(1, '#4a1a80')
+    ctx.fillStyle = rampGrad
+    ctx.globalAlpha = 0.85
+    ctx.fill()
+    ctx.globalAlpha = 1
+    ctx.strokeStyle = '#c084fc'
+    ctx.lineWidth = 2
+    ctx.shadowColor = '#a855f7'
+    ctx.shadowBlur = 12
+    ctx.stroke()
+    ctx.shadowBlur = 0
 
-  // Chrome outer rail
-  drawChromeRail(ctx, 12, 20, 12, 660, 5)
-  drawChromeRail(ctx, 388, 20, 388, 520, 5)
-  drawChromeRail(ctx, 12, 20, 388, 20, 5)
+    // Chevrons on ramp
+    ctx.fillStyle = 'rgba(255, 220, 80, 0.55)'
+    for (let i = 0; i < 5; i++) {
+      const y = 200 + i * 48
+      const x = 48 + Math.sin(i) * 4
+      ctx.beginPath()
+      ctx.moveTo(x, y)
+      ctx.lineTo(x + 10, y + 8)
+      ctx.lineTo(x, y + 16)
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.restore()
+  }
 
-  // Outlane wedges with neon edge
-  const drawWedge = (pts: [number, number][], fill: string, edge: string) => {
+  // Yellow lane arrows / indicators
+  const drawArrow = (x: number, y: number, rot: number, color: string) => {
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate(rot)
+    ctx.beginPath()
+    ctx.moveTo(0, -8)
+    ctx.lineTo(7, 6)
+    ctx.lineTo(0, 2)
+    ctx.lineTo(-7, 6)
+    ctx.closePath()
+    ctx.fillStyle = color
+    ctx.globalAlpha = 0.55 + 0.35 * Math.sin(animTime * 3 + x * 0.05)
+    ctx.shadowColor = color
+    ctx.shadowBlur = 8
+    ctx.fill()
+    ctx.restore()
+  }
+  drawArrow(55, 70, 0.3, '#f5c542')
+  drawArrow(120, 55, 0, '#f5c542')
+  drawArrow(280, 55, 0, '#f5c542')
+  drawArrow(330, 75, -0.3, '#f5c542')
+  drawArrow(100, 380, 0.6, '#ff5a6a')
+  drawArrow(280, 380, -0.6, '#ff5a6a')
+
+  // Top rollover lights
+  for (let i = 0; i < 5; i++) {
+    const lx = 110 + i * 40
+    const pulse = 0.5 + 0.5 * Math.sin(animTime * 5 + i * 1.1)
+    ctx.beginPath()
+    ctx.arc(lx, 32, 5, 0, Math.PI * 2)
+    ctx.fillStyle = i % 2 === 0 ? `rgba(255, 80, 80, ${0.5 + pulse * 0.5})` : `rgba(80, 220, 120, ${0.5 + pulse * 0.5})`
+    ctx.shadowColor = ctx.fillStyle as string
+    ctx.shadowBlur = 10
+    ctx.fill()
+  }
+  ctx.shadowBlur = 0
+
+  // Drain sunburst between flippers
+  {
+    ctx.save()
+    ctx.translate(175, 690)
+    ctx.fillStyle = 'rgba(140, 60, 200, 0.55)'
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + (i - 4.5) * 0.14
+      ctx.beginPath()
+      ctx.moveTo(0, 0)
+      ctx.lineTo(Math.cos(a - 0.05) * 55, Math.sin(a - 0.05) * 40)
+      ctx.lineTo(Math.cos(a + 0.05) * 55, Math.sin(a + 0.05) * 40)
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.restore()
+  }
+
+  // Slingshot wedges (above flippers) with lightning art
+  const drawSling = (pts: [number, number][], mirror: boolean) => {
     ctx.beginPath()
     ctx.moveTo(pts[0][0], pts[0][1])
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
     ctx.closePath()
-    ctx.fillStyle = fill
+    ctx.fillStyle = 'rgba(20, 35, 70, 0.92)'
     ctx.fill()
-    ctx.strokeStyle = edge
+    ctx.strokeStyle = '#c0c8d4'
+    ctx.lineWidth = 3
+    ctx.stroke()
+    // Lightning bolt graphic
+    const mx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3
+    const my = (pts[0][1] + pts[1][1] + pts[2][1]) / 3
+    ctx.strokeStyle = `rgba(120, 200, 255, ${0.55 + 0.25 * Math.sin(animTime * 6)})`
     ctx.lineWidth = 2
-    ctx.shadowColor = edge
-    ctx.shadowBlur = 10
+    ctx.shadowColor = '#7ec8ff'
+    ctx.shadowBlur = 8
+    ctx.beginPath()
+    if (!mirror) {
+      ctx.moveTo(mx - 8, my - 18)
+      ctx.lineTo(mx + 4, my - 4)
+      ctx.lineTo(mx - 2, my - 2)
+      ctx.lineTo(mx + 10, my + 18)
+    } else {
+      ctx.moveTo(mx + 8, my - 18)
+      ctx.lineTo(mx - 4, my - 4)
+      ctx.lineTo(mx + 2, my - 2)
+      ctx.lineTo(mx - 10, my + 18)
+    }
     ctx.stroke()
     ctx.shadowBlur = 0
   }
-  drawWedge(
-    [
-      [12, 510],
-      [115, 580],
-      [12, 640],
-    ],
-    'rgba(40, 10, 30, 0.95)',
-    '#ff006e'
-  )
-  drawWedge(
-    [
-      [340, 510],
-      [260, 580],
-      [340, 635],
-    ],
-    'rgba(10, 30, 40, 0.95)',
-    '#00f5d4'
-  )
+  drawSling([[18, 520], [108, 585], [18, 635]], false)
+  drawSling([[332, 520], [255, 585], [332, 630]], true)
+
+  // Chrome outer rails
+  drawChromeRail(ctx, 14, 18, 14, 660, 6)
+  drawChromeRail(ctx, 386, 18, 386, 520, 6)
+  drawChromeRail(ctx, 14, 18, 386, 18, 6)
+  drawChromeCurve(ctx, [[14, 18], [30, 8], [200, 4], [370, 8], [386, 18]], 5)
 
   // Shooter lane
-  const laneGrad = ctx.createLinearGradient(350, 200, 400, 700)
-  laneGrad.addColorStop(0, 'rgba(255, 190, 11, 0.2)')
-  laneGrad.addColorStop(1, 'rgba(255, 0, 110, 0.08)')
-  ctx.fillStyle = laneGrad
-  ctx.fillRect(353, 200, 35, 480)
+  {
+    const laneGrad = ctx.createLinearGradient(350, 200, 400, 700)
+    laneGrad.addColorStop(0, 'rgba(40, 70, 120, 0.45)')
+    laneGrad.addColorStop(1, 'rgba(20, 30, 60, 0.3)')
+    ctx.fillStyle = laneGrad
+    ctx.fillRect(353, 200, 35, 480)
 
-  ctx.fillStyle = '#1e293b'
-  ctx.fillRect(347, 200, 6, 480)
-  ctx.shadowColor = '#fee440'
-  ctx.shadowBlur = 8
-  ctx.fillStyle = '#fee440'
-  ctx.globalAlpha = 0.7 + Math.sin(animTime * 5) * 0.3
-  ctx.fillRect(348, 200, 4, 480)
-  ctx.globalAlpha = 1
-  ctx.shadowBlur = 0
+    drawChromeRail(ctx, 350, 200, 350, 680, 5)
 
-  // One-way lane gate (closed after ball enters play — classic pinball)
+    // Lane chevrons
+    ctx.fillStyle = 'rgba(245, 197, 66, 0.4)'
+    for (let y = 280; y < 620; y += 36) {
+      ctx.beginPath()
+      ctx.moveTo(365, y)
+      ctx.lineTo(372, y + 10)
+      ctx.lineTo(379, y)
+      ctx.closePath()
+      ctx.fill()
+    }
+  }
+
+  // One-way lane gate (closed after ball enters play)
   if (world.laneGateClosed) {
-    ctx.fillStyle = '#1e293b'
-    ctx.fillRect(347, 20, 6, 185)
-    ctx.shadowColor = '#00f5d4'
-    ctx.shadowBlur = 10
-    ctx.fillStyle = '#00f5d4'
-    ctx.globalAlpha = 0.85
-    ctx.fillRect(348, 20, 4, 185)
-    ctx.globalAlpha = 1
-    ctx.shadowBlur = 0
-
-    // Wire gate flap at the mouth
+    drawChromeRail(ctx, 350, 20, 350, 205, 5)
     ctx.save()
-    ctx.strokeStyle = '#fee440'
+    ctx.strokeStyle = '#c0c8d4'
     ctx.lineWidth = 3
     ctx.lineCap = 'round'
-    ctx.shadowColor = '#fee440'
-    ctx.shadowBlur = 8
+    ctx.shadowColor = '#e2e8f0'
+    ctx.shadowBlur = 6
     ctx.beginPath()
     ctx.moveTo(350, 198)
     ctx.lineTo(388, 188)
@@ -630,36 +774,26 @@ function render() {
     ctx.restore()
   }
 
-  // Top curve rails (visual match for physics deflectors)
-  ctx.save()
-  ctx.strokeStyle = '#00f5d4'
-  ctx.lineWidth = 5
-  ctx.lineCap = 'round'
-  ctx.shadowColor = '#00f5d4'
-  ctx.shadowBlur = 12
-  ctx.beginPath()
-  ctx.moveTo(390, 160)
-  ctx.quadraticCurveTo(395, 90, 340, 45)
-  ctx.stroke()
-  ctx.strokeStyle = '#fee440'
-  ctx.lineWidth = 3
-  ctx.shadowColor = '#fee440'
-  ctx.beginPath()
-  ctx.moveTo(395, 175)
-  ctx.quadraticCurveTo(400, 110, 360, 60)
-  ctx.stroke()
-  ctx.restore()
+  // Top curve rails into playfield
+  drawChromeCurve(
+    ctx,
+    [[390, 165], [395, 110], [380, 70], [340, 42], [300, 35]],
+    6
+  )
+  drawChromeCurve(
+    ctx,
+    [[395, 180], [398, 130], [375, 80], [350, 55]],
+    4
+  )
 
-  // Lane chevrons
-  ctx.fillStyle = 'rgba(254, 228, 64, 0.35)'
-  for (let y = 280; y < 620; y += 36) {
-    ctx.beginPath()
-    ctx.moveTo(365, y)
-    ctx.lineTo(372, y + 10)
-    ctx.lineTo(379, y)
-    ctx.closePath()
-    ctx.fill()
-  }
+  // Corner brand marks
+  ctx.save()
+  ctx.font = 'bold 9px sans-serif'
+  ctx.fillStyle = 'rgba(220, 60, 70, 0.85)'
+  ctx.fillText('CINEMATRONICS', 22, 685)
+  ctx.textAlign = 'right'
+  ctx.fillText('MAXIS', 340, 685)
+  ctx.restore()
 
   // Idle ball in lane
   if (!world.ballInPlay && !gameOver.value && world.ballsRemaining > 0) {
@@ -686,59 +820,73 @@ function render() {
     ctx.shadowBlur = 0
   }
 
-  // Bumpers
+  // Space Cadet pop bumpers — white body, colored cap
   for (const [body, spec] of world.bumperBodies) {
     const pos = body.getPosition()
     const flash = bumperFlashes.find(
       (f) => Math.hypot(f.x - pos.x, f.y - pos.y) < 8
     )
-    const pulse = flash ? 1.15 : 1 + Math.sin(animTime * 3 + pos.x) * 0.03
+    const pulse = flash ? 1.12 : 1 + Math.sin(animTime * 3 + pos.x) * 0.02
     const r = spec.radius * pulse
 
-    // Outer glow ring
     ctx.beginPath()
-    ctx.arc(pos.x, pos.y, r + 8, 0, Math.PI * 2)
-    const glow = ctx.createRadialGradient(pos.x, pos.y, r * 0.4, pos.x, pos.y, r + 10)
-    glow.addColorStop(0, flash ? `${spec.color}aa` : `${spec.color}33`)
+    ctx.arc(pos.x, pos.y, r + 6, 0, Math.PI * 2)
+    const glow = ctx.createRadialGradient(pos.x, pos.y, r * 0.3, pos.x, pos.y, r + 8)
+    glow.addColorStop(0, flash ? `${spec.color}99` : `${spec.color}33`)
     glow.addColorStop(1, 'transparent')
     ctx.fillStyle = glow
     ctx.fill()
 
-    const bumperGrad = ctx.createRadialGradient(
-      pos.x - r * 0.25,
-      pos.y - r * 0.3,
+    const bodyGrad = ctx.createRadialGradient(
+      pos.x - r * 0.3,
+      pos.y - r * 0.35,
       r * 0.1,
       pos.x,
       pos.y,
       r
     )
-    bumperGrad.addColorStop(0, '#fff')
-    bumperGrad.addColorStop(0.2, spec.color)
-    bumperGrad.addColorStop(0.75, spec.color)
-    bumperGrad.addColorStop(1, '#1a1a1a')
+    bodyGrad.addColorStop(0, '#ffffff')
+    bodyGrad.addColorStop(0.35, '#e8eef5')
+    bodyGrad.addColorStop(0.85, '#b0bcc8')
+    bodyGrad.addColorStop(1, '#6a7888')
 
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2)
-    ctx.fillStyle = bumperGrad
-    ctx.shadowColor = spec.color
-    ctx.shadowBlur = flash ? 28 : 14
+    ctx.fillStyle = bodyGrad
+    ctx.shadowColor = 'rgba(255,255,255,0.5)'
+    ctx.shadowBlur = flash ? 18 : 8
     ctx.fill()
     ctx.shadowBlur = 0
 
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2)
-    ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 2.5
+    ctx.strokeStyle = '#8a96a4'
+    ctx.lineWidth = 2
     ctx.stroke()
 
-    // Cap
+    // Colored cap
+    const capR = r * 0.42
+    const capGrad = ctx.createRadialGradient(
+      pos.x - capR * 0.2,
+      pos.y - capR * 0.25,
+      1,
+      pos.x,
+      pos.y,
+      capR
+    )
+    capGrad.addColorStop(0, flash ? '#fff' : '#fff8f0')
+    capGrad.addColorStop(0.35, spec.color)
+    capGrad.addColorStop(1, '#1a1010')
     ctx.beginPath()
-    ctx.arc(pos.x, pos.y, r * 0.35, 0, Math.PI * 2)
-    ctx.fillStyle = flash ? '#fff' : 'rgba(255,255,255,0.25)'
+    ctx.arc(pos.x, pos.y, capR, 0, Math.PI * 2)
+    ctx.fillStyle = capGrad
     ctx.fill()
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'
+    ctx.lineWidth = 1
+    ctx.stroke()
   }
 
-  // Targets
+  // Drop targets
   for (const [body, spec] of world.targetBodies) {
     if (world.hitTargets.has(spec.id)) continue
 
@@ -748,94 +896,129 @@ function render() {
     ctx.translate(pos.x, pos.y)
 
     ctx.shadowColor = spec.color
-    ctx.shadowBlur = 16 * blink
+    ctx.shadowBlur = 12 * blink
     ctx.fillStyle = spec.color
     ctx.globalAlpha = 0.85 + blink * 0.15
     ctx.fillRect(-spec.width / 2, -spec.height / 2, spec.width, spec.height)
 
     ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 2
+    ctx.lineWidth = 1.5
     ctx.globalAlpha = 1
     ctx.strokeRect(-spec.width / 2, -spec.height / 2, spec.width, spec.height)
 
-    // Inner highlight stripe
-    ctx.fillStyle = 'rgba(255,255,255,0.35)'
-    ctx.fillRect(-spec.width / 2 + 2, -spec.height / 2 + 2, spec.width - 4, Math.max(2, spec.height * 0.3))
+    ctx.fillStyle = 'rgba(255,255,255,0.4)'
+    ctx.fillRect(-spec.width / 2 + 2, -spec.height / 2 + 2, spec.width - 4, Math.max(2, spec.height * 0.28))
     ctx.restore()
   }
 
-  // Hit targets — dim ghost marks
   for (const [body, spec] of world.targetBodies) {
     if (!world.hitTargets.has(spec.id)) continue
     const pos = body.getPosition()
     ctx.save()
     ctx.translate(pos.x, pos.y)
-    ctx.globalAlpha = 0.2
+    ctx.globalAlpha = 0.18
     ctx.fillStyle = '#64748b'
     ctx.fillRect(-spec.width / 2, -spec.height / 2, spec.width, spec.height)
     ctx.restore()
   }
 
-  // Flippers
+  // Space Cadet flippers — blue body, red tip
   const flippers = getFlipperTransforms(world)
 
   const drawFlipper = (
     x: number,
     y: number,
     angle: number,
-    colorA: string,
-    colorB: string,
     mirrored: boolean
   ) => {
     ctx.save()
     ctx.translate(x, y)
     ctx.rotate(angle)
 
-    ctx.shadowColor = colorA
-    ctx.shadowBlur = 16
-
-    // Match physics: polygon extends from pivot (0) to tip (±length).
     const tip = mirrored ? -level.flipperLength : level.flipperLength
-    const grad = ctx.createLinearGradient(0, 0, tip, 0)
-    grad.addColorStop(0, colorA)
-    grad.addColorStop(0.5, '#fff')
-    grad.addColorStop(1, colorB)
-    ctx.fillStyle = grad
+    const tipStart = tip * 0.62
+
+    // Blue rubber body
+    const bodyGrad = ctx.createLinearGradient(0, 0, tipStart, 0)
+    bodyGrad.addColorStop(0, '#1e4a8c')
+    bodyGrad.addColorStop(0.4, '#3b82c4')
+    bodyGrad.addColorStop(1, '#2563a8')
+    ctx.fillStyle = bodyGrad
+    ctx.shadowColor = '#3b82c4'
+    ctx.shadowBlur = 10
 
     ctx.beginPath()
     if (!mirrored) {
       ctx.moveTo(0, -level.flipperWidth / 2)
-      ctx.lineTo(level.flipperLength, -level.flipperWidth / 3)
-      ctx.lineTo(level.flipperLength, level.flipperWidth / 3)
+      ctx.lineTo(level.flipperLength * 0.65, -level.flipperWidth / 3)
+      ctx.lineTo(level.flipperLength * 0.65, level.flipperWidth / 3)
       ctx.lineTo(0, level.flipperWidth / 2)
     } else {
       ctx.moveTo(0, -level.flipperWidth / 2)
-      ctx.lineTo(-level.flipperLength, -level.flipperWidth / 3)
-      ctx.lineTo(-level.flipperLength, level.flipperWidth / 3)
+      ctx.lineTo(-level.flipperLength * 0.65, -level.flipperWidth / 3)
+      ctx.lineTo(-level.flipperLength * 0.65, level.flipperWidth / 3)
       ctx.lineTo(0, level.flipperWidth / 2)
     }
     ctx.closePath()
     ctx.fill()
 
+    // Red tip
+    const tipGrad = ctx.createLinearGradient(tipStart, 0, tip, 0)
+    tipGrad.addColorStop(0, '#e11d2e')
+    tipGrad.addColorStop(0.5, '#ff4d5a')
+    tipGrad.addColorStop(1, '#b01020')
+    ctx.fillStyle = tipGrad
+    ctx.shadowColor = '#ff4d5a'
+    ctx.beginPath()
+    if (!mirrored) {
+      ctx.moveTo(level.flipperLength * 0.62, -level.flipperWidth / 3)
+      ctx.lineTo(level.flipperLength, -level.flipperWidth / 3.5)
+      ctx.lineTo(level.flipperLength, level.flipperWidth / 3.5)
+      ctx.lineTo(level.flipperLength * 0.62, level.flipperWidth / 3)
+    } else {
+      ctx.moveTo(-level.flipperLength * 0.62, -level.flipperWidth / 3)
+      ctx.lineTo(-level.flipperLength, -level.flipperWidth / 3.5)
+      ctx.lineTo(-level.flipperLength, level.flipperWidth / 3.5)
+      ctx.lineTo(-level.flipperLength * 0.62, level.flipperWidth / 3)
+    }
+    ctx.closePath()
+    ctx.fill()
     ctx.shadowBlur = 0
-    ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 2
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    if (!mirrored) {
+      ctx.moveTo(0, -level.flipperWidth / 2)
+      ctx.lineTo(level.flipperLength, -level.flipperWidth / 3.5)
+      ctx.lineTo(level.flipperLength, level.flipperWidth / 3.5)
+      ctx.lineTo(0, level.flipperWidth / 2)
+    } else {
+      ctx.moveTo(0, -level.flipperWidth / 2)
+      ctx.lineTo(-level.flipperLength, -level.flipperWidth / 3.5)
+      ctx.lineTo(-level.flipperLength, level.flipperWidth / 3.5)
+      ctx.lineTo(0, level.flipperWidth / 2)
+    }
+    ctx.closePath()
     ctx.stroke()
 
     // Pivot cap
     ctx.beginPath()
     ctx.arc(0, 0, 7, 0, Math.PI * 2)
-    ctx.fillStyle = '#e2e8f0'
+    const pivotGrad = ctx.createRadialGradient(-2, -2, 1, 0, 0, 7)
+    pivotGrad.addColorStop(0, '#f0f4f8')
+    pivotGrad.addColorStop(1, '#7a8794')
+    ctx.fillStyle = pivotGrad
     ctx.fill()
-    ctx.strokeStyle = '#94a3b8'
+    ctx.strokeStyle = '#4a5560'
     ctx.lineWidth = 1.5
     ctx.stroke()
 
     ctx.restore()
   }
 
-  drawFlipper(flippers.left.x, flippers.left.y, flippers.left.angle, '#ff006e', '#ff6b6b', false)
-  drawFlipper(flippers.right.x, flippers.right.y, flippers.right.angle, '#00f5d4', '#4ecdc4', true)
+  drawFlipper(flippers.left.x, flippers.left.y, flippers.left.angle, false)
+  drawFlipper(flippers.right.x, flippers.right.y, flippers.right.angle, true)
 
   // Particles
   for (const p of particles) {
@@ -870,7 +1053,7 @@ function render() {
       const life = (t.until - now) / 140
       ctx.beginPath()
       ctx.arc(t.x, t.y, level.ballRadius * (0.35 + life * 0.4), 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(254, 228, 64, ${life * 0.45})`
+      ctx.fillStyle = `rgba(160, 210, 255, ${life * 0.45})`
       ctx.fill()
     }
 
@@ -941,15 +1124,15 @@ watch(displayScale, () => {
         <span class="hud-value score" :class="{ pulse: scorePulse }">{{ formatScore(score) }}</span>
       </div>
       <div class="hud-brand">
-        <span class="brand-mark">NEON</span>
-        <span class="brand-name">PINBALL</span>
+        <span class="brand-mark">3D PINBALL</span>
+        <span class="brand-name">SPACE CADET</span>
       </div>
       <div class="hud-section">
         <span class="hud-label">High</span>
         <span class="hud-value high">{{ formatScore(highScore) }}</span>
       </div>
       <div class="hud-section balls">
-        <span class="hud-label">Balls</span>
+        <span class="hud-label">Ball {{ currentBallNumber }}</span>
         <div class="ball-indicators">
           <span
             v-for="i in 3"
@@ -1007,7 +1190,7 @@ watch(displayScale, () => {
 
       <div v-if="gameOver" class="game-over-overlay">
         <div class="game-over-content">
-          <p class="over-eyebrow">Cabinet locked</p>
+          <p class="over-eyebrow">Mission failed</p>
           <h2>GAME OVER</h2>
           <p class="final-score">{{ formatScore(score) }}</p>
           <p v-if="score >= highScore && score > 0" class="new-highscore">NEW HIGH SCORE</p>
@@ -1045,10 +1228,10 @@ watch(displayScale, () => {
 
 <style scoped>
 .pinball-container {
-  --neon-pink: #ff006e;
-  --neon-cyan: #00f5d4;
-  --neon-gold: #fee440;
-  --cabinet: #0a0610;
+  --neon-pink: #ff4d5a;
+  --neon-cyan: #3cc8ff;
+  --neon-gold: #f5c542;
+  --cabinet: #06101f;
 
   position: relative;
   display: flex;
@@ -1057,12 +1240,12 @@ watch(displayScale, () => {
   height: 100%;
   width: 100%;
   background:
-    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(255, 0, 110, 0.18), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(0, 245, 212, 0.1), transparent 50%),
-    linear-gradient(180deg, #140810 0%, var(--cabinet) 40%, #050308 100%);
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(60, 100, 200, 0.22), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(120, 60, 180, 0.14), transparent 50%),
+    linear-gradient(180deg, #0a1830 0%, var(--cabinet) 40%, #030810 100%);
   overflow: hidden;
   user-select: none;
-  font-family: 'Outfit', 'DM Sans', system-ui, sans-serif;
+  font-family: 'Segoe UI', 'Trebuchet MS', 'Outfit', system-ui, sans-serif;
 }
 
 .cabinet-glow {
@@ -1119,10 +1302,10 @@ watch(displayScale, () => {
 }
 
 .hud-value.score {
-  color: var(--neon-gold);
+  color: #ffffff;
   text-shadow:
-    0 0 12px rgba(254, 228, 64, 0.65),
-    0 0 28px rgba(254, 228, 64, 0.35);
+    0 0 10px rgba(100, 180, 255, 0.55),
+    0 0 24px rgba(60, 120, 220, 0.35);
   transition: transform 0.15s ease;
 }
 
@@ -1146,19 +1329,19 @@ watch(displayScale, () => {
 .brand-mark {
   font-size: 0.55rem;
   font-weight: 700;
-  letter-spacing: 0.35em;
-  color: var(--neon-pink);
-  text-shadow: 0 0 10px rgba(255, 0, 110, 0.8);
+  letter-spacing: 0.28em;
+  color: #7ec8ff;
+  text-shadow: 0 0 10px rgba(60, 160, 255, 0.75);
 }
 
 .brand-name {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 800;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.14em;
   color: #fff;
   text-shadow:
-    0 0 16px rgba(255, 0, 110, 0.5),
-    0 0 32px rgba(0, 245, 212, 0.25);
+    0 0 14px rgba(100, 160, 255, 0.55),
+    0 0 28px rgba(140, 80, 200, 0.3);
 }
 
 .ball-indicators {
@@ -1204,8 +1387,8 @@ watch(displayScale, () => {
 }
 
 .mute-btn:hover {
-  background: rgba(255, 0, 110, 0.25);
-  border-color: rgba(255, 0, 110, 0.5);
+  background: rgba(60, 120, 220, 0.3);
+  border-color: rgba(100, 180, 255, 0.55);
 }
 
 .mute-btn:active {
@@ -1226,8 +1409,8 @@ watch(displayScale, () => {
 .combo-mult {
   font-size: 1.6rem;
   font-weight: 800;
-  color: var(--neon-pink);
-  text-shadow: 0 0 14px rgba(255, 0, 110, 0.85);
+  color: var(--neon-gold);
+  text-shadow: 0 0 14px rgba(245, 197, 66, 0.85);
   line-height: 1;
 }
 
@@ -1268,29 +1451,29 @@ watch(displayScale, () => {
 
 .canvas-frame {
   position: relative;
-  border-radius: 16px;
-  padding: 3px;
+  border-radius: 10px;
+  padding: 4px;
   max-height: 100%;
   background: linear-gradient(
     145deg,
-    #f8fafc 0%,
-    #94a3b8 25%,
-    #475569 50%,
-    #e2e8f0 75%,
-    #64748b 100%
+    #d8dee8 0%,
+    #8a96a8 25%,
+    #5a6678 50%,
+    #c8d0dc 75%,
+    #707c8c 100%
   );
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.55),
     0 12px 40px rgba(0, 0, 0, 0.55),
-    0 0 60px rgba(255, 0, 110, 0.15),
-    0 0 80px rgba(0, 245, 212, 0.08);
+    0 0 50px rgba(60, 120, 220, 0.2),
+    0 0 70px rgba(120, 60, 180, 0.1);
 }
 
 .pinball-canvas {
   display: block;
-  border-radius: 13px;
-  background: #0a0610;
-  max-height: calc(100% - 6px);
+  border-radius: 7px;
+  background: #081530;
+  max-height: calc(100% - 8px);
 }
 
 .frame-shine {
@@ -1486,13 +1669,15 @@ watch(displayScale, () => {
 }
 
 .touch-flipper.left {
-  background: linear-gradient(145deg, #ff006e, #c1121f);
-  box-shadow: 0 0 20px rgba(255, 0, 110, 0.35);
+  background: linear-gradient(145deg, #2b6cb0, #1e4a8c);
+  box-shadow: 0 0 20px rgba(59, 130, 196, 0.4);
+  border-bottom: 3px solid #e11d2e;
 }
 
 .touch-flipper.right {
-  background: linear-gradient(145deg, #00f5d4, #0891b2);
-  box-shadow: 0 0 20px rgba(0, 245, 212, 0.35);
+  background: linear-gradient(145deg, #2b6cb0, #1e4a8c);
+  box-shadow: 0 0 20px rgba(59, 130, 196, 0.4);
+  border-bottom: 3px solid #e11d2e;
 }
 
 .touch-flipper:active {

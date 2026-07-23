@@ -40,11 +40,11 @@ const controls = [
       </div>
 
       <div class="hero-content">
-        <p class="hero-eyebrow">Single player</p>
-        <h2 class="hero-title">Pinball</h2>
+        <p class="hero-eyebrow">3D Pinball</p>
+        <h2 class="hero-title">Space Cadet</h2>
         <p class="hero-desc">
-          Classic arcade pinball action! Use the flippers to keep the ball in play,
-          hit bumpers and targets to rack up points, and try to beat your high score.
+          Classic Windows Space Cadet vibes — flippers, pop bumpers, and a one-way
+          shooter lane. Keep the ball alive and chase a high score.
         </p>
       </div>
     </section>
@@ -106,9 +106,9 @@ const controls = [
   gap: 1.75rem 2.5rem;
   padding: 1.75rem 2rem;
   background:
-    radial-gradient(ellipse 70% 80% at 12% 40%, rgba(83, 82, 237, 0.2) 0%, transparent 55%),
-    linear-gradient(135deg, rgba(21, 28, 44, 0.98) 0%, rgba(16, 22, 36, 0.98) 100%);
-  border-color: rgba(83, 82, 237, 0.3);
+    radial-gradient(ellipse 70% 80% at 12% 40%, rgba(60, 120, 220, 0.25) 0%, transparent 55%),
+    linear-gradient(135deg, rgba(10, 24, 48, 0.98) 0%, rgba(8, 16, 32, 0.98) 100%);
+  border-color: rgba(100, 160, 255, 0.3);
   min-height: 200px;
 }
 
@@ -127,9 +127,9 @@ const controls = [
   position: relative;
   width: 140px;
   height: 140px;
-  background: linear-gradient(180deg, #1a1a2e 0%, #0f0f23 100%);
+  background: linear-gradient(180deg, #0c2048 0%, #081530 100%);
   border-radius: 12px 12px 0 0;
-  border: 3px solid #4a4a6a;
+  border: 3px solid #8a96a8;
   overflow: hidden;
 }
 
@@ -144,7 +144,7 @@ const controls = [
   height: 24px;
   top: 20px;
   left: 30px;
-  background: radial-gradient(circle at 30% 30%, #ff6b6b, #ff4757);
+  background: radial-gradient(circle at 30% 30%, #fff 0%, #e8eef5 40%, #ff3b4a 70%);
 }
 
 .preview-bumper.bumper-2 {
@@ -152,7 +152,7 @@ const controls = [
   height: 24px;
   top: 20px;
   right: 30px;
-  background: radial-gradient(circle at 30% 30%, #ff6b6b, #ff4757);
+  background: radial-gradient(circle at 30% 30%, #fff 0%, #e8eef5 40%, #2ecc71 70%);
 }
 
 .preview-bumper.bumper-3 {
@@ -161,7 +161,7 @@ const controls = [
   top: 45px;
   left: 50%;
   transform: translateX(-50%);
-  background: radial-gradient(circle at 30% 30%, #ffd700, #ffa502);
+  background: radial-gradient(circle at 30% 30%, #fff 0%, #e8eef5 40%, #ff3b4a 70%);
 }
 
 .preview-ball {
@@ -192,14 +192,14 @@ const controls = [
 
 .preview-flipper.flipper-left {
   left: 15px;
-  background: linear-gradient(90deg, #ff6b6b, #ee5a5a);
+  background: linear-gradient(90deg, #2b6cb0 0%, #3b82c4 60%, #e11d2e 61%, #ff4d5a 100%);
   transform-origin: left center;
   animation: flipperLeft 1s ease-in-out infinite;
 }
 
 .preview-flipper.flipper-right {
   right: 15px;
-  background: linear-gradient(90deg, #4ecdc4, #3dbdb5);
+  background: linear-gradient(90deg, #ff4d5a 0%, #e11d2e 39%, #3b82c4 40%, #2b6cb0 100%);
   transform-origin: right center;
   animation: flipperRight 1s ease-in-out infinite;
 }
