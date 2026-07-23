@@ -1,5 +1,7 @@
-from app.games.bomberman.engine import BombermanEngine, TILE_EMPTY
-from app.games.bomberman.maps import MAPS, build_map_grid, list_maps
+import random
+
+from app.games.bomberman.engine import BombermanEngine, TILE_EMPTY, TILE_HARD
+from app.games.bomberman.maps import MAPS, _non_hard_reachable, build_map_grid, list_maps
 
 
 def test_list_maps_covers_all() -> None:
@@ -32,6 +34,38 @@ def test_every_map_builds_and_has_clear_spawns() -> None:
             if grid[y][width - 1] == TILE_EMPTY:
                 edge_empty += 1
         assert edge_empty > 0
+
+
+def test_spawns_not_sealed_by_hard_walls() -> None:
+    """Hard walls must not trap a bomber in a pocket cut off from center."""
+    for map_id in MAPS:
+        for seed in range(8):
+            random.seed(seed)
+            grid, spawns, meta = build_map_grid(map_id)
+            height = len(grid)
+            width = len(grid[0])
+            cx, cy = width // 2, height // 2
+            if grid[cy][cx] == TILE_HARD:
+                # Same fallback as ensure_spawn_access: nearest non-hard cell.
+                target = None
+                for radius in range(1, max(width, height)):
+                    for dy in range(-radius, radius + 1):
+                        for dx in range(-radius, radius + 1):
+                            x, y = cx + dx, cy + dy
+                            if 0 <= x < width and 0 <= y < height and grid[y][x] != TILE_HARD:
+                                target = (x, y)
+                                break
+                        if target:
+                            break
+                    if target:
+                        break
+                assert target is not None
+                cx, cy = target
+            for sx, sy in spawns:
+                assert grid[sy][sx] != TILE_HARD
+                region = _non_hard_reachable(grid, sx, sy)
+                assert (cx, cy) in region, f"{map_id} seed={seed} spawn={(sx, sy)}"
+                assert len(region) >= 12, f"{map_id} seed={seed} spawn={(sx, sy)} region={len(region)}"
 
 
 def test_engine_uses_selected_map() -> None:

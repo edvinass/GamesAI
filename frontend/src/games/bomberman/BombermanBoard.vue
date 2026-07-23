@@ -21,7 +21,6 @@ import {
   isSoundMuted,
   playBombKick,
   playBombPlace,
-  playBombFuse,
   playBombStop,
   playBombThrow,
   playCountdownGo,
@@ -533,13 +532,6 @@ function playStateSounds(state: BombermanGameState) {
       playBombStop()
       break
     }
-  }
-
-  // Fuse hiss while any bomb is close to detonating
-  const liveBombs = state.bombs ?? []
-  if (liveBombs.length > 0 && state.phase === 'playing') {
-    const minFuse = Math.min(...liveBombs.map((b) => b.fuse))
-    if (minFuse <= 5) playBombFuse(minFuse <= 3)
   }
 
   // Explosions + particles / shake

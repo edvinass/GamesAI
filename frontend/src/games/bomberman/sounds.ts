@@ -9,7 +9,6 @@ const SFX_VOLUME = 0.22
 const MUTE_STORAGE_KEY = 'bomberman-sound-muted'
 
 let muted = readMutedPreference()
-let lastFuseBeepAt = 0
 let lastStepAt = 0
 
 function readMutedPreference(): boolean {
@@ -267,21 +266,6 @@ export function playBombKick(): void {
 export function playBombStop(): void {
   tone(90, 0.07, { type: 'sine', volume: 0.07, slideTo: 55 })
   noiseBurst(0.05, { volume: 0.045, filterFreq: 250, filterType: 'lowpass' })
-}
-
-/** Urgent fuse hiss/beep while bombs are about to blow. */
-export function playBombFuse(urgent = false): void {
-  const now = performance.now()
-  if (now - lastFuseBeepAt < (urgent ? 90 : 160)) return
-  lastFuseBeepAt = now
-
-  if (urgent) {
-    tone(980, 0.035, { type: 'square', volume: 0.055, filterFreq: 2200 })
-    noiseBurst(0.04, { volume: 0.035, filterFreq: 3200, filterType: 'highpass', filterQ: 0.5 })
-  } else {
-    tone(720, 0.028, { type: 'square', volume: 0.035, filterFreq: 1600 })
-    noiseBurst(0.03, { volume: 0.02, filterFreq: 1800, filterType: 'bandpass' })
-  }
 }
 
 /** Big layered blast with rumble and crackle. */
@@ -877,6 +861,5 @@ export function disposeSounds(): void {
   ctx = null
   masterGain = null
   compressor = null
-  lastFuseBeepAt = 0
   lastStepAt = 0
 }

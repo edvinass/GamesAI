@@ -70,10 +70,94 @@ def clear_spawn_zone(grid: list[list[int]], sx: int, sy: int) -> None:
     cx, cy = width // 2, height // 2
     step_x = 0 if sx == cx else (1 if sx < cx else -1)
     step_y = 0 if sy == cy else (1 if sy < cy else -1)
+    # Clear soft blocks toward center (classic bomberman egress lanes).
     if step_x and 0 <= sx + step_x < width and grid[sy][sx + step_x] != TILE_HARD:
         grid[sy][sx + step_x] = TILE_EMPTY
     if step_y and 0 <= sy + step_y < height and grid[sy + step_y][sx] != TILE_HARD:
         grid[sy + step_y][sx] = TILE_EMPTY
+
+
+def _non_hard_reachable(grid: list[list[int]], sx: int, sy: int) -> set[tuple[int, int]]:
+    """BFS through empty/soft tiles (hard walls block)."""
+    height = len(grid)
+    width = len(grid[0])
+    if not (0 <= sx < width and 0 <= sy < height):
+        return set()
+    if grid[sy][sx] == TILE_HARD:
+        return set()
+    seen: set[tuple[int, int]] = {(sx, sy)}
+    stack = [(sx, sy)]
+    while stack:
+        x, y = stack.pop()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < width and 0 <= ny < height):
+                continue
+            if (nx, ny) in seen or grid[ny][nx] == TILE_HARD:
+                continue
+            seen.add((nx, ny))
+            stack.append((nx, ny))
+    return seen
+
+
+def _carve_lane(grid: list[list[int]], sx: int, sy: int, tx: int, ty: int) -> None:
+    """Open an L-shaped path by removing hard walls (spawn egress / connectivity)."""
+    height = len(grid)
+    width = len(grid[0])
+    x, y = sx, sy
+    while x != tx:
+        x += 1 if tx > x else -1
+        if 0 <= x < width and 0 <= y < height and grid[y][x] == TILE_HARD:
+            grid[y][x] = TILE_EMPTY
+    while y != ty:
+        y += 1 if ty > y else -1
+        if 0 <= x < width and 0 <= y < height and grid[y][x] == TILE_HARD:
+            grid[y][x] = TILE_EMPTY
+    if 0 <= sx < width and 0 <= sy < height:
+        grid[sy][sx] = TILE_EMPTY
+    if 0 <= tx < width and 0 <= ty < height and grid[ty][tx] == TILE_HARD:
+        grid[ty][tx] = TILE_EMPTY
+
+
+def ensure_spawn_access(grid: list[list[int]], spawns: list[tuple[int, int]]) -> None:
+    """Prevent hard walls from sealing a bomber into a tiny pocket.
+
+    Soft walls may still block until bombed; hard walls must not isolate a spawn
+    from the center of the arena.
+    """
+    height = len(grid)
+    width = len(grid[0])
+    if width < 3 or height < 3 or not spawns:
+        return
+    cx, cy = width // 2, height // 2
+    if grid[cy][cx] == TILE_HARD:
+        # Nudge target to a nearby non-hard cell when the exact center is solid.
+        found = False
+        for radius in range(1, max(width, height)):
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    x, y = cx + dx, cy + dy
+                    if 0 <= x < width and 0 <= y < height and grid[y][x] != TILE_HARD:
+                        cx, cy = x, y
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                break
+    # A spawn needs a decent non-hard region that reaches the center.
+    min_region = max(12, (width * height) // 10)
+    for sx, sy in spawns:
+        if not (0 <= sx < width and 0 <= sy < height):
+            continue
+        if grid[sy][sx] == TILE_HARD:
+            grid[sy][sx] = TILE_EMPTY
+        region = _non_hard_reachable(grid, sx, sy)
+        if len(region) >= min_region and (cx, cy) in region:
+            continue
+        _carve_lane(grid, sx, sy, cx, cy)
+        # Re-clear soft blocks in the spawn pocket after carving.
+        clear_spawn_zone(grid, sx, sy)
 
 
 def _build_classic(width: int, height: int, soft_fill: float) -> list[list[int]]:
@@ -211,18 +295,27 @@ def _build_diamond(width: int, height: int, soft_fill: float) -> list[list[int]]
 
 
 def _build_narrows(width: int, height: int, soft_fill: float) -> list[list[int]]:
-    """Horizontal choke corridors — bombs are extremely deadly."""
+    """Horizontal choke corridors — bombs are extremely deadly.
+
+    Odd rows are mostly hard walls with staggered doors; even rows are corridors
+    with sparse pillars. Edge columns stay open so corner spawns are never sealed.
+    """
     hard: set[tuple[int, int]] = set()
-    for y in range(1, height, 2):
-        for x in range(width):
-            # Leave 1-cell gaps every few columns
-            if (x + y) % 4 != 1:
-                hard.add((x, y))
-    # Vertical struts
-    for x in range(2, width, 4):
-        for y in range(height):
-            if y % 2 == 0:
-                hard.add((x, y))
+    for y in range(1, height - 1, 2):
+        door_offset = (y // 2) % 2
+        for x in range(1, width - 1):
+            # Staggered doors every 4 cells; keep a vertical spine open at mid.
+            is_door = (x + door_offset * 2) % 4 == 0
+            is_mid = x == width // 2
+            if is_door or is_mid:
+                continue
+            hard.add((x, y))
+    # Sparse pillars on corridor rows — skip edges and the mid lane.
+    for y in range(0, height, 2):
+        for x in range(3, width - 3, 4):
+            if x == width // 2:
+                continue
+            hard.add((x, y))
     grid = _empty_grid(width, height)
     _set_hard(grid, hard)
     _scatter_soft(grid, soft_fill * 0.55, hard)
@@ -260,55 +353,58 @@ def _build_arena(width: int, height: int, soft_fill: float) -> list[list[int]]:
 Builder = Callable[[int, int, float], list[list[int]]]
 
 MAPS: dict[str, dict[str, Any]] = {
+    # Medium default first (lobby order).
     "classic": {
         "id": "classic",
         "name": "Classic",
         "description": "Standard pillar grid — balanced and familiar.",
         "difficulty": "standard",
-        "width": 25,
-        "height": 21,
+        "width": 23,
+        "height": 19,
         "soft_fill": 0.62,
         "builder": _build_classic,
     },
-    "open_field": {
-        "id": "open_field",
-        "name": "Open Field",
-        "description": "Sparse cover and long sightlines — raw duels.",
+    # Small — quick rounds, whole board in view.
+    "diamond": {
+        "id": "diamond",
+        "name": "Diamond",
+        "description": "Tiny diamond ring — choke openings, frantic fights.",
         "difficulty": "standard",
-        "width": 31,
-        "height": 25,
-        "soft_fill": 0.45,
-        "builder": _build_open_field,
+        "width": 15,
+        "height": 13,
+        "soft_fill": 0.55,
+        "builder": _build_diamond,
+    },
+    "narrows": {
+        "id": "narrows",
+        "name": "The Narrows",
+        "description": "Compact corridors where one bomb ends everything.",
+        "difficulty": "brutal",
+        "width": 17,
+        "height": 13,
+        "soft_fill": 0.4,
+        "builder": _build_narrows,
     },
     "crossroads": {
         "id": "crossroads",
         "name": "Crossroads",
-        "description": "Clear mid lanes with packed quadrants.",
+        "description": "Small map with clear mid lanes and packed quadrants.",
         "difficulty": "standard",
-        "width": 25,
-        "height": 21,
+        "width": 19,
+        "height": 15,
         "soft_fill": 0.68,
         "builder": _build_crossroads,
     },
+    # Medium.
     "fortress": {
         "id": "fortress",
         "name": "Fortress",
         "description": "A gated keep in the center — hold or siege.",
         "difficulty": "hard",
-        "width": 27,
-        "height": 23,
+        "width": 25,
+        "height": 21,
         "soft_fill": 0.58,
         "builder": _build_fortress,
-    },
-    "labyrinth": {
-        "id": "labyrinth",
-        "name": "Labyrinth",
-        "description": "Dense soft walls — carve your path slowly.",
-        "difficulty": "hard",
-        "width": 29,
-        "height": 25,
-        "soft_fill": 0.82,
-        "builder": _build_labyrinth,
     },
     "islands": {
         "id": "islands",
@@ -316,37 +412,38 @@ MAPS: dict[str, dict[str, Any]] = {
         "description": "Four pockets linked by narrow bridges.",
         "difficulty": "hard",
         "width": 27,
-        "height": 23,
+        "height": 21,
         "soft_fill": 0.6,
         "builder": _build_islands,
     },
-    "diamond": {
-        "id": "diamond",
-        "name": "Diamond",
-        "description": "Concentric diamond walls with choke openings.",
-        "difficulty": "standard",
-        "width": 25,
-        "height": 21,
-        "soft_fill": 0.55,
-        "builder": _build_diamond,
+    # Large — long rotations, camera follows.
+    "labyrinth": {
+        "id": "labyrinth",
+        "name": "Labyrinth",
+        "description": "Vast soft maze — carve your path slowly.",
+        "difficulty": "hard",
+        "width": 31,
+        "height": 25,
+        "soft_fill": 0.82,
+        "builder": _build_labyrinth,
     },
-    "narrows": {
-        "id": "narrows",
-        "name": "The Narrows",
-        "description": "Tight corridors where one bomb ends everything.",
-        "difficulty": "brutal",
-        "width": 25,
-        "height": 21,
-        "soft_fill": 0.4,
-        "builder": _build_narrows,
+    "open_field": {
+        "id": "open_field",
+        "name": "Open Field",
+        "description": "Wide sparse cover and long sightlines — raw duels.",
+        "difficulty": "standard",
+        "width": 33,
+        "height": 27,
+        "soft_fill": 0.45,
+        "builder": _build_open_field,
     },
     "arena": {
         "id": "arena",
         "name": "Arena",
-        "description": "Open coliseum center with a soft outer ring.",
+        "description": "Huge coliseum center with a soft outer ring.",
         "difficulty": "standard",
-        "width": 31,
-        "height": 25,
+        "width": 35,
+        "height": 29,
         "soft_fill": 0.58,
         "builder": _build_arena,
     },
@@ -384,4 +481,5 @@ def build_map_grid(map_id: str, soft_fill: float | None = None) -> tuple[list[li
     grid = builder(width, height, fill)
     for sx, sy in spawns:
         clear_spawn_zone(grid, sx, sy)
+    ensure_spawn_access(grid, spawns)
     return grid, spawns, meta

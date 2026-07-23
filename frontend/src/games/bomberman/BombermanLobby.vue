@@ -81,8 +81,8 @@ const FALLBACK_MAPS: MapOption[] = [
     name: 'Classic',
     description: 'Standard pillar grid — balanced and familiar.',
     difficulty: 'standard',
-    width: 25,
-    height: 21,
+    width: 23,
+    height: 19,
   },
 ]
 
