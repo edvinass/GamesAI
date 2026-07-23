@@ -63,6 +63,9 @@ export interface RenderFrameInput {
   mapId?: string
   /** 0–1 strength of the local-player ground marker (countdown / early play). */
   selfMarker?: number
+  /** Optional camera focus in cell coords (spectate pan). Defaults to local bomber. */
+  focusX?: number
+  focusY?: number
 }
 
 export type SoftBlockStyle = 'brick' | 'crate' | 'ice' | 'hedge' | 'wood' | 'stone'
@@ -1408,6 +1411,8 @@ export function renderFrame(
     shake = 0,
     mapId,
     selfMarker = 0,
+    focusX: focusXOverride,
+    focusY: focusYOverride,
   } = input
   const theme = getMapTheme(mapId)
   const s = cellSize(displayW, displayH, gridW, gridH)
@@ -1415,8 +1420,10 @@ export function renderFrame(
   const boardH = s * gridH
 
   const me = bombers[playerId]
-  const focusX = me ? me.x : (gridW - 1) / 2
-  const focusY = me ? me.y : (gridH - 1) / 2
+  const focusX =
+    focusXOverride ?? (me ? me.x : (gridW - 1) / 2)
+  const focusY =
+    focusYOverride ?? (me ? me.y : (gridH - 1) / 2)
   let { ox, oy } = cameraOffset(displayW, displayH, gridW, gridH, s, focusX, focusY)
 
   if (shake > 0.01) {

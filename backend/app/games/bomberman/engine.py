@@ -717,6 +717,8 @@ class BombermanEngine(GamePlugin):
         bomb["land_x"] = None
         bomb["land_y"] = None
         bomb["x"], bomb["y"] = nx, ny
+        # Last player to move the bomb owns the kill credit (and bomb slot).
+        bomb["owner_id"] = player_id
         self._grant_passable_on_cell(state, bomb["id"], nx, ny)
 
         state["last_action"] = {
@@ -771,6 +773,8 @@ class BombermanEngine(GamePlugin):
         bomb["land_x"] = land_x
         bomb["land_y"] = land_y
         bomb["x"], bomb["y"] = nx, ny
+        # Last player to throw the bomb owns the kill credit (and bomb slot).
+        bomb["owner_id"] = player_id
         if state["grid"][ny][nx] == TILE_EMPTY:
             self._grant_passable_on_cell(state, bomb["id"], nx, ny)
         if (nx, ny) == (land_x, land_y):

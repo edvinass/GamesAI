@@ -606,7 +606,7 @@ def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
     assert any(e["type"] == "bomb_thrown" for e in events)
     bomb = state["bombs"][0]
-    assert bomb["owner_id"] == other
+    assert bomb["owner_id"] == player["id"]
     assert bomb["flight"] == "throw"
     assert bomb["x"] == 2
     assert bomb["land_x"] == 4 and bomb["land_y"] == 1
@@ -670,6 +670,7 @@ def test_kick_bomb_along_ground(engine: BombermanEngine, state: dict) -> None:
     assert any(e["type"] == "bomb_kicked" for e in events)
     bomb = state["bombs"][0]
     assert bomb["flight"] == "kick"
+    assert bomb["owner_id"] == player["id"]
     assert bomb["x"] == 3
     assert bomber["x"] == 2  # walked into vacated cell
 
@@ -1006,3 +1007,121 @@ def test_rule_preset_fields_validated(engine: BombermanEngine) -> None:
     assert settings["kill_target"] == 7
     assert settings["starting_kick"] is True
     assert settings["sudden_death_sec"] == 120
+
+
+def test_kick_transfers_kill_credit(engine: BombermanEngine, state: dict) -> None:
+    """Last player to kick/throw a bomb gets the kill, not the original planter."""
+    planter = state["players"][0]
+    kicker = state["players"][1]
+    p_planter = planter["id"]
+    p_kicker = kicker["id"]
+    b_planter = state["bombers"][p_planter]
+    b_kicker = state["bombers"][p_kicker]
+
+    for x in range(0, 8):
+        state["grid"][1][x] = TILE_EMPTY
+
+    b_kicker["x"], b_kicker["y"] = 1, 1
+    b_kicker["facing"] = "right"
+    b_kicker["next_direction"] = "right"
+    b_kicker["move_credit"] = 1.0
+    b_kicker["can_kick"] = True
+    b_kicker["lives"] = 3
+    b_kicker["kills"] = 0
+
+    b_planter["x"], b_planter["y"] = 5, 1
+    b_planter["next_direction"] = "stop"
+    b_planter["lives"] = 3
+    b_planter["kills"] = 0
+    b_planter["invuln_ticks"] = 0
+    b_planter["respawn_ticks"] = 0
+
+    state["bombs"] = [
+        {
+            "id": "stolen",
+            "x": 2,
+            "y": 1,
+            "owner_id": p_planter,
+            "range": 4,
+            "fuse": 20,
+            "flight": None,
+            "sliding": False,
+            "slide_dir": None,
+            "land_x": None,
+            "land_y": None,
+        }
+    ]
+    state["explosions"] = []
+
+    state, events = engine.tick(state)
+    assert any(e["type"] == "bomb_kicked" for e in events)
+    bomb = state["bombs"][0]
+    assert bomb["owner_id"] == p_kicker
+
+    # Detonate after ownership transferred.
+    events = engine._detonate(state, {bomb["id"]})
+    assert any(e["type"] == "life_lost" and e["player_id"] == p_planter for e in events)
+    assert b_kicker["kills"] == 1
+    assert b_planter["kills"] == 0
+
+
+def test_throw_transfers_kill_credit(engine: BombermanEngine, state: dict) -> None:
+    planter = state["players"][0]
+    thrower = state["players"][1]
+    p_planter = planter["id"]
+    p_thrower = thrower["id"]
+    b_planter = state["bombers"][p_planter]
+    b_thrower = state["bombers"][p_thrower]
+
+    for x in range(0, 10):
+        state["grid"][1][x] = TILE_EMPTY
+
+    b_thrower["x"], b_thrower["y"] = 1, 1
+    b_thrower["facing"] = "right"
+    b_thrower["can_throw"] = True
+    b_thrower["kills"] = 0
+    b_thrower["lives"] = 3
+    b_planter["x"], b_planter["y"] = 6, 1
+    b_planter["next_direction"] = "stop"
+    b_planter["kills"] = 0
+    b_planter["lives"] = 3
+    b_planter["invuln_ticks"] = 0
+    b_planter["respawn_ticks"] = 0
+
+    state["bombs"] = [
+        {
+            "id": "enemy-bomb",
+            "x": 1,
+            "y": 1,
+            "owner_id": p_planter,
+            "range": 2,
+            "fuse": 20,
+            "flight": None,
+            "sliding": False,
+            "slide_dir": None,
+            "land_x": None,
+            "land_y": None,
+        }
+    ]
+    state["explosions"] = []
+
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, thrower)
+    assert any(e["type"] == "bomb_picked_up" for e in events)
+    assert state["bombs"][0]["owner_id"] == p_planter  # pick-up alone does not steal credit
+
+    state, events = engine.apply_action(state, {"type": "place_bomb"}, thrower)
+    assert any(e["type"] == "bomb_thrown" for e in events)
+    bomb = state["bombs"][0]
+    assert bomb["owner_id"] == p_thrower
+
+    # Land the throw, then detonate on the victim.
+    for _ in range(5):
+        if bomb.get("flight"):
+            state, _ = engine.tick(state)
+        else:
+            break
+    bomb["x"], bomb["y"] = 6, 1
+    events = engine._detonate(state, {bomb["id"]})
+    assert any(e["type"] == "life_lost" and e["player_id"] == p_planter for e in events)
+    assert b_thrower["kills"] == 1
+    assert b_planter["kills"] == 0

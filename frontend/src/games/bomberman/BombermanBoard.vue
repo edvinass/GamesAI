@@ -65,6 +65,10 @@ const canControl = computed(
     isAlive.value &&
     !isRespawning.value,
 )
+/** Eliminated or waiting to respawn — free camera pan with arrows/WASD. */
+const isSpectating = computed(
+  () => props.gameState.phase === 'playing' && !canControl.value,
+)
 
 const myNickname = computed(
   () => props.gameState.players.find((p) => p.id === props.playerId)?.nickname ?? 'You',
@@ -230,8 +234,48 @@ const codeToDirection: Record<string, string> = {
 const directionStack: string[] = []
 let currentDirection = 'stop'
 
+/** Spectate camera pan — separate from movement so respawn doesn't inherit hold. */
+const spectateDirectionStack: string[] = []
+let spectateFocus: { x: number; y: number } | null = null
+const SPECTATE_PAN_CELLS_PER_SEC = 10
+
 function desiredDirection(): string {
   return directionStack.length ? directionStack[directionStack.length - 1]! : 'stop'
+}
+
+function desiredSpectateDirection(): string {
+  return spectateDirectionStack.length
+    ? spectateDirectionStack[spectateDirectionStack.length - 1]!
+    : 'stop'
+}
+
+function seedSpectateFocus() {
+  const me = myBomber.value
+  const gridW = props.gameState.grid_width
+  const gridH = props.gameState.grid_height
+  spectateFocus = {
+    x: me ? me.x : (gridW - 1) / 2,
+    y: me ? me.y : (gridH - 1) / 2,
+  }
+}
+
+function clearSpectateInput() {
+  spectateDirectionStack.length = 0
+  spectateFocus = null
+}
+
+function updateSpectateFocus(dt: number) {
+  if (!isSpectating.value) return
+  if (!spectateFocus) seedSpectateFocus()
+  const dir = desiredSpectateDirection()
+  const delta = DIR_DELTAS[dir]
+  if (!delta || !spectateFocus) return
+  const [dx, dy] = delta
+  const gridW = props.gameState.grid_width
+  const gridH = props.gameState.grid_height
+  const step = SPECTATE_PAN_CELLS_PER_SEC * dt
+  spectateFocus.x = Math.min(gridW - 1, Math.max(0, spectateFocus.x + dx * step))
+  spectateFocus.y = Math.min(gridH - 1, Math.max(0, spectateFocus.y + dy * step))
 }
 
 function emitDirection(force = false) {
@@ -258,6 +302,17 @@ function startNewGame() {
 }
 
 function onKeyDown(e: KeyboardEvent) {
+  if (isSpectating.value) {
+    const direction = codeToDirection[e.code]
+    if (!direction) return
+    e.preventDefault()
+    if (e.repeat) return
+    if (!spectateFocus) seedSpectateFocus()
+    const idx = spectateDirectionStack.indexOf(direction)
+    if (idx >= 0) spectateDirectionStack.splice(idx, 1)
+    spectateDirectionStack.push(direction)
+    return
+  }
   if (!canControl.value) return
   if (e.code === 'Space' || e.key === ' ') {
     e.preventDefault()
@@ -285,6 +340,11 @@ function onKeyUp(e: KeyboardEvent) {
   const direction = codeToDirection[e.code]
   if (!direction) return
   e.preventDefault()
+  if (isSpectating.value) {
+    const idx = spectateDirectionStack.indexOf(direction)
+    if (idx >= 0) spectateDirectionStack.splice(idx, 1)
+    return
+  }
   const idx = directionStack.indexOf(direction)
   if (idx >= 0) directionStack.splice(idx, 1)
   if (!canControl.value) {
@@ -297,6 +357,7 @@ function onKeyUp(e: KeyboardEvent) {
 
 function onWindowBlur() {
   clearMovementInput()
+  spectateDirectionStack.length = 0
 }
 
 let rafId = 0
@@ -627,9 +688,21 @@ watch(canControl, (ok) => {
   if (!ok) {
     directionStack.length = 0
     currentDirection = 'stop'
-  } else if (desiredDirection() !== 'stop') {
-    // Re-assert held direction after countdown / reconnect.
-    emitDirection(true)
+    if (isSpectating.value) seedSpectateFocus()
+  } else {
+    clearSpectateInput()
+    if (desiredDirection() !== 'stop') {
+      // Re-assert held direction after countdown / reconnect.
+      emitDirection(true)
+    }
+  }
+})
+
+watch(isSpectating, (spectating) => {
+  if (spectating) {
+    seedSpectateFocus()
+  } else {
+    clearSpectateInput()
   }
 })
 
@@ -651,6 +724,7 @@ function paint(now: number) {
   lastFrameTime = now
   particles = updateParticles(particles, dt)
   shake = Math.max(0, shake - dt * 2.8)
+  updateSpectateFocus(dt)
 
   const displayW = wrap.clientWidth
   const displayH = wrap.clientHeight
@@ -710,6 +784,8 @@ function paint(now: number) {
     shake,
     mapId: props.gameState.map_id,
     selfMarker: selfMarkerStrength(now),
+    focusX: isSpectating.value && spectateFocus ? spectateFocus.x : undefined,
+    focusY: isSpectating.value && spectateFocus ? spectateFocus.y : undefined,
   })
 }
 
@@ -779,14 +855,14 @@ onUnmounted(() => {
         v-else-if="isAlive && isRespawning && gameState.phase === 'playing'"
         class="spectate-banner"
       >
-        <span class="spectate-label">Respawning…</span>
+        <span class="spectate-label">Respawning… · arrows to pan</span>
       </div>
 
       <div
         v-else-if="!isAlive && gameState.phase === 'playing'"
         class="spectate-banner"
       >
-        <span class="spectate-label">Eliminated — spectating</span>
+        <span class="spectate-label">Eliminated — spectating · arrows to pan</span>
       </div>
 
       <div
@@ -898,7 +974,12 @@ onUnmounted(() => {
           <span v-if="myBomber?.can_kick"> · walk into bombs to kick</span>
           <span class="muted">({{ myActiveBombs }}/{{ myBomber?.max_bombs ?? 1 }})</span>
         </p>
-        <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">Spectating</p>
+        <p v-else-if="gameState.phase === 'playing' && !isAlive" class="muted">
+          Spectating · arrows / WASD to pan
+        </p>
+        <p v-else-if="isSpectating" class="muted">
+          Arrows / WASD to pan map
+        </p>
         <p v-else class="muted">Waiting to start…</p>
         <ul class="power-legend">
           <li><span class="legend-emoji">💣</span>Bomb+</li>

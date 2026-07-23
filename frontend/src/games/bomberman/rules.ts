@@ -21,7 +21,7 @@ export const bombermanRules: GameRules = {
     },
     {
       heading: 'Arena',
-      body: 'Each lobby picks an arena layout (Classic, Fortress, Islands, The Narrows, and more). Arenas are larger than the screen — your bomber stays centered while the map scrolls. Hard walls are permanent; soft walls break and may drop power-ups. Explosions travel in four directions and stop at hard walls.',
+      body: 'Each lobby picks an arena layout (Classic, Fortress, Islands, The Narrows, and more). Arenas are larger than the screen — your bomber stays centered while the map scrolls. When eliminated or respawning, use arrow keys or WASD to pan the camera. Hard walls are permanent; soft walls break and may drop power-ups. Explosions travel in four directions and stop at hard walls.',
     },
     {
       heading: 'Power-ups',
