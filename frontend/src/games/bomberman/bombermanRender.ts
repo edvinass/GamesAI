@@ -279,12 +279,12 @@ export function getMapTheme(mapId?: string | null): MapTheme {
   return CLASSIC_THEME
 }
 
-/** Preferred on-screen window in cells — keeps tiles large on big arenas. */
-const VIEW_COLS = 15
-const VIEW_ROWS = 13
+/** Preferred on-screen window in cells — slight zoom-out from classic 15×13. */
+const VIEW_COLS = 21
+const VIEW_ROWS = 17
 
 function cellSize(displayW: number, displayH: number, gridW: number, gridH: number) {
-  // Cover a classic-sized window so the arena fills the available area (no letterboxing).
+  // Cover a slightly wider window so a few more tiles stay visible while filling the canvas.
   // If the whole map fits in that window, contain-fit instead so edges aren't cropped.
   const cols = Math.min(gridW, VIEW_COLS)
   const rows = Math.min(gridH, VIEW_ROWS)
