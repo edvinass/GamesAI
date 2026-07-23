@@ -50,6 +50,221 @@ export interface RenderFrameInput {
   time: number
   particles?: Particle[]
   shake?: number
+  mapId?: string
+}
+
+export type SoftBlockStyle = 'brick' | 'crate' | 'ice' | 'hedge' | 'wood' | 'stone'
+export type HardBlockStyle = 'steel' | 'stone' | 'crystal' | 'rust' | 'sandstone'
+
+export interface MapTheme {
+  id: string
+  floorTop: string
+  floorBottom: string
+  checker: string
+  tileInset: string
+  vignette: string
+  hard: [string, string, string]
+  soft: [string, string, string]
+  softStroke: string
+  softSheen: string
+  hardStyle: HardBlockStyle
+  softStyle: SoftBlockStyle
+  debris: string[]
+  accent: string
+  accentRgb: string
+  glow: string
+  wrapTop: string
+  wrapBottom: string
+}
+
+const CLASSIC_THEME: MapTheme = {
+  id: 'classic',
+  floorTop: '#1c2838',
+  floorBottom: '#121a24',
+  checker: 'rgba(255,255,255,0.025)',
+  tileInset: 'rgba(0,0,0,0.12)',
+  vignette: 'rgba(0,0,0,0.28)',
+  hard: ['#5a6578', '#3d4656', '#2a3140'],
+  soft: ['#e09a55', '#c47432', '#8f4a1c'],
+  softStroke: 'rgba(60, 28, 8, 0.5)',
+  softSheen: 'rgba(255,220,160,0.12)',
+  hardStyle: 'steel',
+  softStyle: 'brick',
+  debris: ['#c47a3a', '#a05a28', '#d4924e', '#6b3a18'],
+  accent: '#f97316',
+  accentRgb: '249, 115, 22',
+  glow: 'rgba(255, 120, 40, 0.16)',
+  wrapTop: '#101820',
+  wrapBottom: '#0a0e14',
+}
+
+export const MAP_THEMES: Record<string, MapTheme> = {
+  classic: CLASSIC_THEME,
+  open_field: {
+    id: 'open_field',
+    floorTop: '#2a2418',
+    floorBottom: '#1a1610',
+    checker: 'rgba(255,210,140,0.04)',
+    tileInset: 'rgba(0,0,0,0.14)',
+    vignette: 'rgba(40,28,10,0.32)',
+    hard: ['#9a8b6e', '#6f6350', '#4a4236'],
+    soft: ['#d4a574', '#b8844a', '#8a5c2e'],
+    softStroke: 'rgba(70, 40, 16, 0.55)',
+    softSheen: 'rgba(255,230,180,0.14)',
+    hardStyle: 'sandstone',
+    softStyle: 'crate',
+    debris: ['#c4965a', '#a07438', '#e0b878', '#6e4820'],
+    accent: '#d4a017',
+    accentRgb: '212, 160, 23',
+    glow: 'rgba(212, 160, 23, 0.14)',
+    wrapTop: '#1c1810',
+    wrapBottom: '#0e0c08',
+  },
+  crossroads: {
+    id: 'crossroads',
+    floorTop: '#1a1e24',
+    floorBottom: '#0e1218',
+    checker: 'rgba(180,200,220,0.035)',
+    tileInset: 'rgba(0,0,0,0.16)',
+    vignette: 'rgba(0,0,0,0.34)',
+    hard: ['#6a7380', '#4a5360', '#2e3540'],
+    soft: ['#8a919c', '#6a717c', '#4a515c'],
+    softStroke: 'rgba(20, 24, 30, 0.55)',
+    softSheen: 'rgba(220,230,240,0.1)',
+    hardStyle: 'stone',
+    softStyle: 'stone',
+    debris: ['#7a818c', '#5a616c', '#9aa1ac', '#3a414c'],
+    accent: '#94a3b8',
+    accentRgb: '148, 163, 184',
+    glow: 'rgba(148, 163, 184, 0.12)',
+    wrapTop: '#12161c',
+    wrapBottom: '#080a0e',
+  },
+  fortress: {
+    id: 'fortress',
+    floorTop: '#1a1c18',
+    floorBottom: '#0e100e',
+    checker: 'rgba(120,160,100,0.03)',
+    tileInset: 'rgba(0,0,0,0.18)',
+    vignette: 'rgba(0,0,0,0.38)',
+    hard: ['#4a5248', '#323a32', '#1e241e'],
+    soft: ['#6b5a3e', '#4e422c', '#342c1c'],
+    softStroke: 'rgba(20, 30, 16, 0.55)',
+    softSheen: 'rgba(160,200,120,0.08)',
+    hardStyle: 'stone',
+    softStyle: 'crate',
+    debris: ['#5a4a30', '#3e3420', '#7a6a48', '#2a2418'],
+    accent: '#84cc16',
+    accentRgb: '132, 204, 22',
+    glow: 'rgba(100, 140, 60, 0.14)',
+    wrapTop: '#121410',
+    wrapBottom: '#080a08',
+  },
+  labyrinth: {
+    id: 'labyrinth',
+    floorTop: '#1c1624',
+    floorBottom: '#100e18',
+    checker: 'rgba(180,140,220,0.035)',
+    tileInset: 'rgba(0,0,0,0.16)',
+    vignette: 'rgba(20,10,30,0.4)',
+    hard: ['#5a4a68', '#3e3450', '#2a2438'],
+    soft: ['#6b5a3e', '#4a3e2a', '#2e2618'],
+    softStroke: 'rgba(40, 24, 50, 0.55)',
+    softSheen: 'rgba(200,160,255,0.08)',
+    hardStyle: 'stone',
+    softStyle: 'hedge',
+    debris: ['#5a4a30', '#3e3420', '#7a5a90', '#2a2038'],
+    accent: '#a855f7',
+    accentRgb: '168, 85, 247',
+    glow: 'rgba(168, 85, 247, 0.14)',
+    wrapTop: '#141018',
+    wrapBottom: '#0a0810',
+  },
+  islands: {
+    id: 'islands',
+    floorTop: '#143038',
+    floorBottom: '#0a1c24',
+    checker: 'rgba(80,200,200,0.04)',
+    tileInset: 'rgba(0,20,30,0.18)',
+    vignette: 'rgba(0,20,30,0.36)',
+    hard: ['#5a7068', '#3e5248', '#2a3a34'],
+    soft: ['#c4a06a', '#a07840', '#6e5028'],
+    softStroke: 'rgba(40, 28, 12, 0.5)',
+    softSheen: 'rgba(255,230,180,0.12)',
+    hardStyle: 'stone',
+    softStyle: 'wood',
+    debris: ['#b89050', '#8a6830', '#d4b078', '#5a4020'],
+    accent: '#14b8a6',
+    accentRgb: '20, 184, 166',
+    glow: 'rgba(20, 184, 166, 0.14)',
+    wrapTop: '#0e2028',
+    wrapBottom: '#061018',
+  },
+  diamond: {
+    id: 'diamond',
+    floorTop: '#142028',
+    floorBottom: '#0a141c',
+    checker: 'rgba(120,220,255,0.04)',
+    tileInset: 'rgba(0,40,60,0.14)',
+    vignette: 'rgba(0,30,50,0.34)',
+    hard: ['#6ec8e8', '#3a9abc', '#206880'],
+    soft: ['#b8e0f0', '#7ab8d0', '#4a88a0'],
+    softStroke: 'rgba(20, 60, 80, 0.5)',
+    softSheen: 'rgba(220,250,255,0.22)',
+    hardStyle: 'crystal',
+    softStyle: 'ice',
+    debris: ['#8ad0e8', '#5aa8c0', '#c0e8f4', '#3a7890'],
+    accent: '#22d3ee',
+    accentRgb: '34, 211, 238',
+    glow: 'rgba(34, 211, 238, 0.14)',
+    wrapTop: '#0e1a22',
+    wrapBottom: '#060e14',
+  },
+  narrows: {
+    id: 'narrows',
+    floorTop: '#241818',
+    floorBottom: '#140c0c',
+    checker: 'rgba(255,100,60,0.03)',
+    tileInset: 'rgba(0,0,0,0.2)',
+    vignette: 'rgba(40,10,0,0.42)',
+    hard: ['#8a5040', '#5e3428', '#3a2018'],
+    soft: ['#a06040', '#7a4030', '#4e2818'],
+    softStroke: 'rgba(50, 18, 10, 0.6)',
+    softSheen: 'rgba(255,160,100,0.1)',
+    hardStyle: 'rust',
+    softStyle: 'crate',
+    debris: ['#a05030', '#7a3820', '#c07048', '#4a2010'],
+    accent: '#ef4444',
+    accentRgb: '239, 68, 68',
+    glow: 'rgba(239, 68, 68, 0.14)',
+    wrapTop: '#1a1010',
+    wrapBottom: '#0c0606',
+  },
+  arena: {
+    id: 'arena',
+    floorTop: '#2a2218',
+    floorBottom: '#18140e',
+    checker: 'rgba(255,200,120,0.04)',
+    tileInset: 'rgba(0,0,0,0.14)',
+    vignette: 'rgba(30,20,8,0.3)',
+    hard: ['#b09a78', '#80705a', '#54483a'],
+    soft: ['#d4b080', '#b08850', '#7a5830'],
+    softStroke: 'rgba(60, 40, 16, 0.5)',
+    softSheen: 'rgba(255,230,180,0.14)',
+    hardStyle: 'sandstone',
+    softStyle: 'brick',
+    debris: ['#c4a060', '#9a7840', '#e0c088', '#6a5028'],
+    accent: '#f59e0b',
+    accentRgb: '245, 158, 11',
+    glow: 'rgba(245, 158, 11, 0.14)',
+    wrapTop: '#1c1610',
+    wrapBottom: '#0e0a08',
+  },
+}
+
+export function getMapTheme(mapId?: string | null): MapTheme {
+  if (mapId && MAP_THEMES[mapId]) return MAP_THEMES[mapId]!
+  return CLASSIC_THEME
 }
 
 function cellSize(displayW: number, displayH: number, gridW: number, gridH: number) {
@@ -315,9 +530,14 @@ export function spawnExplosionParticles(cx: number, cy: number, count = 14): Par
   return particles
 }
 
-export function spawnDebrisParticles(cx: number, cy: number, count = 8): Particle[] {
+export function spawnDebrisParticles(
+  cx: number,
+  cy: number,
+  count = 8,
+  debrisColors?: string[],
+): Particle[] {
   const particles: Particle[] = []
-  const colors = ['#c47a3a', '#a05a28', '#d4924e', '#6b3a18']
+  const colors = debrisColors?.length ? debrisColors : CLASSIC_THEME.debris
   for (let i = 0; i < count; i++) {
     const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI
     const speed = 0.8 + Math.random() * 2.2
@@ -382,23 +602,30 @@ export function updateParticles(particles: Particle[], dt: number): Particle[] {
   return next
 }
 
-function drawHardBlock(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
+function drawHardBlock(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  s: number,
+  theme: MapTheme,
+) {
   const pad = s * 0.05
   const bx = x + pad
   const by = y + pad
   const bw = s - pad * 2
   const bh = s - pad * 2
+  const radius =
+    theme.hardStyle === 'crystal' ? s * 0.06 : theme.hardStyle === 'sandstone' ? s * 0.14 : s * 0.1
 
-  // Depth shadow
   ctx.fillStyle = 'rgba(0,0,0,0.35)'
-  drawRoundRect(ctx, bx + s * 0.04, by + s * 0.05, bw, bh, s * 0.1)
+  drawRoundRect(ctx, bx + s * 0.04, by + s * 0.05, bw, bh, radius)
   ctx.fill()
 
   const grad = ctx.createLinearGradient(bx, by, bx, by + bh)
-  grad.addColorStop(0, '#5a6578')
-  grad.addColorStop(0.45, '#3d4656')
-  grad.addColorStop(1, '#2a3140')
-  drawRoundRect(ctx, bx, by, bw, bh, s * 0.1)
+  grad.addColorStop(0, theme.hard[0])
+  grad.addColorStop(0.45, theme.hard[1])
+  grad.addColorStop(1, theme.hard[2])
+  drawRoundRect(ctx, bx, by, bw, bh, radius)
   ctx.fillStyle = grad
   ctx.fill()
 
@@ -406,23 +633,87 @@ function drawHardBlock(ctx: CanvasRenderingContext2D, x: number, y: number, s: n
   ctx.lineWidth = Math.max(1, s * 0.04)
   ctx.stroke()
 
-  // Rivets
-  ctx.fillStyle = 'rgba(255,255,255,0.14)'
-  for (const [rx, ry] of [
-    [0.18, 0.18],
-    [0.82, 0.18],
-    [0.18, 0.82],
-    [0.82, 0.82],
-  ] as const) {
+  if (theme.hardStyle === 'steel' || theme.hardStyle === 'rust') {
+    ctx.fillStyle =
+      theme.hardStyle === 'rust' ? 'rgba(255,160,100,0.12)' : 'rgba(255,255,255,0.14)'
+    for (const [rx, ry] of [
+      [0.18, 0.18],
+      [0.82, 0.18],
+      [0.18, 0.82],
+      [0.82, 0.82],
+    ] as const) {
+      ctx.beginPath()
+      ctx.arc(bx + bw * rx, by + bh * ry, s * 0.045, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  } else if (theme.hardStyle === 'crystal') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)'
+    ctx.lineWidth = Math.max(1, s * 0.025)
     ctx.beginPath()
-    ctx.arc(bx + bw * rx, by + bh * ry, s * 0.045, 0, Math.PI * 2)
+    ctx.moveTo(bx + bw * 0.5, by + bh * 0.12)
+    ctx.lineTo(bx + bw * 0.18, by + bh * 0.72)
+    ctx.lineTo(bx + bw * 0.82, by + bh * 0.72)
+    ctx.closePath()
+    ctx.stroke()
+    ctx.fillStyle = 'rgba(255,255,255,0.16)'
     ctx.fill()
+  } else if (theme.hardStyle === 'stone' || theme.hardStyle === 'sandstone') {
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)'
+    ctx.lineWidth = Math.max(1, s * 0.025)
+    ctx.beginPath()
+    ctx.moveTo(bx + bw * 0.2, by + bh * 0.35)
+    ctx.lineTo(bx + bw * 0.75, by + bh * 0.28)
+    ctx.moveTo(bx + bw * 0.3, by + bh * 0.7)
+    ctx.lineTo(bx + bw * 0.85, by + bh * 0.62)
+    ctx.stroke()
   }
 
-  // Top sheen
-  ctx.fillStyle = 'rgba(255,255,255,0.1)'
+  ctx.fillStyle =
+    theme.hardStyle === 'crystal' ? 'rgba(220,250,255,0.22)' : 'rgba(255,255,255,0.1)'
   drawRoundRect(ctx, bx + bw * 0.12, by + bh * 0.1, bw * 0.5, bh * 0.16, 2)
   ctx.fill()
+}
+
+function drawSoftDetail(
+  ctx: CanvasRenderingContext2D,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
+  wobble: number,
+  style: SoftBlockStyle,
+) {
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)'
+  ctx.lineWidth = Math.max(1, bw * 0.04)
+  ctx.beginPath()
+  if (style === 'brick' || style === 'stone') {
+    ctx.moveTo(bx + bw * 0.5, by + wobble)
+    ctx.lineTo(bx + bw * 0.5, by + bh + wobble)
+    ctx.moveTo(bx, by + bh * 0.33 + wobble)
+    ctx.lineTo(bx + bw * 0.5, by + bh * 0.33 + wobble)
+    ctx.moveTo(bx + bw * 0.5, by + bh * 0.66 + wobble)
+    ctx.lineTo(bx + bw, by + bh * 0.66 + wobble)
+  } else if (style === 'crate' || style === 'wood') {
+    ctx.moveTo(bx + bw * 0.15, by + bh * 0.15 + wobble)
+    ctx.lineTo(bx + bw * 0.85, by + bh * 0.85 + wobble)
+    ctx.moveTo(bx + bw * 0.85, by + bh * 0.15 + wobble)
+    ctx.lineTo(bx + bw * 0.15, by + bh * 0.85 + wobble)
+    ctx.stroke()
+    ctx.strokeRect(bx + bw * 0.12, by + bh * 0.12 + wobble, bw * 0.76, bh * 0.76)
+    return
+  } else if (style === 'ice') {
+    ctx.moveTo(bx + bw * 0.2, by + bh * 0.25 + wobble)
+    ctx.lineTo(bx + bw * 0.55, by + bh * 0.7 + wobble)
+    ctx.moveTo(bx + bw * 0.55, by + bh * 0.2 + wobble)
+    ctx.lineTo(bx + bw * 0.8, by + bh * 0.55 + wobble)
+  } else if (style === 'hedge') {
+    for (let i = 0; i < 3; i++) {
+      const yy = by + bh * (0.25 + i * 0.25) + wobble
+      ctx.moveTo(bx + bw * 0.15, yy)
+      ctx.quadraticCurveTo(bx + bw * 0.5, yy - bh * 0.08, bx + bw * 0.85, yy)
+    }
+  }
+  ctx.stroke()
 }
 
 function drawSoftBlock(
@@ -431,6 +722,7 @@ function drawSoftBlock(
   y: number,
   s: number,
   time: number,
+  theme: MapTheme,
 ) {
   const pad = s * 0.07
   const bx = x + pad
@@ -438,36 +730,27 @@ function drawSoftBlock(
   const bw = s - pad * 2
   const bh = s - pad * 2
   const wobble = Math.sin(time / 900 + x * 0.07 + y * 0.11) * s * 0.008
+  const radius = theme.softStyle === 'ice' ? s * 0.14 : s * 0.08
 
   ctx.fillStyle = 'rgba(0,0,0,0.28)'
-  drawRoundRect(ctx, bx + s * 0.03, by + s * 0.04, bw, bh, s * 0.08)
+  drawRoundRect(ctx, bx + s * 0.03, by + s * 0.04, bw, bh, radius)
   ctx.fill()
 
   const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh)
-  grad.addColorStop(0, '#e09a55')
-  grad.addColorStop(0.5, '#c47432')
-  grad.addColorStop(1, '#8f4a1c')
-  drawRoundRect(ctx, bx, by + wobble, bw, bh, s * 0.08)
+  grad.addColorStop(0, theme.soft[0])
+  grad.addColorStop(0.5, theme.soft[1])
+  grad.addColorStop(1, theme.soft[2])
+  drawRoundRect(ctx, bx, by + wobble, bw, bh, radius)
   ctx.fillStyle = grad
   ctx.fill()
 
-  ctx.strokeStyle = 'rgba(60, 28, 8, 0.5)'
+  ctx.strokeStyle = theme.softStroke
   ctx.lineWidth = Math.max(1, s * 0.035)
   ctx.stroke()
 
-  // Brick mortar lines
-  ctx.strokeStyle = 'rgba(0,0,0,0.22)'
-  ctx.lineWidth = Math.max(1, s * 0.03)
-  ctx.beginPath()
-  ctx.moveTo(bx + bw * 0.5, by + wobble)
-  ctx.lineTo(bx + bw * 0.5, by + bh + wobble)
-  ctx.moveTo(bx, by + bh * 0.33 + wobble)
-  ctx.lineTo(bx + bw * 0.5, by + bh * 0.33 + wobble)
-  ctx.moveTo(bx + bw * 0.5, by + bh * 0.66 + wobble)
-  ctx.lineTo(bx + bw, by + bh * 0.66 + wobble)
-  ctx.stroke()
+  drawSoftDetail(ctx, bx, by, bw, bh, wobble, theme.softStyle)
 
-  ctx.fillStyle = 'rgba(255,220,160,0.12)'
+  ctx.fillStyle = theme.softSheen
   drawRoundRect(ctx, bx + bw * 0.1, by + bh * 0.08 + wobble, bw * 0.4, bh * 0.14, 2)
   ctx.fill()
 }
@@ -932,10 +1215,11 @@ function drawFloor(
   gridW: number,
   gridH: number,
   s: number,
+  theme: MapTheme,
 ) {
   const floor = ctx.createLinearGradient(ox, oy, ox, oy + boardH)
-  floor.addColorStop(0, '#1c2838')
-  floor.addColorStop(1, '#121a24')
+  floor.addColorStop(0, theme.floorTop)
+  floor.addColorStop(1, theme.floorBottom)
   ctx.fillStyle = floor
   ctx.fillRect(ox, oy, boardW, boardH)
 
@@ -944,17 +1228,15 @@ function drawFloor(
       const px = ox + x * s
       const py = oy + y * s
       if ((x + y) % 2 === 0) {
-        ctx.fillStyle = 'rgba(255,255,255,0.025)'
+        ctx.fillStyle = theme.checker
         ctx.fillRect(px, py, s, s)
       }
-      // Subtle tile inset
-      ctx.strokeStyle = 'rgba(0,0,0,0.12)'
+      ctx.strokeStyle = theme.tileInset
       ctx.lineWidth = 1
       ctx.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1)
     }
   }
 
-  // Arena vignette inside board
   const vig = ctx.createRadialGradient(
     ox + boardW / 2,
     oy + boardH / 2,
@@ -964,7 +1246,7 @@ function drawFloor(
     boardW * 0.72,
   )
   vig.addColorStop(0, 'rgba(0,0,0,0)')
-  vig.addColorStop(1, 'rgba(0,0,0,0.28)')
+  vig.addColorStop(1, theme.vignette)
   ctx.fillStyle = vig
   ctx.fillRect(ox, oy, boardW, boardH)
 }
@@ -987,7 +1269,9 @@ export function renderFrame(
     time,
     particles = [],
     shake = 0,
+    mapId,
   } = input
+  const theme = getMapTheme(mapId)
   const s = cellSize(displayW, displayH, gridW, gridH)
   const boardW = s * gridW
   const boardH = s * gridH
@@ -1000,14 +1284,13 @@ export function renderFrame(
   }
 
   ctx.clearRect(0, 0, displayW, displayH)
-  drawFloor(ctx, ox, oy, boardW, boardH, gridW, gridH, s)
+  drawFloor(ctx, ox, oy, boardW, boardH, gridW, gridH, s, theme)
 
-  // Soft then hard for depth ordering feel
   for (let y = 0; y < gridH; y++) {
     const row = grid[y] ?? []
     for (let x = 0; x < gridW; x++) {
       if ((row[x] ?? TILE_EMPTY) === TILE_SOFT) {
-        drawSoftBlock(ctx, ox + x * s, oy + y * s, s, time)
+        drawSoftBlock(ctx, ox + x * s, oy + y * s, s, time, theme)
       }
     }
   }
@@ -1015,7 +1298,7 @@ export function renderFrame(
     const row = grid[y] ?? []
     for (let x = 0; x < gridW; x++) {
       if ((row[x] ?? TILE_EMPTY) === TILE_HARD) {
-        drawHardBlock(ctx, ox + x * s, oy + y * s, s)
+        drawHardBlock(ctx, ox + x * s, oy + y * s, s, theme)
       }
     }
   }
@@ -1044,7 +1327,6 @@ export function renderFrame(
 
   drawParticles(ctx, particles, ox, oy, s)
 
-  // Draw alive bombers last; sort so local player is on top
   const entries = Object.entries(bombers).filter(([, b]) => b.alive)
   entries.sort(([a], [b]) => (a === playerId ? 1 : b === playerId ? -1 : 0))
   for (const [pid, b] of entries) {
@@ -1061,7 +1343,6 @@ export function renderFrame(
     )
   }
 
-  // Carried bombs sit above the bomber's head (classic Power Glove).
   for (const b of bombs) {
     if (b.flight !== 'carried') continue
     drawBomb(
@@ -1076,8 +1357,7 @@ export function renderFrame(
     )
   }
 
-  // Soft outer frame
-  ctx.strokeStyle = 'rgba(249, 115, 22, 0.22)'
+  ctx.strokeStyle = `rgba(${theme.accentRgb}, 0.22)`
   ctx.lineWidth = 2
   ctx.strokeRect(ox - 1, oy - 1, boardW + 2, boardH + 2)
 }

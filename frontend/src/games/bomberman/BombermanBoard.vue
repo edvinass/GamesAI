@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, BombermanGameState, BombermanBomb } from '@/types'
 import {
+  getMapTheme,
   interpolateBombers,
   interpolateBombs,
   renderFrame,
@@ -90,6 +91,19 @@ const playerRows = computed(() =>
 const myActiveBombs = computed(() =>
   (props.gameState.bombs ?? []).filter((b) => b.owner_id === props.playerId).length,
 )
+
+const mapTheme = computed(() => getMapTheme(props.gameState.map_id))
+
+const themeStyle = computed(() => {
+  const t = mapTheme.value
+  return {
+    '--bm-accent': t.accent,
+    '--bm-accent-rgb': t.accentRgb,
+    '--bm-glow': t.glow,
+    '--bm-wrap-top': t.wrapTop,
+    '--bm-wrap-bottom': t.wrapBottom,
+  }
+})
 
 function toggleSoundMute() {
   const next = !soundMuted.value
@@ -427,7 +441,7 @@ function playStateSounds(state: BombermanGameState) {
     for (const key of prev.softCells) {
       if (!softCells.has(key)) {
         const [sx, sy] = key.split(',').map(Number)
-        particles.push(...spawnDebrisParticles(sx!, sy!, 7))
+        particles.push(...spawnDebrisParticles(sx!, sy!, 7, mapTheme.value.debris))
       }
     }
   }
@@ -619,6 +633,7 @@ function paint(now: number) {
     time: now,
     particles,
     shake,
+    mapId: props.gameState.map_id,
   })
 }
 
@@ -652,7 +667,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="bomberman-board">
+  <div class="bomberman-board" :style="themeStyle">
     <div ref="canvasWrapRef" class="canvas-wrap">
       <div class="arena-glow" aria-hidden="true" />
       <canvas ref="canvasRef" class="game-canvas" />
@@ -840,22 +855,30 @@ onUnmounted(() => {
   min-height: 0;
   width: 100%;
   overflow: hidden;
-  border: 1px solid rgba(249, 115, 22, 0.32);
+  border: 1px solid rgba(var(--bm-accent-rgb, 249, 115, 22), 0.32);
   border-radius: calc(var(--radius) + 2px);
   background:
-    radial-gradient(ellipse at 50% 0%, rgba(255, 120, 40, 0.16), transparent 45%),
+    radial-gradient(ellipse at 50% 0%, var(--bm-glow, rgba(255, 120, 40, 0.16)), transparent 45%),
     radial-gradient(ellipse at 80% 100%, rgba(40, 80, 140, 0.18), transparent 40%),
-    linear-gradient(180deg, #101820 0%, #0a0e14 100%);
+    linear-gradient(
+      180deg,
+      var(--bm-wrap-top, #101820) 0%,
+      var(--bm-wrap-bottom, #0a0e14) 100%
+    );
   box-shadow:
     inset 0 0 60px rgba(0, 0, 0, 0.45),
-    0 0 32px rgba(249, 115, 22, 0.1);
+    0 0 32px rgba(var(--bm-accent-rgb, 249, 115, 22), 0.1);
 }
 
 .arena-glow {
   pointer-events: none;
   position: absolute;
   inset: -20%;
-  background: radial-gradient(circle at 50% 40%, rgba(249, 115, 22, 0.08), transparent 55%);
+  background: radial-gradient(
+    circle at 50% 40%,
+    rgba(var(--bm-accent-rgb, 249, 115, 22), 0.08),
+    transparent 55%
+  );
   animation: arena-breathe 5.5s ease-in-out infinite;
 }
 
@@ -1022,9 +1045,9 @@ onUnmounted(() => {
   text-transform: uppercase;
   padding: 0.25rem 0.55rem;
   border-radius: 999px;
-  color: #fdba74;
-  background: rgba(249, 115, 22, 0.14);
-  border: 1px solid rgba(249, 115, 22, 0.28);
+  color: var(--bm-accent, #fdba74);
+  background: rgba(var(--bm-accent-rgb, 249, 115, 22), 0.14);
+  border: 1px solid rgba(var(--bm-accent-rgb, 249, 115, 22), 0.28);
 }
 
 .player-scores {

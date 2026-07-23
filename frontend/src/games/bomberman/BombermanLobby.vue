@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Room } from '@/types'
+import { getMapTheme } from './bombermanRender'
 
 interface MapOption {
   id: string
@@ -109,8 +110,20 @@ const difficultyClass = (difficulty: string) => {
           class="map-card"
           :class="{ selected: m.id === mapId, disabled: !isHost }"
           :disabled="!isHost"
+          :style="{
+            '--map-accent': getMapTheme(m.id).accent,
+            '--map-accent-rgb': getMapTheme(m.id).accentRgb,
+            '--map-floor': getMapTheme(m.id).floorTop,
+            '--map-hard': getMapTheme(m.id).hard[1],
+            '--map-soft': getMapTheme(m.id).soft[1],
+          }"
           @click="mapId = m.id"
         >
+          <div class="map-swatch" aria-hidden="true">
+            <span class="swatch-floor" />
+            <span class="swatch-hard" />
+            <span class="swatch-soft" />
+          </div>
           <div class="map-card-top">
             <span class="map-name">{{ m.name }}</span>
             <span class="diff-badge" :class="difficultyClass(m.difficulty)">
@@ -226,30 +239,67 @@ const difficultyClass = (difficulty: string) => {
   text-align: left;
   padding: 0.7rem 0.75rem;
   border-radius: 10px;
-  border: 1px solid rgba(249, 115, 22, 0.18);
-  background: rgba(20, 16, 12, 0.55);
+  border: 1px solid rgba(var(--map-accent-rgb, 249, 115, 22), 0.22);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--map-floor, #1c2838) 55%, transparent),
+      rgba(12, 14, 18, 0.7)
+    );
   color: var(--text);
   cursor: pointer;
   transition:
     border-color 0.15s ease,
     background 0.15s ease,
-    transform 0.15s ease;
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .map-card:hover:not(:disabled) {
-  border-color: rgba(249, 115, 22, 0.45);
+  border-color: rgba(var(--map-accent-rgb, 249, 115, 22), 0.5);
   transform: translateY(-1px);
 }
 
 .map-card.selected {
-  border-color: rgba(249, 115, 22, 0.75);
-  background: rgba(249, 115, 22, 0.12);
-  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.25);
+  border-color: rgba(var(--map-accent-rgb, 249, 115, 22), 0.8);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--map-accent, #f97316) 18%, transparent),
+      color-mix(in srgb, var(--map-floor, #1c2838) 45%, transparent)
+    );
+  box-shadow: 0 0 0 1px rgba(var(--map-accent-rgb, 249, 115, 22), 0.28);
 }
 
 .map-card.disabled {
   cursor: default;
   opacity: 0.9;
+}
+
+.map-swatch {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.45rem;
+}
+
+.map-swatch span {
+  display: block;
+  width: 1.1rem;
+  height: 0.55rem;
+  border-radius: 3px;
+}
+
+.swatch-floor {
+  background: var(--map-floor, #1c2838);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.swatch-hard {
+  background: var(--map-hard, #3d4656);
+}
+
+.swatch-soft {
+  background: var(--map-soft, #c47432);
 }
 
 .map-card-top {
@@ -263,6 +313,7 @@ const difficultyClass = (difficulty: string) => {
 .map-name {
   font-weight: 700;
   font-size: 0.9rem;
+  color: color-mix(in srgb, var(--map-accent, #f97316) 55%, #f5f5f5);
 }
 
 .diff-badge {
