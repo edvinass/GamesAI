@@ -933,6 +933,139 @@ function drawBomb(
   ctx.fill()
 }
 
+const BLAST_DIRS: Array<[number, number]> = [
+  [0, -1],
+  [0, 1],
+  [-1, 0],
+  [1, 0],
+]
+/** Delay before a blast cell appears, per cell of distance from the bomb. */
+const BLAST_CELL_DELAY_MS = 40
+
+type BlastWave = {
+  startedAt: number
+  centers: Array<{ x: number; y: number }>
+  cells: Set<string>
+}
+
+const blastWaves: BlastWave[] = []
+const blastPrevTtl = new Map<string, number>()
+
+function blastKey(x: number, y: number): string {
+  return `${x},${y}`
+}
+
+function parseBlastKey(key: string): { x: number; y: number } {
+  const [xs, ys] = key.split(',')
+  return { x: Number(xs), y: Number(ys) }
+}
+
+/** Bomb epicenters = strict local maxima of cardinal reach (tips must not count). */
+function findBlastCenters(cellSet: Set<string>): Array<{ x: number; y: number }> {
+  const cells: Array<{ x: number; y: number }> = []
+  for (const key of cellSet) cells.push(parseBlastKey(key))
+  if (cells.length === 0) return []
+
+  const scoreOf = (x: number, y: number) => {
+    let score = 0
+    for (const [dx, dy] of BLAST_DIRS) {
+      let step = 1
+      while (cellSet.has(blastKey(x + dx * step, y + dy * step))) {
+        score++
+        step++
+      }
+    }
+    return score
+  }
+
+  const scores = new Map<string, number>()
+  let maxScore = 0
+  for (const c of cells) {
+    const sc = scoreOf(c.x, c.y)
+    scores.set(blastKey(c.x, c.y), sc)
+    if (sc > maxScore) maxScore = sc
+  }
+
+  const centers: Array<{ x: number; y: number }> = []
+  for (const c of cells) {
+    const key = blastKey(c.x, c.y)
+    const sc = scores.get(key) ?? 0
+    let strictMax = true
+    for (const [dx, dy] of BLAST_DIRS) {
+      const n = scores.get(blastKey(c.x + dx, c.y + dy))
+      if (n != null && n >= sc) {
+        strictMax = false
+        break
+      }
+    }
+    if (strictMax) centers.push(c)
+  }
+  if (centers.length) return centers
+
+  // Fallback: every cell with the best reach score (overlapping bombs).
+  return cells.filter((c) => (scores.get(blastKey(c.x, c.y)) ?? 0) === maxScore)
+}
+
+function distToNearestCenter(
+  x: number,
+  y: number,
+  centers: Array<{ x: number; y: number }>,
+): number {
+  let best = Infinity
+  for (const c of centers) {
+    const d = Math.abs(x - c.x) + Math.abs(y - c.y)
+    if (d < best) best = d
+  }
+  return Number.isFinite(best) ? best : 0
+}
+
+function syncBlastWaves(explosions: BombermanExplosion[], now: number) {
+  const live = new Set(explosions.map((e) => blastKey(e.x, e.y)))
+  for (const key of [...blastPrevTtl.keys()]) {
+    if (!live.has(key)) blastPrevTtl.delete(key)
+  }
+
+  // Drop waves whose cells are all gone.
+  for (let i = blastWaves.length - 1; i >= 0; i--) {
+    const wave = blastWaves[i]!
+    let anyLive = false
+    for (const key of wave.cells) {
+      if (live.has(key)) {
+        anyLive = true
+        break
+      }
+    }
+    if (!anyLive) blastWaves.splice(i, 1)
+  }
+
+  const ignited: BombermanExplosion[] = []
+  for (const e of explosions) {
+    const key = blastKey(e.x, e.y)
+    const prev = blastPrevTtl.get(key)
+    if (prev == null || e.ttl > prev) ignited.push(e)
+    blastPrevTtl.set(key, e.ttl)
+  }
+  if (ignited.length === 0) return
+
+  // One wave per batch of newly ignited cells (a bomb or chain pop).
+  const ignitedSet = new Set(ignited.map((e) => blastKey(e.x, e.y)))
+  blastWaves.push({
+    startedAt: now,
+    centers: findBlastCenters(ignitedSet),
+    cells: ignitedSet,
+  })
+}
+
+/** Newest wave that owns this cell (chain reactions stack as new waves). */
+function waveForCell(key: string): BlastWave | null {
+  for (let i = blastWaves.length - 1; i >= 0; i--) {
+    const wave = blastWaves[i]!
+    if (wave.cells.has(key)) return wave
+  }
+  return null
+}
+
+/** Original per-cell flame cross (unchanged look). */
 function drawExplosion(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -948,12 +1081,7 @@ function drawExplosion(
   const arm = s * (0.18 + 0.2 * intensity)
   const len = s * (0.42 + 0.08 * intensity)
 
-  for (const [dx, dy] of [
-    [0, -1],
-    [0, 1],
-    [-1, 0],
-    [1, 0],
-  ] as const) {
+  for (const [dx, dy] of BLAST_DIRS) {
     const tipX = cx + dx * len
     const tipY = cy + dy * len
     const grad = ctx.createLinearGradient(cx, cy, tipX, tipY)
@@ -985,6 +1113,38 @@ function drawExplosion(
   ctx.arc(cx, cy, s * 0.1 * intensity, 0, Math.PI * 2)
   ctx.fillStyle = `rgba(255, 180, 60, ${0.7 * intensity})`
   ctx.fill()
+}
+
+/**
+ * Same per-cell blast art; only timing changes — farther cells appear later.
+ */
+function drawExplosions(
+  ctx: CanvasRenderingContext2D,
+  explosions: BombermanExplosion[],
+  ox: number,
+  oy: number,
+  s: number,
+  time: number,
+) {
+  if (explosions.length === 0) {
+    blastWaves.length = 0
+    blastPrevTtl.clear()
+    return
+  }
+
+  syncBlastWaves(explosions, time)
+
+  for (const e of explosions) {
+    const key = blastKey(e.x, e.y)
+    const wave = waveForCell(key)
+    if (!wave) {
+      drawExplosion(ctx, ox + e.x * s, oy + e.y * s, s, e.ttl, time)
+      continue
+    }
+    const dist = distToNearestCenter(e.x, e.y, wave.centers)
+    if (time < wave.startedAt + dist * BLAST_CELL_DELAY_MS) continue
+    drawExplosion(ctx, ox + e.x * s, oy + e.y * s, s, e.ttl, time)
+  }
 }
 
 function drawPowerup(
@@ -1803,10 +1963,7 @@ export function renderFrame(
     )
   }
 
-  for (const e of explosions) {
-    if (!inView(e.x, e.y)) continue
-    drawExplosion(ctx, ox + e.x * s, oy + e.y * s, s, e.ttl, time)
-  }
+  drawExplosions(ctx, explosions, ox, oy, s, time)
 
   drawParticles(ctx, particles, ox, oy, s)
 

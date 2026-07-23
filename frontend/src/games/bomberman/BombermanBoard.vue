@@ -593,10 +593,18 @@ function playStateSounds(state: BombermanGameState) {
     const intensity = Math.min(1.35, 0.75 + newBlasts.length * 0.12)
     playExplosion(intensity)
     shake = Math.min(1, shake + 0.55 + newBlasts.length * 0.08)
-    for (const key of newBlasts.length ? newBlasts : [...explKeys].slice(0, 6)) {
-      const [sx, sy] = key.split(',').map(Number)
-      particles.push(...spawnExplosionParticles(sx!, sy!, 10))
+    // One particle burst at the blast centroid — per-tile sparks made stagger look instant.
+    const keys = newBlasts.length ? newBlasts : [...explKeys].slice(0, 1)
+    let sx = 0
+    let sy = 0
+    for (const key of keys) {
+      const [x, y] = key.split(',').map(Number)
+      sx += x!
+      sy += y!
     }
+    sx /= keys.length
+    sy /= keys.length
+    particles.push(...spawnExplosionParticles(sx, sy, 14))
   }
 
   // Soft walls destroyed
