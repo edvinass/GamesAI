@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Room, SnakeGameState } from '@/types'
+import TouchDpad from '@/components/TouchDpad.vue'
 import {
   interpolateBody,
   renderFrame,
@@ -311,44 +312,10 @@ onUnmounted(() => {
         class="touch-controls"
         aria-label="Touch controls"
       >
-        <div class="touch-dpad">
-          <button
-            type="button"
-            class="touch-btn dpad-up"
-            aria-label="Move up"
-            @touchstart.prevent="onTouchDirection('up')"
-            @mousedown.prevent="onTouchDirection('up')"
-          >
-            ▲
-          </button>
-          <button
-            type="button"
-            class="touch-btn dpad-left"
-            aria-label="Move left"
-            @touchstart.prevent="onTouchDirection('left')"
-            @mousedown.prevent="onTouchDirection('left')"
-          >
-            ◀
-          </button>
-          <button
-            type="button"
-            class="touch-btn dpad-right"
-            aria-label="Move right"
-            @touchstart.prevent="onTouchDirection('right')"
-            @mousedown.prevent="onTouchDirection('right')"
-          >
-            ▶
-          </button>
-          <button
-            type="button"
-            class="touch-btn dpad-down"
-            aria-label="Move down"
-            @touchstart.prevent="onTouchDirection('down')"
-            @mousedown.prevent="onTouchDirection('down')"
-          >
-            ▼
-          </button>
-        </div>
+        <TouchDpad
+          accent-color="#a7f3d0"
+          @direction="onTouchDirection"
+        />
         <div class="touch-actions">
           <button
             type="button"
@@ -702,19 +669,14 @@ onUnmounted(() => {
   padding: 0.75rem;
 }
 
-.touch-dpad {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  gap: 0.25rem;
-  width: 9.5rem;
-  height: 9.5rem;
+.touch-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
   pointer-events: auto;
 }
 
 .touch-btn {
-  width: 3rem;
-  height: 3rem;
   border-radius: 12px;
   border: 1px solid rgba(74, 222, 128, 0.35);
   background: rgba(10, 18, 16, 0.85);
@@ -733,33 +695,6 @@ onUnmounted(() => {
 .touch-btn:active {
   transform: scale(0.95);
   background: rgba(74, 222, 128, 0.25);
-}
-
-.dpad-up {
-  grid-column: 2;
-  grid-row: 1;
-}
-
-.dpad-left {
-  grid-column: 1;
-  grid-row: 2;
-}
-
-.dpad-right {
-  grid-column: 3;
-  grid-row: 2;
-}
-
-.dpad-down {
-  grid-column: 2;
-  grid-row: 3;
-}
-
-.touch-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  pointer-events: auto;
 }
 
 .touch-shoot {
