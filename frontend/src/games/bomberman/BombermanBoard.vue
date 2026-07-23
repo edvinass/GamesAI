@@ -437,8 +437,8 @@ function explosionKeys(state: BombermanGameState): Set<string> {
 function playStateSounds(state: BombermanGameState) {
   const bombIds = new Set((state.bombs ?? []).map((b) => b.id))
   const explosionCount = (state.explosions ?? []).length
-  const softCount = countSoftBlocks(state.grid)
-  const softCells = softCellKeys(state.grid)
+  const softCount = countSoftBlocks(state.grid ?? [])
+  const softCells = softCellKeys(state.grid ?? [])
   const explKeys = explosionKeys(state)
   const alive: Record<string, boolean> = {}
   const lives: Record<string, number> = {}
@@ -773,7 +773,7 @@ function paint(now: number) {
   renderFrame(ctx, displayW, displayH, {
     gridW: props.gameState.grid_width,
     gridH: props.gameState.grid_height,
-    grid: props.gameState.grid,
+    grid: props.gameState.grid ?? [],
     bombers: displayBombers,
     bombs: renderedBombs,
     explosions: props.gameState.explosions ?? [],

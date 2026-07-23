@@ -6,7 +6,7 @@ import random
 from datetime import datetime, timedelta, timezone
 
 from app.games.base import GamePlugin
-from app.games.bomberman.ai import choose_ai_action
+from app.games.bomberman.ai import choose_ai_action, _danger_times
 from app.games.bomberman.maps import (
     TILE_EMPTY,
     TILE_HARD,
@@ -227,6 +227,31 @@ class BombermanEngine(GamePlugin):
     def tick_interval_ms(self) -> int:
         return 150
 
+    def clone_tick_state(self, state: dict) -> dict:
+        """Shallow structural copy — avoids deepcopy of the full arena dict."""
+        bombers: dict[str, dict] = {}
+        for pid, bomber in (state.get("bombers") or {}).items():
+            nb = dict(bomber)
+            ids = nb.get("passable_bomb_ids")
+            if ids is not None:
+                nb["passable_bomb_ids"] = list(ids)
+            bombers[pid] = nb
+        out = {
+            **state,
+            "grid": [row[:] for row in state["grid"]],
+            "bombers": bombers,
+            "bombs": [dict(b) for b in state.get("bombs") or []],
+            "explosions": [dict(e) for e in state.get("explosions") or []],
+            "powerups": [dict(p) for p in state.get("powerups") or []],
+            # players / settings are not mutated during tick
+            "players": state.get("players") or [],
+            "settings": state.get("settings") or {},
+        }
+        # Per-broadcast caches must not leak across ticks.
+        out.pop("_public_bundle", None)
+        out["_grid_changes"] = []
+        return out
+
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:
         settings = self.validate_settings(settings)
         if settings.get("solo_practice"):
@@ -384,6 +409,13 @@ class BombermanEngine(GamePlugin):
         nid = int(state.get("_bomb_seq", 0)) + 1
         state["_bomb_seq"] = nid
         return f"bomb-{nid}"
+
+    def _set_tile(self, state: dict, x: int, y: int, tile: int) -> None:
+        """Mutate a grid cell and record it for WS delta broadcasts."""
+        if state["grid"][y][x] == tile:
+            return
+        state["grid"][y][x] = tile
+        state.setdefault("_grid_changes", []).append({"x": x, "y": y, "t": tile})
 
     def _active_bomb_count(self, state: dict, player_id: str) -> int:
         return sum(1 for b in state.get("bombs") or [] if b.get("owner_id") == player_id)
@@ -1141,6 +1173,7 @@ class BombermanEngine(GamePlugin):
 
     def _apply_ai_actions(self, state: dict) -> list[dict]:
         events: list[dict] = []
+        ai_seats: list[tuple[str, dict]] = []
         for player in state["players"]:
             if not player.get("is_ai"):
                 continue
@@ -1148,7 +1181,22 @@ class BombermanEngine(GamePlugin):
             bomber = state["bombers"].get(pid)
             if not bomber or not self._bomber_controllable(bomber):
                 continue
-            direction, place = choose_ai_action(state, pid, bomber)
+            ai_seats.append((pid, bomber))
+        if not ai_seats:
+            return events
+
+        # One danger map per tick for all AIs; stagger heavy trap/soft scans.
+        danger = _danger_times(state)
+        playing_tick = int(state.get("playing_tick", 0))
+        for i, (pid, bomber) in enumerate(ai_seats):
+            heavy_think = (playing_tick + i) % 2 == 0
+            direction, place = choose_ai_action(
+                state,
+                pid,
+                bomber,
+                danger=danger,
+                heavy_think=heavy_think,
+            )
             if direction in DIRECTIONS or direction == "stop":
                 bomber["next_direction"] = self._apply_reverse(bomber, direction)
             if place:
@@ -1370,7 +1418,7 @@ class BombermanEngine(GamePlugin):
         destroyed_soft: list[tuple[int, int]] = []
         for x, y in blast_cells:
             if state["grid"][y][x] == TILE_SOFT:
-                state["grid"][y][x] = TILE_EMPTY
+                self._set_tile(state, x, y, TILE_EMPTY)
                 destroyed_soft.append((x, y))
                 events.append({"type": "soft_destroyed", "x": x, "y": y})
 
@@ -1643,7 +1691,7 @@ class BombermanEngine(GamePlugin):
             for x, y in ring:
                 if state["grid"][y][x] == TILE_HARD:
                     continue
-                state["grid"][y][x] = TILE_HARD
+                self._set_tile(state, x, y, TILE_HARD)
                 hardened.append({"x": x, "y": y})
             # Wipe soft drops / bombs / powerups on the new walls.
             hard_set = {(c["x"], c["y"]) for c in hardened}
@@ -1831,6 +1879,9 @@ class BombermanEngine(GamePlugin):
 
     def tick(self, state: dict) -> tuple[dict, list[dict]]:
         events: list[dict] = []
+        # Fresh delta list for this tick's WS payload.
+        state["_grid_changes"] = []
+        state.pop("_public_bundle", None)
 
         if state["phase"] == "finished":
             return state, events
@@ -1930,6 +1981,28 @@ class BombermanEngine(GamePlugin):
         if match_ticks > 0 and state.get("phase") == "playing":
             left = max(0, match_ticks - playing_tick)
             time_remaining_sec = (left * tick_ms) // 1000
+
+        # Full grid on countdown / early ticks / periodic resync; deltas otherwise.
+        # Bundle is shared across viewers for the same tick.
+        tick = int(state.get("tick", 0))
+        need_full = (
+            state.get("phase") != "playing"
+            or tick <= 1
+            or playing_tick % 60 == 0
+        )
+        bundle = state.get("_public_bundle")
+        if not (isinstance(bundle, dict) and bundle.get("tick") == tick and bundle.get("full") == need_full):
+            if need_full:
+                grid_part = {"grid": state["grid"], "grid_full": True}
+            else:
+                grid_part = {
+                    "grid_delta": list(state.get("_grid_changes") or []),
+                    "grid_full": False,
+                }
+            bundle = {"tick": tick, "full": need_full, "grid_part": grid_part}
+            state["_public_bundle"] = bundle
+        grid_part = bundle["grid_part"]
+
         return {
             "phase": state["phase"],
             "countdown_ends_at": state.get("countdown_ends_at"),
@@ -1938,7 +2011,7 @@ class BombermanEngine(GamePlugin):
             "tick_ms": tick_ms,
             "grid_width": state["grid_width"],
             "grid_height": state["grid_height"],
-            "grid": state["grid"],
+            **grid_part,
             "map_id": state.get("map_id", settings.get("map_id", "classic")),
             "map_name": state.get("map_name", "Classic"),
             "game_mode": state.get("game_mode", settings.get("game_mode", "classic")),

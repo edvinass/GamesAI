@@ -1002,7 +1002,7 @@ class RoomService:
         game = get_game(room.game_type)
         player_data = self._player_data(player)
         state, events = game.apply_action(
-            copy.deepcopy(room.game_state.state), action, player_data
+            game.clone_tick_state(room.game_state.state), action, player_data
         )
         room.game_state.state = state
         room.game_state.version += 1
@@ -1016,7 +1016,6 @@ class RoomService:
             room.status = RoomStatus.PLAYING
 
         await self.db.commit()
-        await self.db.refresh(room, ["players", "game_state"])
         return room, state, events
 
     async def apply_game_tick(
@@ -1031,22 +1030,37 @@ class RoomService:
                 raise ValueError("Game not in progress")
 
             game = get_game(room.game_type)
-            state, events = game.tick(copy.deepcopy(room.game_state.state))
+            state, events = game.tick(game.clone_tick_state(room.game_state.state))
             room.game_state.state = state
             room.game_state.version += 1
             if state.get("winner") or state.get("phase") in ("finished", "game_over"):
                 room.status = RoomStatus.FINISHED
 
             await self.db.commit()
-            await self.db.refresh(room, ["players", "game_state"])
+            # expire_on_commit=False — room stays usable for broadcast without refresh.
             return room, state, events
 
-    def get_viewer_state(self, room: Room, viewer: RoomPlayer | None) -> dict | None:
+    def get_viewer_state(
+        self,
+        room: Room,
+        viewer: RoomPlayer | None,
+        *,
+        full_grid: bool = False,
+    ) -> dict | None:
         if not room.game_state:
             return None
         game = get_game(room.game_type)
         viewer_data = self._player_data(viewer) if viewer else None
-        return game.get_public_state(room.game_state.state, viewer_data)
+        public = game.get_public_state(room.game_state.state, viewer_data)
+        if full_grid and public is not None and room.game_type == "bomberman":
+            # Late join / reconnect: always ship the full arena.
+            public = {
+                **public,
+                "grid": room.game_state.state["grid"],
+                "grid_full": True,
+            }
+            public.pop("grid_delta", None)
+        return public
 
     async def run_ai_turn_if_needed(self, room_id: uuid.UUID, broadcast_fn) -> None:
         await process_ai_turns(room_id, broadcast_fn)

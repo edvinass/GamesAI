@@ -919,9 +919,18 @@ def choose_ai_action(
     state: dict,
     player_id: str,
     bomber: dict[str, Any],
+    *,
+    danger: dict[tuple[int, int], int] | None = None,
+    heavy_think: bool = True,
 ) -> tuple[str, bool]:
-    """Return (direction, place_bomb)."""
-    danger = _danger_times(state)
+    """Return (direction, place_bomb).
+
+    Pass a shared ``danger`` map when multiple AIs act in the same tick.
+    ``heavy_think=False`` skips expensive trap / soft-farm scans (survival and
+    bombing still run every tick).
+    """
+    if danger is None:
+        danger = _danger_times(state)
     pos = (bomber["x"], bomber["y"])
     here_lethal = danger.get(pos)
 
@@ -1048,9 +1057,10 @@ def choose_ai_action(
                 return esc, True
 
     # 2b) One-ply plant: step onto a tile that yields a trap/kill next tick.
-    approach = _best_plant_approach(state, player_id, bomber, danger)
-    if approach:
-        return approach, False
+    if heavy_think:
+        approach = _best_plant_approach(state, player_id, bomber, danger)
+        if approach:
+            return approach, False
 
     # 3) Priority power-ups (throw/kick/bomb before filler).
     powerups = _priority_powerup_targets(state, bomber, danger)
@@ -1064,13 +1074,14 @@ def choose_ai_action(
         default=99,
     )
 
-    # 4) Path to trap tiles before ordinary hunting lines.
-    traps = _trap_positions(state, player_id, bomber, danger)
-    move, dist = _bfs_to_targets(state, bomber, danger, traps, max_dist=24)
-    if move and move != "stop":
-        if dist == 0:
-            return "stop", False
-        return move, False
+    # 4) Path to trap tiles — expensive; only on heavy-think ticks.
+    if heavy_think:
+        traps = _trap_positions(state, player_id, bomber, danger)
+        move, dist = _bfs_to_targets(state, bomber, danger, traps, max_dist=24)
+        if move and move != "stop":
+            if dist == 0:
+                return "stop", False
+            return move, False
 
     # 5) Hunt enemies — get onto a bombing line (uses predicted positions).
     hunt = _hunting_positions(state, player_id, bomber, danger)
@@ -1084,10 +1095,11 @@ def choose_ai_action(
 
     # 6) Soft-wall farming when enemies are far or map is clogged.
     if nearest_enemy_dist > 6 or int(bomber.get("bomb_range", 1)) < 2:
-        soft = _soft_targets(state, danger)
-        move, _ = _bfs_to_targets(state, bomber, danger, soft, max_dist=20)
-        if move and move != "stop":
-            return move, False
+        if heavy_think or nearest_enemy_dist > 8:
+            soft = _soft_targets(state, danger)
+            move, _ = _bfs_to_targets(state, bomber, danger, soft, max_dist=20)
+            if move and move != "stop":
+                return move, False
 
     # 7) Close the gap — path toward enemy tile neighborhood (incl. predicted).
     if enemies:
@@ -1101,10 +1113,11 @@ def choose_ai_action(
         if move and move != "stop":
             return move, False
 
-    # 8) Soft walls as fallback
-    soft = _soft_targets(state, danger)
-    move, _ = _bfs_to_targets(state, bomber, danger, soft, max_dist=25)
-    if move and move != "stop":
-        return move, False
+    # 8) Soft walls as fallback (heavy ticks only — full-map scan).
+    if heavy_think:
+        soft = _soft_targets(state, danger)
+        move, _ = _bfs_to_targets(state, bomber, danger, soft, max_dist=25)
+        if move and move != "stop":
+            return move, False
 
     return _best_safe_direction(state, bomber, danger), False

@@ -67,33 +67,45 @@ def schedule_game_updates(room_id: uuid.UUID, game_type: str) -> None:
 
 async def broadcast_room_state(room, events: list[dict] | None = None) -> None:
     room_id = str(room.id)
-    async with async_session() as db:
-        service = RoomService(db)
-        room = await service._load_room(room.id)
-        if not room:
-            return
-        for player in room.players:
-            viewer_state = service.get_viewer_state(room, player)
-            payload: dict[str, Any] = {
-                "type": "state_updated",
-                "room": room_to_dict(room),
-                "game_state": viewer_state,
-            }
-            if events:
-                payload["events"] = events
-            if room_id in manager.active and str(player.id) in manager.active[room_id]:
-                try:
-                    await manager.active[room_id][str(player.id)].send_json(payload)
-                except Exception:
-                    pass
+    # Tick/action paths commit with expire_on_commit=False — reuse the in-memory
+    # room to skip a full DB reload every ~150ms.
+    if room.game_state is None or room.players is None:
+        async with async_session() as db:
+            service = RoomService(db)
+            room = await service._load_room(room.id)
+            if not room:
+                return
+            await _send_room_state(room, events)
+        return
+    await _send_room_state(room, events)
 
-        lobby_payload = {
-            "type": "room_updated",
+
+async def _send_room_state(room, events: list[dict] | None = None) -> None:
+    room_id = str(room.id)
+    # RoomService.get_viewer_state does not need a live DB session.
+    service = RoomService.__new__(RoomService)
+    for player in room.players:
+        viewer_state = service.get_viewer_state(room, player)
+        payload: dict[str, Any] = {
+            "type": "state_updated",
             "room": room_to_dict(room),
+            "game_state": viewer_state,
         }
         if events:
-            lobby_payload["events"] = events
-        await manager.broadcast(room_id, lobby_payload)
+            payload["events"] = events
+        if room_id in manager.active and str(player.id) in manager.active[room_id]:
+            try:
+                await manager.active[room_id][str(player.id)].send_json(payload)
+            except Exception:
+                pass
+
+    lobby_payload = {
+        "type": "room_updated",
+        "room": room_to_dict(room),
+    }
+    if events:
+        lobby_payload["events"] = events
+    await manager.broadcast(room_id, lobby_payload)
 
 
 async def handle_websocket(websocket: WebSocket, room_id: uuid.UUID, token: str) -> None:
@@ -116,7 +128,7 @@ async def handle_websocket(websocket: WebSocket, room_id: uuid.UUID, token: str)
             service = RoomService(db)
             room = await service._load_room(room_id)
             if room:
-                viewer_state = service.get_viewer_state(room, player)
+                viewer_state = service.get_viewer_state(room, player, full_grid=True)
                 await websocket.send_json({
                     "type": "connected",
                     "room": room_to_dict(room),

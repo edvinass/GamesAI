@@ -26,7 +26,7 @@ import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
 import { pokerReactionSet } from '@/games/poker/reactions'
 import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState, PinballGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState, isPinballState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState, isPinballState, mergeBombermanGameState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -160,7 +160,21 @@ onMounted(async () => {
 watch(lastMessage, (msg) => {
   if (!msg) return
   if (msg.room) room.value = msg.room
-  if (msg.game_state !== undefined) gameState.value = msg.game_state
+  if (msg.game_state !== undefined) {
+    const incoming = msg.game_state
+    if (
+      incoming &&
+      isBombermanState(incoming) &&
+      gameState.value &&
+      isBombermanState(gameState.value)
+    ) {
+      gameState.value = mergeBombermanGameState(gameState.value, incoming)
+    } else if (incoming && isBombermanState(incoming)) {
+      gameState.value = mergeBombermanGameState(null, incoming)
+    } else {
+      gameState.value = incoming
+    }
+  }
   if (msg.type === 'game_started' && msg.room) {
     room.value = msg.room
   }

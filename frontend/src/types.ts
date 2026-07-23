@@ -202,6 +202,13 @@ export interface BombermanPowerup {
   type: BombermanPowerupType
 }
 
+export interface BombermanGridDelta {
+  x: number
+  y: number
+  /** Tile value: 0 empty, 1 hard, 2 soft */
+  t: number
+}
+
 export interface BombermanGameState {
   phase: 'countdown' | 'playing' | 'finished'
   countdown_ends_at: string | null
@@ -210,8 +217,12 @@ export interface BombermanGameState {
   tick_ms?: number
   grid_width: number
   grid_height: number
-  /** 0 empty, 1 hard wall, 2 soft wall */
-  grid: number[][]
+  /** 0 empty, 1 hard wall, 2 soft wall — omitted when only grid_delta is sent */
+  grid?: number[][]
+  /** Changed cells since the previous tick (when grid_full is false). */
+  grid_delta?: BombermanGridDelta[]
+  /** True when `grid` is a full snapshot. */
+  grid_full?: boolean
   map_id?: string
   map_name?: string
   game_mode?: 'classic' | 'team' | 'kill_race' | string
@@ -982,7 +993,38 @@ export function isSnakeState(state: GameState): state is SnakeGameState {
 }
 
 export function isBombermanState(state: GameState): state is BombermanGameState {
-  return 'bombers' in state && 'bombs' in state && 'grid' in state && Array.isArray((state as BombermanGameState).grid)
+  return (
+    'bombers' in state &&
+    'bombs' in state &&
+    (('grid' in state && Array.isArray((state as BombermanGameState).grid)) ||
+      Array.isArray((state as BombermanGameState).grid_delta))
+  )
+}
+
+/** Merge a Bomberman WS payload that may carry only grid_delta. */
+export function mergeBombermanGameState(
+  prev: BombermanGameState | null,
+  next: BombermanGameState,
+): BombermanGameState {
+  if (next.grid_full !== false && Array.isArray(next.grid)) {
+    return next
+  }
+  if (!prev?.grid || !Array.isArray(next.grid_delta)) {
+    // No base grid yet — keep next as-is (may be incomplete until a full sync).
+    if (Array.isArray(next.grid)) return next
+    if (prev?.grid) {
+      return { ...next, grid: prev.grid }
+    }
+    return next
+  }
+  const grid = prev.grid.map((row) => row.slice())
+  for (const cell of next.grid_delta) {
+    const row = grid[cell.y]
+    if (row && cell.x >= 0 && cell.x < row.length) {
+      row[cell.x] = cell.t
+    }
+  }
+  return { ...next, grid, grid_full: false }
 }
 
 export function isPacmanState(state: GameState): state is PacmanGameState {

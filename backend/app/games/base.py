@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from typing import Any
 
 
@@ -40,3 +41,7 @@ class GamePlugin(ABC):
 
     def tick(self, state: dict) -> tuple[dict, list[dict]]:
         return state, []
+
+    def clone_tick_state(self, state: dict) -> dict:
+        """Copy state before tick/action mutation. Override for cheaper copies."""
+        return deepcopy(state)

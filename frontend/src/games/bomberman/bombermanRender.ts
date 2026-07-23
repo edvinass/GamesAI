@@ -51,6 +51,7 @@ export interface RenderFrameInput {
       direction: string
       speed?: number
       disease?: string | null
+      respawn_ticks?: number
     }
   >
   bombs: BombermanBomb[]
@@ -1344,39 +1345,75 @@ function drawParticles(
   }
 }
 
-function drawFloor(
-  ctx: CanvasRenderingContext2D,
-  ox: number,
-  oy: number,
-  boardW: number,
-  boardH: number,
-  s: number,
-  theme: MapTheme,
-  range: { x0: number; x1: number; y0: number; y1: number },
-  displayW: number,
-  displayH: number,
-) {
-  const floor = ctx.createLinearGradient(ox, oy, ox, oy + boardH)
-  floor.addColorStop(0, theme.floorTop)
-  floor.addColorStop(1, theme.floorBottom)
-  ctx.fillStyle = floor
-  ctx.fillRect(ox, oy, boardW, boardH)
+/** Cached floor layer + hard/soft tile sprites (rebuild on theme or cell size change). */
+type TileLayerCache = {
+  key: string
+  floor: HTMLCanvasElement
+  hard: HTMLCanvasElement
+  soft: HTMLCanvasElement
+  cell: number
+  gridW: number
+  gridH: number
+}
 
-  for (let y = range.y0; y < range.y1; y++) {
-    for (let x = range.x0; x < range.x1; x++) {
-      const px = ox + x * s
-      const py = oy + y * s
+let tileLayerCache: TileLayerCache | null = null
+
+function makeCanvas(w: number, h: number): HTMLCanvasElement {
+  const c = document.createElement('canvas')
+  c.width = Math.max(1, w)
+  c.height = Math.max(1, h)
+  return c
+}
+
+function ensureTileLayerCache(
+  theme: MapTheme,
+  gridW: number,
+  gridH: number,
+  s: number,
+): TileLayerCache {
+  const key = `${theme.id}:${gridW}x${gridH}:${s}`
+  if (tileLayerCache && tileLayerCache.key === key) return tileLayerCache
+
+  const floor = makeCanvas(gridW * s, gridH * s)
+  const fctx = floor.getContext('2d')!
+  const boardW = gridW * s
+  const boardH = gridH * s
+  const grad = fctx.createLinearGradient(0, 0, 0, boardH)
+  grad.addColorStop(0, theme.floorTop)
+  grad.addColorStop(1, theme.floorBottom)
+  fctx.fillStyle = grad
+  fctx.fillRect(0, 0, boardW, boardH)
+  for (let y = 0; y < gridH; y++) {
+    for (let x = 0; x < gridW; x++) {
+      const px = x * s
+      const py = y * s
       if ((x + y) % 2 === 0) {
-        ctx.fillStyle = theme.checker
-        ctx.fillRect(px, py, s, s)
+        fctx.fillStyle = theme.checker
+        fctx.fillRect(px, py, s, s)
       }
-      ctx.strokeStyle = theme.tileInset
-      ctx.lineWidth = 1
-      ctx.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1)
+      fctx.strokeStyle = theme.tileInset
+      fctx.lineWidth = 1
+      fctx.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1)
     }
   }
 
-  // Screen-space vignette so large maps don't look washed out at the edges.
+  const hard = makeCanvas(s, s)
+  drawHardBlock(hard.getContext('2d')!, 0, 0, s, theme)
+
+  const soft = makeCanvas(s, s)
+  // Static soft sprite (no per-frame wobble) — gradients baked once.
+  drawSoftBlock(soft.getContext('2d')!, 0, 0, s, 0, theme)
+
+  tileLayerCache = { key, floor, hard, soft, cell: s, gridW, gridH }
+  return tileLayerCache
+}
+
+function drawScreenVignette(
+  ctx: CanvasRenderingContext2D,
+  displayW: number,
+  displayH: number,
+  theme: MapTheme,
+) {
   const vig = ctx.createRadialGradient(
     displayW / 2,
     displayH / 2,
@@ -1439,13 +1476,33 @@ export function renderFrame(
   // Off-map backdrop when the camera is clamped at a map edge.
   ctx.fillStyle = theme.wrapBottom
   ctx.fillRect(0, 0, displayW, displayH)
-  drawFloor(ctx, ox, oy, boardW, boardH, s, theme, range, displayW, displayH)
+
+  const layers = ensureTileLayerCache(theme, gridW, gridH, s)
+  // Blit only the visible floor region from the cached full-board layer.
+  const srcX = range.x0 * s
+  const srcY = range.y0 * s
+  const srcW = (range.x1 - range.x0) * s
+  const srcH = (range.y1 - range.y0) * s
+  if (srcW > 0 && srcH > 0) {
+    ctx.drawImage(
+      layers.floor,
+      srcX,
+      srcY,
+      srcW,
+      srcH,
+      ox + srcX,
+      oy + srcY,
+      srcW,
+      srcH,
+    )
+  }
+  drawScreenVignette(ctx, displayW, displayH, theme)
 
   for (let y = range.y0; y < range.y1; y++) {
     const row = grid[y] ?? []
     for (let x = range.x0; x < range.x1; x++) {
       if ((row[x] ?? TILE_EMPTY) === TILE_SOFT) {
-        drawSoftBlock(ctx, ox + x * s, oy + y * s, s, time, theme)
+        ctx.drawImage(layers.soft, ox + x * s, oy + y * s)
       }
     }
   }
@@ -1453,7 +1510,7 @@ export function renderFrame(
     const row = grid[y] ?? []
     for (let x = range.x0; x < range.x1; x++) {
       if ((row[x] ?? TILE_EMPTY) === TILE_HARD) {
-        drawHardBlock(ctx, ox + x * s, oy + y * s, s, theme)
+        ctx.drawImage(layers.hard, ox + x * s, oy + y * s)
       }
     }
   }
