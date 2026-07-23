@@ -7,6 +7,7 @@ from app.games.duel.engine import DuelEngine
 from app.games.go.engine import GoEngine
 from app.games.gravity_master.engine import GravityMasterEngine
 from app.games.pacman.engine import PacmanEngine
+from app.games.pinball.engine import PinballEngine
 from app.games.roborally.engine import RoboRallyEngine
 from app.games.snake.engine import SnakeEngine
 from app.games.poker.engine import PokerEngine
@@ -32,6 +33,7 @@ _REGISTRY: dict[str, GamePlugin] = {
     "connect4": Connect4Engine(),
     "battleship": BattleshipEngine(),
     "solitaire": SolitaireEngine(),
+    "pinball": PinballEngine(),
 }
 
 
@@ -58,6 +60,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "connect4": {"name": "Connect Four", "description": "Drop discs to connect four in a row — play a friend or AI"},
     "battleship": {"name": "Battleship", "description": "Place your fleet and sink the enemy — play a friend or AI"},
     "solitaire": {"name": "Solitaire", "description": "Classic Klondike — stack cards and clear the tableau"},
+    "pinball": {"name": "Pinball", "description": "Classic arcade pinball — hit bumpers, score points, beat your high score"},
 }
 
 

@@ -74,6 +74,7 @@ _NO_TEAM_LOBBY_GAMES = frozenset(
         "roborally",
         "battleship",
         "connect4",
+        "pinball",
     }
 )
 
@@ -252,6 +253,7 @@ class RoomService:
             "tetris",
             "pacman",
             "gravity_master",
+            "pinball",
         ):
             for p in list(room.players):
                 if p.is_ai:
@@ -278,6 +280,9 @@ class RoomService:
 
         if room.game_type == "gravity_master":
             raise ValueError("Gravity Master is single-player only — AI players are not supported")
+
+        if room.game_type == "pinball":
+            raise ValueError("Pinball is single-player only — AI players are not supported")
 
         if room.game_type == "spyfall" and bool((room.settings or {}).get("same_room")):
             raise ValueError("Same-room Spyfall does not allow AI players")
@@ -491,6 +496,9 @@ class RoomService:
             await self.db.refresh(room, ["players"])
         elif room.game_type == "gravity_master":
             await self._setup_gravity_master_single_player(room)
+            await self.db.refresh(room, ["players"])
+        elif room.game_type == "pinball":
+            await self._setup_pinball_single_player(room)
             await self.db.refresh(room, ["players"])
 
         players_data = [self._player_data(p) for p in room.players]
@@ -720,6 +728,12 @@ class RoomService:
         await self.db.flush()
 
     async def _setup_gravity_master_single_player(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+    async def _setup_pinball_single_player(self, room: Room) -> None:
         for p in list(room.players):
             if p.is_ai:
                 await self.db.delete(p)
