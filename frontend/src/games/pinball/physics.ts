@@ -5,8 +5,8 @@ type PlanckBody = planck.Body
 
 const FIXED_TIMESTEP = 1 / 60
 const PHYSICS_TIME_SCALE = 1.5
-/** Arcade gravity — Planck clamps linear speed to ~120, so high g makes launches fail. */
-const GRAVITY = 18
+/** Arcade gravity — scaled for PHYSICS_TIME_SCALE (≈2 substeps/frame). */
+const GRAVITY = 9
 /** Sustained plunger speed (at Planck's velocity cap). */
 const PLUNGER_SPEED = 110
 /** Stop forcing plunger thrust once the ball reaches the top curve. */
@@ -17,10 +17,13 @@ const LEFT_REST_ANGLE = 0.55
 const LEFT_ACTIVE_ANGLE = -0.4
 const RIGHT_REST_ANGLE = -0.55
 const RIGHT_ACTIVE_ANGLE = 0.4
-const FLIPPER_SPEED = 90
-/** Extra kick applied on flipper contact while the flipper is raised/swinging. */
-const FLIPPER_KICK_MIN = 95
-const FLIPPER_KICK_MAX = 160
+/** Visible swing — too fast and the bat teleports before it can hit. */
+const FLIPPER_SPEED = 14
+/** Impulse speed (Planck clamps ~120 — aim for strong up-table shots). */
+const FLIPPER_KICK_MIN = 105
+const FLIPPER_KICK_MAX = 120
+/** Mild bounce when the ball hits a resting / held flipper. */
+const FLIPPER_DEAD_BOUNCE = 0.8
 
 export interface BumperSpec {
   x: number
@@ -202,7 +205,7 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
       planck.Vec2(level.flipperLength, level.flipperWidth / 3),
       planck.Vec2(0, level.flipperWidth / 2),
     ]),
-    { friction: 0.7, restitution: 0.35 }
+    { friction: 0.35, restitution: 0.85 }
   )
 
   const rightFlipper = world.createBody({
@@ -217,7 +220,7 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
       planck.Vec2(-level.flipperLength, level.flipperWidth / 3),
       planck.Vec2(0, level.flipperWidth / 2),
     ]),
-    { friction: 0.7, restitution: 0.35 }
+    { friction: 0.35, restitution: 0.85 }
   )
 
   return { leftBody: leftFlipper, rightBody: rightFlipper }
@@ -247,6 +250,62 @@ export function createPinballWorld(
   let plungerActive = false
   /** Queued flipper kick applied after the physics step (solver would overwrite it otherwise). */
   let pendingFlipperKick: { vx: number; vy: number } | null = null
+  /** Re-assert launch velocity for a few frames so collisions can't eat the shot. */
+  let flipperKickHold: { vx: number; vy: number; frames: number } | null = null
+  /** Ball currently touching each flipper (begin/end-contact). */
+  let ballOnLeftFlipper = false
+  let ballOnRightFlipper = false
+  /** One solid kick per flipper press (covers catch-then-flip). */
+  let leftSwingKicked = false
+  let rightSwingKicked = false
+
+  const computeFlipperKick = (isLeft: boolean, flipperBody: PlanckBody, ballPos: { x: number; y: number }) => {
+    const fp = flipperBody.getPosition()
+    const ang = flipperBody.getAngle()
+    const dx = ballPos.x - fp.x
+    const dy = ballPos.y - fp.y
+    // Distance along flipper axis from pivot (0 at base → 1 at tip).
+    const tipDirX = isLeft ? Math.cos(ang) : -Math.cos(ang)
+    const tipDirY = isLeft ? Math.sin(ang) : -Math.sin(ang)
+    const alongDist = dx * tipDirX + dy * tipDirY
+    const along = Math.min(1, Math.max(0.45, alongDist / level.flipperLength))
+    const power = FLIPPER_KICK_MIN + along * (FLIPPER_KICK_MAX - FLIPPER_KICK_MIN)
+
+    // Tip velocity direction while raising (ω < 0 left, ω > 0 right).
+    const wRaise = isLeft ? -1 : 1
+    let vx = wRaise * -tipDirY * power
+    let vy = wRaise * tipDirX * power
+
+    // Guarantee a strong up-table component even near vertical angles.
+    if (vy > -power * 0.9) {
+      vy = -power
+    }
+    // Bias slightly toward table center so shots stay in play.
+    vx += (isLeft ? 1 : -1) * (12 + along * 35)
+
+    return { vx, vy, along }
+  }
+
+  /** True if ball is close enough to the flipper bat to be struck. */
+  const ballNearFlipper = (
+    isLeft: boolean,
+    flipperBody: PlanckBody,
+    ballPos: { x: number; y: number }
+  ) => {
+    const fp = flipperBody.getPosition()
+    const ang = flipperBody.getAngle()
+    const tipDirX = isLeft ? Math.cos(ang) : -Math.cos(ang)
+    const tipDirY = isLeft ? Math.sin(ang) : -Math.sin(ang)
+    const dx = ballPos.x - fp.x
+    const dy = ballPos.y - fp.y
+    const along = dx * tipDirX + dy * tipDirY
+    const perp = dx * -tipDirY + dy * tipDirX
+    return (
+      along > -10 &&
+      along < level.flipperLength + 16 &&
+      Math.abs(perp) < level.flipperWidth * 0.5 + level.ballRadius + 18
+    )
+  }
 
   const openLaneGate = () => {
     laneGate.setActive(false)
@@ -299,6 +358,35 @@ export function createPinballWorld(
       for (let i = 0; i < PHYSICS_TIME_SCALE; i++) {
         state.simTime += FIXED_TIMESTEP
 
+        // Strike before driving the angle so a press still connects while the
+        // bat is at rest under a caught ball.
+        if (state.ballBody) {
+          const pos = state.ballBody.getPosition()
+          const trySwingKick = (isLeft: boolean) => {
+            const active = isLeft ? state.leftFlipperActive : state.rightFlipperActive
+            const kicked = isLeft ? leftSwingKicked : rightSwingKicked
+            if (!active || kicked) return
+            const body = isLeft ? leftBody : rightBody
+            const onBat =
+              (isLeft ? ballOnLeftFlipper : ballOnRightFlipper) ||
+              ballNearFlipper(isLeft, body, pos)
+            if (!onBat) return
+            const kick = computeFlipperKick(isLeft, body, pos)
+            pendingFlipperKick = { vx: kick.vx, vy: kick.vy }
+            if (isLeft) leftSwingKicked = true
+            else rightSwingKicked = true
+            onCollision({
+              type: 'flipper',
+              x: pos.x,
+              y: pos.y,
+              points: 0,
+              intensity: 1,
+            })
+          }
+          trySwingKick(true)
+          if (!pendingFlipperKick) trySwingKick(false)
+        }
+
         driveFlipper(leftBody, state.leftFlipperActive, LEFT_REST_ANGLE, LEFT_ACTIVE_ANGLE)
         driveFlipper(rightBody, state.rightFlipperActive, RIGHT_REST_ANGLE, RIGHT_ACTIVE_ANGLE)
 
@@ -315,23 +403,40 @@ export function createPinballWorld(
 
         world.step(FIXED_TIMESTEP)
 
-        if (state.ballBody && pendingFlipperKick) {
-          const cur = state.ballBody.getLinearVelocity()
-          // Always apply active kicks; only skip if already near the velocity cap upward.
-          if (cur.y > -110) {
-            state.ballBody.setLinearVelocity(
-              planck.Vec2(pendingFlipperKick.vx, pendingFlipperKick.vy)
-            )
-          }
-          pendingFlipperKick = null
-        }
-
         // Close the one-way gate only after the ball has crossed left into the
         // playfield (classic pinball: can't fall back in after exiting the lane).
         if (state.ballBody && state.ballLaunched && !plungerActive && !state.laneGateClosed) {
           const pos = state.ballBody.getPosition()
           if (pos.x < 340) closeLaneGate()
         }
+      }
+
+      // Apply flipper shot after all substeps so the solver can't immediately eat it.
+      if (state.ballBody && pendingFlipperKick) {
+        const k = pendingFlipperKick
+        state.ballBody.setLinearVelocity(planck.Vec2(k.vx, k.vy))
+        state.ballBody.setAwake(true)
+        // Nudge clear of the bat so the next step doesn't cancel the launch.
+        const p = state.ballBody.getPosition()
+        const speed = Math.hypot(k.vx, k.vy) || 1
+        state.ballBody.setTransform(
+          planck.Vec2(p.x + (k.vx / speed) * 22, p.y + (k.vy / speed) * 22),
+          state.ballBody.getAngle()
+        )
+        flipperKickHold = { vx: k.vx, vy: k.vy, frames: 8 }
+        pendingFlipperKick = null
+        ballOnLeftFlipper = false
+        ballOnRightFlipper = false
+      } else if (state.ballBody && flipperKickHold && flipperKickHold.frames > 0) {
+        // Hold launch speed briefly — kinematic flipper contacts otherwise kill vy.
+        const cur = state.ballBody.getLinearVelocity()
+        if (cur.y > flipperKickHold.vy * 0.55) {
+          state.ballBody.setLinearVelocity(
+            planck.Vec2(flipperKickHold.vx, flipperKickHold.vy)
+          )
+        }
+        flipperKickHold.frames--
+        if (flipperKickHold.frames <= 0) flipperKickHold = null
       }
 
       if (state.ballBody && state.ballInPlay) {
@@ -341,6 +446,11 @@ export function createPinballWorld(
           state.ballLaunched = false
           plungerActive = false
           pendingFlipperKick = null
+          flipperKickHold = null
+          ballOnLeftFlipper = false
+          ballOnRightFlipper = false
+          leftSwingKicked = false
+          rightSwingKicked = false
           openLaneGate()
           world.destroyBody(state.ballBody)
           state.ballBody = null
@@ -374,9 +484,11 @@ export function createPinballWorld(
     },
     activateLeftFlipper: (active: boolean) => {
       state.leftFlipperActive = active
+      if (!active) leftSwingKicked = false
     },
     activateRightFlipper: (active: boolean) => {
       state.rightFlipperActive = active
+      if (!active) rightSwingKicked = false
     },
     resetBall: () => {
       if (state.ballBody) {
@@ -384,6 +496,12 @@ export function createPinballWorld(
         state.ballBody = null
       }
       plungerActive = false
+      pendingFlipperKick = null
+      flipperKickHold = null
+      ballOnLeftFlipper = false
+      ballOnRightFlipper = false
+      leftSwingKicked = false
+      rightSwingKicked = false
       state.ballInPlay = false
       state.ballLaunched = false
       openLaneGate()
@@ -459,21 +577,25 @@ export function createPinballWorld(
     if (otherBody === leftBody || otherBody === rightBody) {
       const pos = state.ballBody.getPosition()
       const isLeft = otherBody === leftBody
-      const flipperActive = isLeft ? state.leftFlipperActive : state.rightFlipperActive
-      const flipperBody = isLeft ? leftBody : rightBody
+      if (isLeft) ballOnLeftFlipper = true
+      else ballOnRightFlipper = true
 
-      if (flipperActive) {
-        const fp = flipperBody.getPosition()
-        const ang = flipperBody.getAngle()
-        const dx = pos.x - fp.x
-        const dy = pos.y - fp.y
-        const localX = Math.abs(dx * Math.cos(ang) + dy * Math.sin(ang))
-        const along = Math.min(1, Math.max(0.35, localX / level.flipperLength))
-        const power = FLIPPER_KICK_MIN + along * (FLIPPER_KICK_MAX - FLIPPER_KICK_MIN)
-        // Up-table is -Y. Left flipper also kicks right; right kicks left.
+      const flipperActive = isLeft ? state.leftFlipperActive : state.rightFlipperActive
+      const alreadyKicked = isLeft ? leftSwingKicked : rightSwingKicked
+
+      if (flipperActive && !alreadyKicked) {
+        const flipperBody = isLeft ? leftBody : rightBody
+        const kick = computeFlipperKick(isLeft, flipperBody, pos)
+        pendingFlipperKick = { vx: kick.vx, vy: kick.vy }
+        if (isLeft) leftSwingKicked = true
+        else rightSwingKicked = true
+      } else if (!flipperActive) {
+        // Dead bounce off a resting bat — reflect upward with energy.
+        const vel = state.ballBody.getLinearVelocity()
+        const bounce = Math.max(36, Math.abs(vel.y) * FLIPPER_DEAD_BOUNCE + 16)
         pendingFlipperKick = {
-          vx: (isLeft ? 1 : -1) * (22 + along * 60),
-          vy: -power,
+          vx: vel.x * 0.65 + (isLeft ? 14 : -14),
+          vy: -bounce,
         }
       }
 
@@ -482,7 +604,7 @@ export function createPinballWorld(
         x: pos.x,
         y: pos.y,
         points: 0,
-        intensity: flipperActive ? 1 : 0.4,
+        intensity: flipperActive ? 1 : 0.45,
       })
       return
     }
@@ -502,6 +624,15 @@ export function createPinballWorld(
         })
       }
     }
+  })
+
+  world.on('end-contact', (contact) => {
+    const bodyA = contact.getFixtureA().getBody()
+    const bodyB = contact.getFixtureB().getBody()
+    if (!state.ballBody) return
+    const other = bodyA === state.ballBody ? bodyB : bodyB === state.ballBody ? bodyA : null
+    if (other === leftBody) ballOnLeftFlipper = false
+    if (other === rightBody) ballOnRightFlipper = false
   })
 
   return state
