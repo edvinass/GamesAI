@@ -945,30 +945,45 @@ function drawExplosion(
   const flicker = 0.82 + Math.sin(time / 28 + x * 0.3 + y * 0.5) * 0.18
   const cx = x + s / 2
   const cy = y + s / 2
+  const arm = s * (0.18 + 0.2 * intensity)
+  const len = s * (0.42 + 0.08 * intensity)
 
-  // Outer glow
-  const glow = ctx.createRadialGradient(cx, cy, s * 0.05, cx, cy, s * 0.62)
-  glow.addColorStop(0, `rgba(255, 240, 160, ${0.55 * intensity * flicker})`)
-  glow.addColorStop(0.35, `rgba(255, 120, 30, ${0.4 * intensity})`)
-  glow.addColorStop(1, 'rgba(255, 40, 0, 0)')
-  ctx.fillStyle = glow
+  for (const [dx, dy] of [
+    [0, -1],
+    [0, 1],
+    [-1, 0],
+    [1, 0],
+  ] as const) {
+    const tipX = cx + dx * len
+    const tipY = cy + dy * len
+    const grad = ctx.createLinearGradient(cx, cy, tipX, tipY)
+    grad.addColorStop(0, `rgba(255, 250, 200, ${0.9 * intensity * flicker})`)
+    grad.addColorStop(0.45, `rgba(255, 140, 40, ${0.8 * intensity})`)
+    grad.addColorStop(1, `rgba(220, 40, 0, ${0.15 * intensity})`)
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    if (dx === 0) {
+      ctx.moveTo(cx - arm, cy)
+      ctx.lineTo(cx + arm, cy)
+      ctx.lineTo(tipX + arm * 0.35, tipY)
+      ctx.lineTo(tipX - arm * 0.35, tipY)
+    } else {
+      ctx.moveTo(cx, cy - arm)
+      ctx.lineTo(cx, cy + arm)
+      ctx.lineTo(tipX, tipY + arm * 0.35)
+      ctx.lineTo(tipX, tipY - arm * 0.35)
+    }
+    ctx.closePath()
+    ctx.fill()
+  }
+
   ctx.beginPath()
-  ctx.arc(cx, cy, s * 0.62, 0, Math.PI * 2)
+  ctx.arc(cx, cy, s * 0.22 * intensity, 0, Math.PI * 2)
+  ctx.fillStyle = `rgba(255, 255, 220, ${0.85 * intensity * flicker})`
   ctx.fill()
-
-  const pad = s * (0.12 + (1 - intensity) * 0.12)
-  const coreGrad = ctx.createLinearGradient(x, y, x + s, y + s)
-  coreGrad.addColorStop(0, `rgba(255, 210, 90, ${0.85 * intensity * flicker})`)
-  coreGrad.addColorStop(0.5, `rgba(255, 110, 30, ${0.75 * intensity})`)
-  coreGrad.addColorStop(1, `rgba(220, 40, 10, ${0.55 * intensity})`)
-  drawRoundRect(ctx, x + pad, y + pad, s - pad * 2, s - pad * 2, s * 0.18)
-  ctx.fillStyle = coreGrad
-  ctx.fill()
-
-  // Hot core
   ctx.beginPath()
-  ctx.arc(cx, cy, s * 0.16 * intensity, 0, Math.PI * 2)
-  ctx.fillStyle = `rgba(255, 255, 230, ${0.7 * intensity * flicker})`
+  ctx.arc(cx, cy, s * 0.1 * intensity, 0, Math.PI * 2)
+  ctx.fillStyle = `rgba(255, 180, 60, ${0.7 * intensity})`
   ctx.fill()
 }
 
@@ -1070,6 +1085,402 @@ function drawSelfMarker(
   ctx.stroke()
 }
 
+interface BomberBodyOpts {
+  s: number
+  color: string
+  isMe: boolean
+  stride: number
+  /** Facing unit: -1/0/1 on each axis. */
+  fdx: number
+  fdy: number
+  /** 'up' | 'down' | 'left' | 'right' | 'stop' */
+  facing: string
+  backView: boolean
+  sideView: boolean
+  skin: string
+  skinShade: string
+  boot: string
+  glove: string
+  suitDark: string
+  suitLite: string
+}
+
+function drawDomeBody(ctx: CanvasRenderingContext2D, o: BomberBodyOpts): number {
+  const { s, color, isMe, stride, fdx, fdy, facing, backView, sideView, boot, glove, suitDark, suitLite } =
+    o
+  const leanX = fdx * s * 0.055
+  const leanY = fdy * s * 0.012
+  // Side profile: tuck body depth; front/back keep full width.
+  const torsoW = sideView ? s * 0.2 : s * 0.34
+  const torsoH = s * 0.24
+  const legSpread = sideView ? s * 0.03 : s * 0.09
+  const armLen = s * 0.13
+
+  // Legs — stride along facing so the silhouette walks in that direction.
+  for (const side of [-1, 1] as const) {
+    const swing = side * stride * s * (sideView ? 0.12 : 0.09)
+    const hipX = leanX + side * legSpread
+    const hipY = s * 0.1 + leanY
+    // Boots point along facing (side view: forward/back of stride; front: outward + lean).
+    const footX = sideView
+      ? leanX + swing + fdx * s * 0.04
+      : hipX + swing * 0.35 + fdx * s * 0.05
+    const footY = hipY + s * 0.2 + Math.abs(swing) * 0.1 + (backView ? -s * 0.01 : 0)
+
+    ctx.strokeStyle = suitDark
+    ctx.lineWidth = Math.max(3, s * (sideView ? 0.09 : 0.08))
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(hipX, hipY)
+    ctx.lineTo(footX, footY)
+    ctx.stroke()
+
+    // Boot sole oriented toward facing.
+    const bootW = sideView ? s * 0.16 : s * 0.13
+    const bootH = s * 0.055
+    const bootOx = sideView ? fdx * bootW * 0.25 : fdx * s * 0.02
+    drawRoundRect(ctx, footX - bootW / 2 + bootOx, footY, bootW, bootH, 2)
+    ctx.fillStyle = boot
+    ctx.fill()
+    if (sideView || Math.abs(fdx) > 0.5) {
+      // Toe tip — reinforces left/right.
+      ctx.beginPath()
+      ctx.ellipse(footX + fdx * bootW * 0.45, footY + bootH * 0.45, s * 0.035, bootH * 0.45, 0, 0, Math.PI * 2)
+      ctx.fillStyle = shade(boot, 0.15)
+      ctx.fill()
+    }
+  }
+
+  const torsoX = leanX - torsoW / 2
+  const torsoY = -torsoH * 0.25 + leanY
+  const torsoGrad = ctx.createLinearGradient(
+    torsoX + (sideView ? 0 : torsoW * 0.2),
+    torsoY,
+    torsoX + torsoW * (sideView ? 1 : 0.8),
+    torsoY + torsoH,
+  )
+  if (sideView) {
+    // Lit edge toward facing; dark trailing edge.
+    torsoGrad.addColorStop(0, fdx < 0 ? suitDark : suitLite)
+    torsoGrad.addColorStop(0.45, color)
+    torsoGrad.addColorStop(1, fdx < 0 ? suitLite : suitDark)
+  } else if (backView) {
+    torsoGrad.addColorStop(0, suitDark)
+    torsoGrad.addColorStop(0.55, color)
+    torsoGrad.addColorStop(1, shade(color, -0.35))
+  } else {
+    torsoGrad.addColorStop(0, suitLite)
+    torsoGrad.addColorStop(0.55, color)
+    torsoGrad.addColorStop(1, suitDark)
+  }
+  drawRoundRect(ctx, torsoX, torsoY, torsoW, torsoH, s * 0.1)
+  ctx.fillStyle = torsoGrad
+  ctx.fill()
+  ctx.strokeStyle = isMe ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.3)'
+  ctx.lineWidth = isMe ? Math.max(1.5, s * 0.035) : 1.2
+  ctx.stroke()
+
+  // Chest badge only on front; backpack plate on back; side stripe on profile.
+  if (backView) {
+    drawRoundRect(
+      ctx,
+      leanX - torsoW * 0.28,
+      torsoY + torsoH * 0.18,
+      torsoW * 0.56,
+      torsoH * 0.55,
+      s * 0.06,
+    )
+    ctx.fillStyle = shade(color, -0.35)
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'
+    ctx.lineWidth = 1
+    ctx.stroke()
+  } else if (sideView) {
+    ctx.beginPath()
+    ctx.moveTo(leanX + fdx * torsoW * 0.15, torsoY + torsoH * 0.15)
+    ctx.lineTo(leanX + fdx * torsoW * 0.15, torsoY + torsoH * 0.85)
+    ctx.strokeStyle = rgba('#ffffff', 0.18)
+    ctx.lineWidth = Math.max(1.5, s * 0.035)
+    ctx.stroke()
+  } else {
+    ctx.beginPath()
+    ctx.ellipse(leanX, torsoY + torsoH * 0.45, torsoW * 0.28, torsoH * 0.22, 0, 0, Math.PI * 2)
+    ctx.fillStyle = rgba('#ffffff', 0.14)
+    ctx.fill()
+  }
+
+  // Arms — lead arm reaches toward facing; trail arm hangs back.
+  const armOrder: (-1 | 1)[] = sideView ? (fdx >= 0 ? [-1, 1] : [1, -1]) : [-1, 1]
+  for (const side of armOrder) {
+    const isLead = sideView ? side === Math.sign(fdx || 1) : side === (fdx !== 0 ? Math.sign(fdx) : side)
+    const swing = -side * stride * s * 0.08
+    const shoulderX = leanX + (sideView ? fdx * torsoW * 0.15 : side * torsoW * 0.5)
+    const shoulderY = torsoY + torsoH * 0.2
+    let handX: number
+    let handY: number
+    if (sideView) {
+      // Profile: lead arm forward along facing, trail arm back.
+      const reach = isLead ? 1 : -0.55
+      handX = shoulderX + fdx * s * (0.14 + (isLead ? 0.04 : 0)) * reach + swing * 0.4
+      handY = shoulderY + armLen * (isLead ? 0.55 : 0.95) + Math.abs(swing) * 0.12
+    } else if (backView) {
+      handX = shoulderX + side * s * 0.02 + swing * 0.2
+      handY = shoulderY + armLen + Math.abs(swing) * 0.12
+    } else {
+      // Front: both arms, slightly biased toward look direction.
+      handX = shoulderX + side * s * 0.02 + swing * 0.25 + fdx * s * 0.06
+      handY = shoulderY + armLen * (facing === 'down' ? 0.85 : 1) + Math.abs(swing) * 0.15 + fdy * s * 0.02
+    }
+
+    ctx.strokeStyle = isLead && sideView ? suitLite : color
+    ctx.lineWidth = Math.max(2.4, s * (sideView && !isLead ? 0.055 : 0.07))
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(shoulderX, shoulderY)
+    ctx.lineTo(handX, handY)
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.arc(handX, handY, s * (sideView && !isLead ? 0.04 : 0.052), 0, Math.PI * 2)
+    ctx.fillStyle = glove
+    ctx.fill()
+  }
+
+  return torsoH
+}
+
+function drawDomeFace(
+  ctx: CanvasRenderingContext2D,
+  o: BomberBodyOpts,
+  domeR: number,
+  domeY: number,
+  faceScale = 1,
+  headX = 0,
+) {
+  const { s, fdx, fdy, backView, sideView, skin, skinShade } = o
+  if (backView) {
+    // Helmet seam on the back of the head.
+    ctx.beginPath()
+    ctx.arc(headX, domeY + domeR * 0.1, domeR * 0.45, 0.2 * Math.PI, 0.8 * Math.PI)
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)'
+    ctx.lineWidth = Math.max(1.5, s * 0.035)
+    ctx.stroke()
+    return
+  }
+
+  if (sideView) {
+    // Profile face plate + single eye looking along facing.
+    const faceCX = headX + fdx * domeR * 0.28
+    const faceCY = domeY + domeR * 0.06
+    const faceW = domeR * 0.55 * faceScale
+    const faceH = domeR * 0.72 * faceScale
+    drawRoundRect(ctx, faceCX - faceW / 2, faceCY - faceH / 2, faceW, faceH, s * 0.05)
+    const faceGrad = ctx.createLinearGradient(faceCX, faceCY - faceH / 2, faceCX, faceCY + faceH / 2)
+    faceGrad.addColorStop(0, '#ffe0c4')
+    faceGrad.addColorStop(0.6, skin)
+    faceGrad.addColorStop(1, skinShade)
+    ctx.fillStyle = faceGrad
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)'
+    ctx.lineWidth = 1
+    ctx.stroke()
+
+    const ex = faceCX + fdx * s * 0.01
+    const ey = faceCY - faceH * 0.05
+    ctx.beginPath()
+    ctx.ellipse(ex, ey, s * 0.045 * faceScale, s * 0.055 * faceScale, 0, 0, Math.PI * 2)
+    ctx.fillStyle = '#fff'
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(ex + fdx * s * 0.012, ey + fdy * s * 0.004, s * 0.022 * faceScale, 0, Math.PI * 2)
+    ctx.fillStyle = '#1a1520'
+    ctx.fill()
+
+    ctx.beginPath()
+    ctx.arc(faceCX + fdx * s * 0.01, faceCY + faceH * 0.22, s * 0.03 * faceScale, 0.25 * Math.PI, 0.75 * Math.PI)
+    ctx.strokeStyle = '#c45c3a'
+    ctx.lineWidth = Math.max(1.2, s * 0.025)
+    ctx.lineCap = 'round'
+    ctx.stroke()
+    return
+  }
+
+  const faceW = domeR * 0.95 * faceScale
+  const faceH = domeR * 0.7 * faceScale
+  const faceY = domeY + domeR * 0.08
+  drawRoundRect(ctx, headX - faceW / 2, faceY - faceH / 2, faceW, faceH, s * 0.06)
+  const faceGrad = ctx.createLinearGradient(0, faceY - faceH / 2, 0, faceY + faceH / 2)
+  faceGrad.addColorStop(0, '#ffe0c4')
+  faceGrad.addColorStop(0.6, skin)
+  faceGrad.addColorStop(1, skinShade)
+  ctx.fillStyle = faceGrad
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  const lookX = fdx * s * 0.03
+  const eyeY = faceY - faceH * 0.05 + fdy * s * 0.02
+  for (const side of [-1, 1] as const) {
+    const ex = headX + side * s * 0.065 * faceScale + lookX
+    ctx.beginPath()
+    ctx.ellipse(ex, eyeY, s * 0.048 * faceScale, s * 0.052 * faceScale, 0, 0, Math.PI * 2)
+    ctx.fillStyle = '#fff'
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(ex + lookX * 0.45, eyeY + fdy * s * 0.01, s * 0.024 * faceScale, 0, Math.PI * 2)
+    ctx.fillStyle = '#1a1520'
+    ctx.fill()
+  }
+
+  ctx.beginPath()
+  ctx.arc(headX + lookX * 0.3, faceY + faceH * 0.22, s * 0.04 * faceScale, 0.2 * Math.PI, 0.8 * Math.PI)
+  ctx.strokeStyle = '#c45c3a'
+  ctx.lineWidth = Math.max(1.2, s * 0.025)
+  ctx.lineCap = 'round'
+  ctx.stroke()
+}
+
+function drawDomeAntenna(
+  ctx: CanvasRenderingContext2D,
+  o: BomberBodyOpts,
+  domeR: number,
+  domeY: number,
+  headX: number,
+  tipColor?: string,
+) {
+  const { s, color, fdx, fdy, backView } = o
+  // Antenna tips toward facing so the whole head reads direction.
+  const tipX = headX + fdx * s * 0.08
+  const tipY = domeY - domeR * (backView ? 1.45 : 1.35) + fdy * s * 0.02
+  const baseX = headX + fdx * s * 0.02
+  const baseY = domeY - domeR * 0.85
+  ctx.strokeStyle = shade(color, -0.2)
+  ctx.lineWidth = Math.max(1.8, s * 0.04)
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(baseX, baseY)
+  ctx.lineTo(tipX, tipY)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(tipX, tipY - s * 0.01, s * 0.035, 0, Math.PI * 2)
+  ctx.fillStyle = tipColor ?? color
+  ctx.fill()
+  ctx.strokeStyle = '#fff'
+  ctx.lineWidth = 1
+  ctx.stroke()
+}
+
+/** Dome Shell bomber — body lean + profile/back poses make facing obvious. */
+function drawBomberSprite(ctx: CanvasRenderingContext2D, o: BomberBodyOpts) {
+  const torsoH = drawDomeBody(ctx, o)
+  const { s, color, suitDark, suitLite, fdx, fdy, backView, sideView } = o
+  const leanX = fdx * s * 0.055
+  const domeR = sideView ? s * 0.21 : s * 0.23
+  const domeY = -torsoH * 0.55 + fdy * s * 0.01
+  // Head sits ahead of the torso along facing (classic Bomberman read).
+  const headX = leanX + fdx * s * (sideView ? 0.06 : 0.02)
+
+  // Colored outer shell — highlight from the facing side.
+  const shellGrad = ctx.createRadialGradient(
+    headX - domeR * 0.3 + fdx * domeR * 0.25,
+    domeY - domeR * 0.4,
+    domeR * 0.1,
+    headX,
+    domeY,
+    domeR,
+  )
+  shellGrad.addColorStop(0, suitLite)
+  shellGrad.addColorStop(0.45, color)
+  shellGrad.addColorStop(1, suitDark)
+  ctx.beginPath()
+  if (sideView) {
+    ctx.ellipse(headX, domeY, domeR * 0.85, domeR, 0, 0, Math.PI * 2)
+  } else {
+    ctx.arc(headX, domeY, domeR, 0, Math.PI * 2)
+  }
+  ctx.fillStyle = shellGrad
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)'
+  ctx.lineWidth = Math.max(1.5, s * 0.04)
+  ctx.stroke()
+
+  if (backView) {
+    // Solid colored back of helmet — no white face plate.
+    ctx.beginPath()
+    ctx.arc(headX, domeY + domeR * 0.08, domeR * 0.55, 0, Math.PI * 2)
+    ctx.fillStyle = shade(color, -0.2)
+    ctx.fill()
+    // Vertical seam
+    ctx.beginPath()
+    ctx.moveTo(headX, domeY - domeR * 0.35)
+    ctx.lineTo(headX, domeY + domeR * 0.55)
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)'
+    ctx.lineWidth = Math.max(1.2, s * 0.03)
+    ctx.stroke()
+  } else if (sideView) {
+    // Partial white plate on the facing side of the helmet.
+    const plateX = headX + fdx * domeR * 0.22
+    const plateR = domeR * 0.55
+    const innerGrad = ctx.createRadialGradient(
+      plateX - fdx * plateR * 0.2,
+      domeY - plateR * 0.2,
+      plateR * 0.08,
+      plateX,
+      domeY + domeR * 0.05,
+      plateR,
+    )
+    innerGrad.addColorStop(0, '#ffffff')
+    innerGrad.addColorStop(0.7, '#f2f2f6')
+    innerGrad.addColorStop(1, '#d4d4dc')
+    ctx.beginPath()
+    ctx.ellipse(plateX, domeY + domeR * 0.06, plateR * 0.7, plateR, 0, 0, Math.PI * 2)
+    ctx.fillStyle = innerGrad
+    ctx.fill()
+    ctx.strokeStyle = rgba(suitDark, 0.45)
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  } else {
+    // Full white inner plate (front).
+    const innerR = domeR * 0.72
+    const innerGrad = ctx.createRadialGradient(
+      headX - innerR * 0.25,
+      domeY - innerR * 0.2,
+      innerR * 0.08,
+      headX,
+      domeY + domeR * 0.05,
+      innerR,
+    )
+    innerGrad.addColorStop(0, '#ffffff')
+    innerGrad.addColorStop(0.7, '#f2f2f6')
+    innerGrad.addColorStop(1, '#d4d4dc')
+    ctx.beginPath()
+    ctx.arc(headX, domeY + domeR * 0.06, innerR, 0, Math.PI * 2)
+    ctx.fillStyle = innerGrad
+    ctx.fill()
+    ctx.strokeStyle = rgba(suitDark, 0.45)
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  }
+
+  // Chin / collar rim
+  ctx.beginPath()
+  ctx.ellipse(
+    headX + fdx * s * 0.01,
+    domeY + domeR * 0.62,
+    domeR * (sideView ? 0.55 : 0.7),
+    domeR * 0.2,
+    0,
+    0,
+    Math.PI * 2,
+  )
+  ctx.fillStyle = shade(color, -0.15)
+  ctx.fill()
+
+  drawDomeAntenna(ctx, o, domeR, domeY, headX, '#fff')
+  drawDomeFace(ctx, o, domeR * 0.9, domeY + domeR * 0.04, 0.95, headX)
+}
+
 function drawBomber(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -1108,7 +1519,6 @@ function drawBomber(
   const suitDark = shade(color, -0.22)
   const suitLite = shade(color, 0.28)
 
-  // Facing offsets for features
   const face: Record<string, [number, number]> = {
     up: [0, -1],
     down: [0, 1],
@@ -1116,201 +1526,58 @@ function drawBomber(
     right: [1, 0.15],
     stop: [0, 0.6],
   }
-  const [fdx, fdy] = face[direction] ?? face.stop!
-  const backView = direction === 'up'
+  const facing = direction === 'stop' ? 'down' : direction
+  const [fdx, fdy] = face[facing] ?? face.down!
+  const backView = facing === 'up'
+  const sideView = facing === 'left' || facing === 'right'
 
-  // Local-player marker under feet (drawn before shadow / sprite).
   if (isMe) {
     drawSelfMarker(ctx, cx, y + s * 0.78, s, color, time, selfMarker)
   }
 
-  // Shadow
+  // Shadow stretches slightly along facing so even the ground cue reads direction.
+  const shadowCX = cx + fdx * s * 0.04
   ctx.beginPath()
-  ctx.ellipse(cx, y + s * 0.78 + bounce * 0.3, s * 0.28, s * 0.09, 0, 0, Math.PI * 2)
+  ctx.ellipse(
+    shadowCX,
+    y + s * 0.78 + bounce * 0.3,
+    s * (sideView ? 0.32 : 0.28),
+    s * 0.09,
+    0,
+    0,
+    Math.PI * 2,
+  )
   ctx.fillStyle = 'rgba(0,0,0,0.3)'
   ctx.fill()
 
   ctx.save()
   ctx.translate(cx, cy)
 
-  const legSpread = s * 0.07
-  const armLen = s * 0.14
-
-  // Legs (draw first so body overlaps)
-  for (const side of [-1, 1] as const) {
-    const swing = side * stride * s * 0.1
-    const footY = s * 0.28 + Math.abs(swing) * 0.15
-    const hipX = side * legSpread
-    const footX = side * legSpread + swing
-
-    ctx.strokeStyle = suitDark
-    ctx.lineWidth = Math.max(2.5, s * 0.07)
-    ctx.lineCap = 'round'
-    ctx.beginPath()
-    ctx.moveTo(hipX, s * 0.08)
-    ctx.lineTo(footX, footY)
-    ctx.stroke()
-
-    // Boot
-    ctx.beginPath()
-    ctx.ellipse(footX + fdx * s * 0.01, footY + s * 0.02, s * 0.07, s * 0.045, 0, 0, Math.PI * 2)
-    ctx.fillStyle = boot
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)'
-    ctx.lineWidth = 1
-    ctx.stroke()
+  const body: BomberBodyOpts = {
+    s,
+    color,
+    isMe,
+    stride,
+    fdx,
+    fdy,
+    facing,
+    backView,
+    sideView,
+    skin,
+    skinShade,
+    boot,
+    glove,
+    suitDark,
+    suitLite,
   }
 
-  // Torso
-  const torsoW = s * 0.28
-  const torsoH = s * 0.26
-  const torsoGrad = ctx.createLinearGradient(-torsoW * 0.4, -torsoH * 0.5, torsoW * 0.5, torsoH * 0.6)
-  torsoGrad.addColorStop(0, suitLite)
-  torsoGrad.addColorStop(0.45, color)
-  torsoGrad.addColorStop(1, suitDark)
-  drawRoundRect(ctx, -torsoW / 2, -torsoH * 0.35, torsoW, torsoH, s * 0.08)
-  ctx.fillStyle = torsoGrad
-  ctx.fill()
-  ctx.strokeStyle = isMe ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.28)'
-  ctx.lineWidth = isMe ? Math.max(1.5, s * 0.035) : 1
-  ctx.stroke()
-
-  // Belt
-  ctx.fillStyle = 'rgba(0,0,0,0.28)'
-  drawRoundRect(ctx, -torsoW * 0.42, torsoH * 0.18, torsoW * 0.84, s * 0.035, 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.arc(0, torsoH * 0.2, s * 0.03, 0, Math.PI * 2)
-  ctx.fillStyle = '#fbbf24'
-  ctx.fill()
-
-  // Arms
-  for (const side of [-1, 1] as const) {
-    const swing = -side * stride * s * 0.09
-    const shoulderX = side * torsoW * 0.48
-    const shoulderY = -torsoH * 0.15
-    const handX = shoulderX + side * s * 0.04 + swing * 0.3 + fdx * s * 0.02
-    const handY = shoulderY + armLen + Math.abs(swing) * 0.2
-
-    ctx.strokeStyle = color
-    ctx.lineWidth = Math.max(2.2, s * 0.06)
-    ctx.lineCap = 'round'
-    ctx.beginPath()
-    ctx.moveTo(shoulderX, shoulderY)
-    ctx.quadraticCurveTo(shoulderX + side * s * 0.06, shoulderY + armLen * 0.45, handX, handY)
-    ctx.stroke()
-
-    // Glove
-    ctx.beginPath()
-    ctx.arc(handX, handY, s * 0.055, 0, Math.PI * 2)
-    ctx.fillStyle = glove
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(0,0,0,0.2)'
-    ctx.lineWidth = 1
-    ctx.stroke()
-  }
-
-  // Head
-  const headR = s * 0.175
-  const headY = -torsoH * 0.55
-  const headGrad = ctx.createRadialGradient(
-    -headR * 0.25,
-    headY - headR * 0.35,
-    headR * 0.1,
-    0,
-    headY,
-    headR,
-  )
-  headGrad.addColorStop(0, '#ffe0c4')
-  headGrad.addColorStop(0.55, skin)
-  headGrad.addColorStop(1, skinShade)
-  ctx.beginPath()
-  ctx.arc(0, headY, headR, 0, Math.PI * 2)
-  ctx.fillStyle = headGrad
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(0,0,0,0.22)'
-  ctx.lineWidth = 1.2
-  ctx.stroke()
-
-  // Helmet / headband in team color
-  ctx.beginPath()
-  ctx.ellipse(0, headY - headR * 0.35, headR * 0.95, headR * 0.55, 0, Math.PI * 1.05, Math.PI * 1.95)
-  ctx.strokeStyle = color
-  ctx.lineWidth = Math.max(2.5, s * 0.07)
-  ctx.lineCap = 'round'
-  ctx.stroke()
-
-  // Classic Bomberman antenna
-  ctx.strokeStyle = shade(color, -0.15)
-  ctx.lineWidth = Math.max(1.5, s * 0.035)
-  ctx.beginPath()
-  ctx.moveTo(0, headY - headR * 0.85)
-  ctx.lineTo(0, headY - headR * 1.45)
-  ctx.stroke()
-  ctx.beginPath()
-  ctx.arc(0, headY - headR * 1.5, s * 0.04, 0, Math.PI * 2)
-  ctx.fillStyle = '#fff'
-  ctx.fill()
-  ctx.strokeStyle = color
-  ctx.lineWidth = 1.2
-  ctx.stroke()
-
-  if (!backView) {
-    // Eyes
-    const eyeY = headY + fdy * s * 0.02
-    const eyeSpread = s * 0.07
-    const lookX = fdx * s * 0.03
-    for (const side of [-1, 1] as const) {
-      const ex = side * eyeSpread + lookX
-      // White
-      ctx.beginPath()
-      ctx.ellipse(ex, eyeY, s * 0.055, s * 0.06, 0, 0, Math.PI * 2)
-      ctx.fillStyle = '#fff'
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(0,0,0,0.15)'
-      ctx.lineWidth = 1
-      ctx.stroke()
-      // Pupil
-      ctx.beginPath()
-      ctx.arc(ex + lookX * 0.5, eyeY + fdy * s * 0.01, s * 0.028, 0, Math.PI * 2)
-      ctx.fillStyle = '#1a1520'
-      ctx.fill()
-      // Highlight
-      ctx.beginPath()
-      ctx.arc(ex + s * 0.012, eyeY - s * 0.015, s * 0.012, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(255,255,255,0.9)'
-      ctx.fill()
-    }
-
-    // Cheeks
-    ctx.beginPath()
-    ctx.ellipse(-s * 0.1, headY + s * 0.04, s * 0.035, s * 0.022, 0, 0, Math.PI * 2)
-    ctx.ellipse(s * 0.1, headY + s * 0.04, s * 0.035, s * 0.022, 0, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(255, 120, 120, 0.35)'
-    ctx.fill()
-
-    // Smile
-    ctx.beginPath()
-    ctx.arc(lookX * 0.4, headY + s * 0.07, s * 0.05, 0.15 * Math.PI, 0.85 * Math.PI)
-    ctx.strokeStyle = '#c45c3a'
-    ctx.lineWidth = Math.max(1.2, s * 0.028)
-    ctx.lineCap = 'round'
-    ctx.stroke()
-  } else {
-    // Back of head band detail
-    ctx.beginPath()
-    ctx.arc(0, headY, headR * 0.55, 0.2 * Math.PI, 0.8 * Math.PI)
-    ctx.strokeStyle = 'rgba(0,0,0,0.12)'
-    ctx.lineWidth = 1.5
-    ctx.stroke()
-  }
+  drawBomberSprite(ctx, body)
 
   ctx.restore()
   if (blinkOut) {
     ctx.globalAlpha = prevAlpha
   }
 
-  // Soft purple haze so cursed bombers stay readable while blinking.
   if (diseased) {
     const pulse = 0.25 + 0.2 * Math.sin(time / 140)
     ctx.beginPath()
