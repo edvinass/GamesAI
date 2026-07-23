@@ -366,24 +366,130 @@ export function playPowerup(kind: PowerupSoundKind = 'bomb'): void {
   })
 }
 
-/** Local player eliminated. */
-export function playDeath(): void {
-  tone(320, 0.16, { type: 'sawtooth', volume: 0.13, slideTo: 140, filterFreq: 700 })
-  schedule(70, () =>
-    tone(200, 0.2, { type: 'sawtooth', volume: 0.11, slideTo: 80, filterFreq: 500 }),
-  )
-  schedule(130, () => {
-    tone(110, 0.28, { type: 'triangle', volume: 0.1, slideTo: 48 })
-    noiseBurst(0.2, { volume: 0.09, filterFreq: 480, filterType: 'lowpass' })
+/** Cartoonish scream — pitched yell + filtered noise formants. */
+function scream(opts: {
+  volume?: number
+  duration?: number
+  startHz?: number
+  endHz?: number
+  vibrato?: number
+} = {}) {
+  const audio = alive()
+  if (!audio) return
+
+  const {
+    volume = 0.14,
+    duration = 0.55,
+    startHz = 720,
+    endHz = 180,
+    vibrato = 38,
+  } = opts
+
+  const t0 = audio.currentTime
+
+  // Core yell (saw + square for grit)
+  for (const [type, volMul, detune] of [
+    ['sawtooth', 0.72, 0],
+    ['square', 0.38, 7],
+    ['triangle', 0.28, -11],
+  ] as const) {
+    const osc = audio.createOscillator()
+    const gain = audio.createGain()
+    const filter = audio.createBiquadFilter()
+    const lfo = audio.createOscillator()
+    const lfoGain = audio.createGain()
+
+    osc.type = type
+    osc.frequency.setValueAtTime(startHz, t0)
+    osc.frequency.exponentialRampToValueAtTime(Math.max(40, endHz), t0 + duration * 0.92)
+    osc.detune.setValueAtTime(detune, t0)
+
+    // Pitch wobble = scream vibrato
+    lfo.type = 'sine'
+    lfo.frequency.setValueAtTime(vibrato, t0)
+    lfo.frequency.linearRampToValueAtTime(vibrato * 0.55, t0 + duration)
+    lfoGain.gain.setValueAtTime(startHz * 0.045, t0)
+    lfoGain.gain.linearRampToValueAtTime(endHz * 0.03, t0 + duration)
+    lfo.connect(lfoGain)
+    lfoGain.connect(osc.frequency)
+
+    filter.type = 'bandpass'
+    filter.frequency.setValueAtTime(1400, t0)
+    filter.frequency.exponentialRampToValueAtTime(700, t0 + duration)
+    filter.Q.setValueAtTime(3.2, t0)
+
+    gain.gain.setValueAtTime(0.0001, t0)
+    gain.gain.linearRampToValueAtTime(volume * volMul, t0 + 0.02)
+    gain.gain.setValueAtTime(volume * volMul * 0.85, t0 + duration * 0.35)
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration)
+
+    osc.connect(filter)
+    filter.connect(gain)
+    gain.connect(sfxDest())
+    osc.start(t0)
+    osc.stop(t0 + duration + 0.04)
+    lfo.start(t0)
+    lfo.stop(t0 + duration + 0.04)
+  }
+
+  // Breath / rasp layer
+  noiseBurst(duration * 0.85, {
+    volume: volume * 0.55,
+    filterFreq: 1800,
+    filterType: 'bandpass',
+    filterQ: 1.4,
   })
-  rumble(0.25, 0.08)
+  noiseBurst(duration * 0.55, {
+    volume: volume * 0.28,
+    filterFreq: 3200,
+    filterType: 'highpass',
+    filterQ: 0.7,
+    delay: 0.04,
+  })
+
+  // Quick attack yelp before the fall
+  tone(startHz * 1.15, 0.07, {
+    type: 'sawtooth',
+    volume: volume * 0.55,
+    slideTo: startHz * 0.95,
+    filterFreq: 2200,
+    attack: 0.004,
+  })
 }
 
-/** Another bomber goes out. */
+/** Local player eliminated — full scream. */
+export function playDeath(): void {
+  scream({
+    volume: 0.16,
+    duration: 0.62,
+    startHz: 780,
+    endHz: 140,
+    vibrato: 42,
+  })
+  schedule(80, () =>
+    scream({
+      volume: 0.07,
+      duration: 0.38,
+      startHz: 520,
+      endHz: 110,
+      vibrato: 28,
+    }),
+  )
+  schedule(200, () => rumble(0.22, 0.07))
+}
+
+/** Another bomber goes out — shorter scream. */
 export function playEnemyDeath(): void {
-  tone(260, 0.1, { type: 'triangle', volume: 0.09, slideTo: 140 })
-  schedule(50, () => tone(160, 0.14, { type: 'sine', volume: 0.07, slideTo: 90 }))
-  noiseBurst(0.1, { volume: 0.07, filterFreq: 700, filterType: 'bandpass' })
+  scream({
+    volume: 0.11,
+    duration: 0.42,
+    startHz: 640,
+    endHz: 160,
+    vibrato: 34,
+  })
+  schedule(90, () =>
+    noiseBurst(0.12, { volume: 0.05, filterFreq: 600, filterType: 'lowpass' }),
+  )
 }
 
 export function playCountdownTick(): void {
