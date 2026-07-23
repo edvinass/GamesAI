@@ -294,9 +294,9 @@ function handleTouchStart(side: 'left' | 'right') {
   if (!physicsWorld.value || gameOver.value) return
   void unlockAudio()
 
+  // Allow launching from the flipper buttons, but still flip once the ball is out.
   if (!physicsWorld.value.ballInPlay) {
     launchBall()
-    return
   }
 
   if (side === 'left') {
@@ -328,8 +328,12 @@ function updateDisplayScale() {
   if (!containerRef.value || !physicsWorld.value) return
   const container = containerRef.value
   const level = physicsWorld.value.level
+  const hud = container.querySelector('.pinball-hud') as HTMLElement | null
+  const controls = container.querySelector('.touch-controls') as HTMLElement | null
+  const reservedY =
+    (hud?.offsetHeight ?? 64) + (controls?.offsetHeight ?? 72) + 16
   const scaleX = container.clientWidth / level.worldWidth
-  const scaleY = (container.clientHeight - 120) / level.worldHeight
+  const scaleY = Math.max(100, container.clientHeight - reservedY) / level.worldHeight
   displayScale.value = Math.min(scaleX, scaleY, 1.2)
 }
 
@@ -749,12 +753,9 @@ function render() {
     ctx.shadowColor = colorA
     ctx.shadowBlur = 16
 
-    const grad = ctx.createLinearGradient(
-      -level.flipperLength / 2,
-      0,
-      level.flipperLength / 2,
-      0
-    )
+    // Match physics: polygon extends from pivot (0) to tip (±length).
+    const tip = mirrored ? -level.flipperLength : level.flipperLength
+    const grad = ctx.createLinearGradient(0, 0, tip, 0)
     grad.addColorStop(0, colorA)
     grad.addColorStop(0.5, '#fff')
     grad.addColorStop(1, colorB)
@@ -762,15 +763,15 @@ function render() {
 
     ctx.beginPath()
     if (!mirrored) {
-      ctx.moveTo(-level.flipperLength / 2, -level.flipperWidth / 2)
-      ctx.lineTo(level.flipperLength / 2, -level.flipperWidth / 3)
-      ctx.lineTo(level.flipperLength / 2, level.flipperWidth / 3)
-      ctx.lineTo(-level.flipperLength / 2, level.flipperWidth / 2)
+      ctx.moveTo(0, -level.flipperWidth / 2)
+      ctx.lineTo(level.flipperLength, -level.flipperWidth / 3)
+      ctx.lineTo(level.flipperLength, level.flipperWidth / 3)
+      ctx.lineTo(0, level.flipperWidth / 2)
     } else {
-      ctx.moveTo(level.flipperLength / 2, -level.flipperWidth / 2)
-      ctx.lineTo(-level.flipperLength / 2, -level.flipperWidth / 3)
-      ctx.lineTo(-level.flipperLength / 2, level.flipperWidth / 3)
-      ctx.lineTo(level.flipperLength / 2, level.flipperWidth / 2)
+      ctx.moveTo(0, -level.flipperWidth / 2)
+      ctx.lineTo(-level.flipperLength, -level.flipperWidth / 3)
+      ctx.lineTo(-level.flipperLength, level.flipperWidth / 3)
+      ctx.lineTo(0, level.flipperWidth / 2)
     }
     ctx.closePath()
     ctx.fill()
@@ -782,7 +783,7 @@ function render() {
 
     // Pivot cap
     ctx.beginPath()
-    ctx.arc(mirrored ? level.flipperLength / 2 - 8 : -level.flipperLength / 2 + 8, 0, 6, 0, Math.PI * 2)
+    ctx.arc(0, 0, 7, 0, Math.PI * 2)
     ctx.fillStyle = '#e2e8f0'
     ctx.fill()
     ctx.strokeStyle = '#94a3b8'
@@ -1048,6 +1049,8 @@ watch(displayScale, () => {
   padding: 0.85rem 1.5rem 0.6rem;
   width: 100%;
   flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.2) 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .hud-section {
@@ -1218,12 +1221,15 @@ watch(displayScale, () => {
   align-items: center;
   min-height: 0;
   width: 100%;
+  overflow: hidden;
+  padding: 0.35rem 0;
 }
 
 .canvas-frame {
   position: relative;
   border-radius: 16px;
   padding: 3px;
+  max-height: 100%;
   background: linear-gradient(
     145deg,
     #f8fafc 0%,
@@ -1243,6 +1249,7 @@ watch(displayScale, () => {
   display: block;
   border-radius: 13px;
   background: #0a0610;
+  max-height: calc(100% - 6px);
 }
 
 .frame-shine {

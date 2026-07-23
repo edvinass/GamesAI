@@ -465,13 +465,67 @@ def test_throw_skips_bomb_on_preferred_landing(engine: BombermanEngine, state: d
     state["explosions"] = []
     state["_bomb_seq"] = 2
 
+    # Preferred landing (2+3=5) is occupied by blocker → bounce to 6.
+    assert engine._find_throw_landing(
+        state, 2, 1, "right", ignore_bomb_id="bomb-1"
+    ) == (6, 1)
+
     state, _ = engine.apply_action(state, {"type": "place_bomb"}, player)
     state, events = engine.apply_action(state, {"type": "place_bomb"}, player)
     assert any(e["type"] == "bomb_thrown" for e in events)
     bomb = next(b for b in state["bombs"] if b["id"] == "bomb-1")
+    blocker = next(b for b in state["bombs"] if b["id"] == "blocker")
     assert bomb["land_x"] == 6
     assert bomb["land_y"] == 1
 
+    for _ in range(12):
+        if bomb.get("flight") != "throw":
+            break
+        state, _ = engine.tick(state)
+    assert bomb["flight"] is None
+    assert bomb["x"] == 6 and bomb["y"] == 1
+    assert blocker["x"] == 5 and blocker["y"] == 1
+    # Must not stack on the blocking bomb.
+    assert (bomb["x"], bomb["y"]) != (blocker["x"], blocker["y"])
+
+
+def test_throw_landing_treats_bomb_as_obstacle(engine: BombermanEngine, state: dict) -> None:
+    """Direct landing helper: bombs block the preferred tile and force a bounce."""
+    for x in range(1, 12):
+        state["grid"][1][x] = TILE_EMPTY
+    state["bombs"] = [
+        {
+            "id": "thrown",
+            "x": 1,
+            "y": 1,
+            "owner_id": state["players"][0]["id"],
+            "range": 1,
+            "fuse": 20,
+            "flight": "carried",
+            "sliding": False,
+            "slide_dir": None,
+            "land_x": None,
+            "land_y": None,
+        },
+        {
+            "id": "blocker",
+            "x": 4,
+            "y": 1,
+            "owner_id": state["players"][1]["id"],
+            "range": 1,
+            "fuse": 20,
+            "flight": None,
+            "sliding": False,
+            "slide_dir": None,
+            "land_x": None,
+            "land_y": None,
+        },
+    ]
+    # From x=1, preferred is x=4 (occupied) → next empty x=5.
+    assert engine._throw_cell_landable(state, 4, 1, ignore_bomb_id="thrown") is False
+    assert engine._find_throw_landing(
+        state, 1, 1, "right", ignore_bomb_id="thrown"
+    ) == (5, 1)
 
 def test_throw_opponent_bomb(engine: BombermanEngine, state: dict) -> None:
     player = state["players"][0]

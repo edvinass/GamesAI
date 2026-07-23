@@ -394,17 +394,41 @@ class BombermanEngine(GamePlugin):
                 return value
         return "right"
 
-    def _throw_cell_landable(self, state: dict, x: int, y: int) -> bool:
+    def _throw_cell_landable(
+        self,
+        state: dict,
+        x: int,
+        y: int,
+        *,
+        ignore_bomb_id: str | None = None,
+    ) -> bool:
+        """Empty floor tile with no other bomb on it (carried bombs do not occupy the floor)."""
         width = state["grid_width"]
         height = state["grid_height"]
         if not (0 <= x < width and 0 <= y < height):
             return False
         if state["grid"][y][x] != TILE_EMPTY:
             return False
-        return self._bomb_at(state, x, y, grounded_only=True) is None
+        for other in state.get("bombs") or []:
+            if ignore_bomb_id and other.get("id") == ignore_bomb_id:
+                continue
+            if other.get("x") != x or other.get("y") != y:
+                continue
+            # Held above a bomber — not a floor obstacle.
+            if other.get("flight") == "carried":
+                continue
+            # Grounded, kicked, or mid-throw bombs all block landing on this cell.
+            return False
+        return True
 
     def _find_throw_landing(
-        self, state: dict, start_x: int, start_y: int, direction: str
+        self,
+        state: dict,
+        start_x: int,
+        start_y: int,
+        direction: str,
+        *,
+        ignore_bomb_id: str | None = None,
     ) -> tuple[int, int] | None:
         """Land 3 tiles away; if blocked, continue to the next empty tile in throw direction."""
         if direction not in DIRECTIONS:
@@ -418,7 +442,9 @@ class BombermanEngine(GamePlugin):
             x, y = x + dx, y + dy
             if not (0 <= x < width and 0 <= y < height):
                 break
-            if not self._throw_cell_landable(state, x, y):
+            if not self._throw_cell_landable(
+                state, x, y, ignore_bomb_id=ignore_bomb_id
+            ):
                 # Obstacle / bomb: keep flying and look further for an empty tile.
                 continue
             if dist < THROW_LAND_DISTANCE:
@@ -428,6 +454,32 @@ class BombermanEngine(GamePlugin):
             return (x, y)
         # Near the map edge with no room for a full throw — land on the farthest empty.
         return short_empty
+
+    def _next_throw_landing_from(
+        self,
+        state: dict,
+        x: int,
+        y: int,
+        direction: str,
+        *,
+        ignore_bomb_id: str | None = None,
+    ) -> tuple[int, int] | None:
+        """Find the next landable tile at or beyond (x, y) in throw direction."""
+        if direction not in DIRECTIONS:
+            return None
+        dx, dy = DIRECTIONS[direction]
+        width = state["grid_width"]
+        height = state["grid_height"]
+        cx, cy = x, y
+        for _ in range(max(width, height) + 1):
+            if not (0 <= cx < width and 0 <= cy < height):
+                return None
+            if self._throw_cell_landable(
+                state, cx, cy, ignore_bomb_id=ignore_bomb_id
+            ):
+                return (cx, cy)
+            cx, cy = cx + dx, cy + dy
+        return None
 
     def _grant_passable_on_cell(self, state: dict, bomb_id: str, x: int, y: int) -> None:
         for bomber in state["bombers"].values():
@@ -487,7 +539,9 @@ class BombermanEngine(GamePlugin):
         bomber["facing"] = facing
         start_x, start_y = bomber["x"], bomber["y"]
         bomb["x"], bomb["y"] = start_x, start_y
-        landing = self._find_throw_landing(state, start_x, start_y, facing)
+        landing = self._find_throw_landing(
+            state, start_x, start_y, facing, ignore_bomb_id=bomb.get("id")
+        )
         if landing is None:
             if bomber.get("carrying_bomb_id") == bomb["id"]:
                 self._sync_carried_bomb(state, bomber)
@@ -509,8 +563,22 @@ class BombermanEngine(GamePlugin):
         if state["grid"][ny][nx] == TILE_EMPTY:
             self._grant_passable_on_cell(state, bomb["id"], nx, ny)
         if (nx, ny) == (land_x, land_y):
-            self._clear_bomb_motion(bomb)
+            # If the landing tile became blocked, bounce further before settling.
+            if not self._throw_cell_landable(
+                state, nx, ny, ignore_bomb_id=bomb.get("id")
+            ):
+                bounced = self._next_throw_landing_from(
+                    state, nx + dx, ny + dy, facing, ignore_bomb_id=bomb.get("id")
+                )
+                if bounced is not None:
+                    bomb["land_x"], bomb["land_y"] = bounced
+                else:
+                    self._clear_bomb_motion(bomb)
+            else:
+                self._clear_bomb_motion(bomb)
 
+        land_x = bomb.get("land_x", land_x)
+        land_y = bomb.get("land_y", land_y)
         state["last_action"] = {
             "type": "bomb_thrown",
             "player_id": player_id,
@@ -575,19 +643,63 @@ class BombermanEngine(GamePlugin):
         if land_x is None or land_y is None:
             self._clear_bomb_motion(bomb)
             return events
-        if (bomb["x"], bomb["y"]) == (land_x, land_y):
-            self._clear_bomb_motion(bomb)
-            events.append(
-                {
-                    "type": "bomb_stopped",
-                    "bomb_id": bomb["id"],
-                    "x": bomb["x"],
-                    "y": bomb["y"],
-                }
-            )
-            return events
 
         dx, dy = DIRECTIONS[direction]
+        # If the planned landing is (now) blocked by a bomb/obstacle, bounce further.
+        if not self._throw_cell_landable(
+            state, int(land_x), int(land_y), ignore_bomb_id=bomb.get("id")
+        ):
+            bounced = self._next_throw_landing_from(
+                state,
+                int(land_x) + dx,
+                int(land_y) + dy,
+                direction,
+                ignore_bomb_id=bomb.get("id"),
+            )
+            if bounced is None:
+                # No further tile — keep current planned cell; settle when we arrive.
+                pass
+            else:
+                land_x, land_y = bounced
+                bomb["land_x"], bomb["land_y"] = land_x, land_y
+
+        if (bomb["x"], bomb["y"]) == (land_x, land_y):
+            if not self._throw_cell_landable(
+                state, bomb["x"], bomb["y"], ignore_bomb_id=bomb.get("id")
+            ):
+                bounced = self._next_throw_landing_from(
+                    state,
+                    bomb["x"] + dx,
+                    bomb["y"] + dy,
+                    direction,
+                    ignore_bomb_id=bomb.get("id"),
+                )
+                if bounced is not None:
+                    bomb["land_x"], bomb["land_y"] = bounced
+                    land_x, land_y = bounced
+                else:
+                    self._clear_bomb_motion(bomb)
+                    events.append(
+                        {
+                            "type": "bomb_stopped",
+                            "bomb_id": bomb["id"],
+                            "x": bomb["x"],
+                            "y": bomb["y"],
+                        }
+                    )
+                    return events
+            else:
+                self._clear_bomb_motion(bomb)
+                events.append(
+                    {
+                        "type": "bomb_stopped",
+                        "bomb_id": bomb["id"],
+                        "x": bomb["x"],
+                        "y": bomb["y"],
+                    }
+                )
+                return events
+
         nx, ny = bomb["x"] + dx, bomb["y"] + dy
         if not (0 <= nx < width and 0 <= ny < height):
             self._clear_bomb_motion(bomb)
@@ -607,6 +719,15 @@ class BombermanEngine(GamePlugin):
             }
         )
         if (nx, ny) == (land_x, land_y):
+            if not self._throw_cell_landable(
+                state, nx, ny, ignore_bomb_id=bomb.get("id")
+            ):
+                bounced = self._next_throw_landing_from(
+                    state, nx + dx, ny + dy, direction, ignore_bomb_id=bomb.get("id")
+                )
+                if bounced is not None:
+                    bomb["land_x"], bomb["land_y"] = bounced
+                    return events
             self._clear_bomb_motion(bomb)
             events.append(
                 {

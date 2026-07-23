@@ -12,6 +12,13 @@ const PLUNGER_SPEED = 110
 /** When the ball clears this Y in the shooter lane, gate it into the playfield. */
 const LAUNCH_EXIT_Y = 315
 
+/** Flipper rest / raised angles (absolute body angles). */
+const LEFT_REST_ANGLE = 0.55
+const LEFT_ACTIVE_ANGLE = -0.35
+const RIGHT_REST_ANGLE = -0.55
+const RIGHT_ACTIVE_ANGLE = 0.35
+const FLIPPER_SPEED = 28
+
 export interface BumperSpec {
   x: number
   y: number
@@ -57,8 +64,6 @@ export interface PinballWorld {
   ballBody: PlanckBody | null
   leftFlipperBody: PlanckBody
   rightFlipperBody: PlanckBody
-  leftFlipperJoint: planck.RevoluteJoint
-  rightFlipperJoint: planck.RevoluteJoint
   bumperBodies: Map<PlanckBody, BumperSpec>
   targetBodies: Map<PlanckBody, TargetSpec>
   hitTargets: Set<string>
@@ -67,6 +72,8 @@ export interface PinballWorld {
   ballsRemaining: number
   ballInPlay: boolean
   ballLaunched: boolean
+  leftFlipperActive: boolean
+  rightFlipperActive: boolean
   onCollision: (event: CollisionEvent) => void
   onBallLost: () => void
   step: () => void
@@ -138,113 +145,69 @@ function createWalls(world: PlanckWorld, level: PinballLevel): void {
 
 function createBumpers(world: PlanckWorld, level: PinballLevel): Map<PlanckBody, BumperSpec> {
   const bumperMap = new Map<PlanckBody, BumperSpec>()
-  
+
   for (const bumper of level.bumpers) {
     const body = world.createBody({ type: 'static', position: planck.Vec2(bumper.x, bumper.y) })
     body.createFixture(planck.Circle(bumper.radius), { friction: 0.1, restitution: 1.5 })
     bumperMap.set(body, bumper)
   }
-  
+
   return bumperMap
 }
 
 function createTargets(world: PlanckWorld, level: PinballLevel): Map<PlanckBody, TargetSpec> {
   const targetMap = new Map<PlanckBody, TargetSpec>()
-  
+
   for (const target of level.targets) {
     const body = world.createBody({ type: 'static', position: planck.Vec2(target.x, target.y) })
     body.createFixture(planck.Box(target.width / 2, target.height / 2), { friction: 0.2, restitution: 0.8 })
     targetMap.set(body, target)
   }
-  
+
   return targetMap
 }
 
 function createFlippers(world: PlanckWorld, level: PinballLevel): {
   leftBody: PlanckBody
   rightBody: PlanckBody
-  leftJoint: planck.RevoluteJoint
-  rightJoint: planck.RevoluteJoint
 } {
   const flipperY = 650
   const leftPivotX = 100
   const rightPivotX = 250
-  // Pixel-scale world: keep density tiny so motors can overcome inertia.
-  const flipperDensity = 0.002
-  const maxTorque = 200_000
 
-  const leftAnchor = world.createBody({ type: 'static', position: planck.Vec2(leftPivotX, flipperY) })
-  const rightAnchor = world.createBody({ type: 'static', position: planck.Vec2(rightPivotX, flipperY) })
-
+  // Kinematic flippers: infinite effective mass so the ball bounces instead of
+  // shoving them. We drive angle via setAngularVelocity each step.
   const leftFlipper = world.createBody({
-    type: 'dynamic',
-    position: planck.Vec2(leftPivotX + level.flipperLength / 2 - 10, flipperY),
-    angle: 0.45,
-    bullet: true,
+    type: 'kinematic',
+    position: planck.Vec2(leftPivotX, flipperY),
+    angle: LEFT_REST_ANGLE,
   })
-  leftFlipper.setSleepingAllowed(false)
   leftFlipper.createFixture(
     planck.Polygon([
-      planck.Vec2(-level.flipperLength / 2, -level.flipperWidth / 2),
-      planck.Vec2(level.flipperLength / 2, -level.flipperWidth / 3),
-      planck.Vec2(level.flipperLength / 2, level.flipperWidth / 3),
-      planck.Vec2(-level.flipperLength / 2, level.flipperWidth / 2),
+      planck.Vec2(0, -level.flipperWidth / 2),
+      planck.Vec2(level.flipperLength, -level.flipperWidth / 3),
+      planck.Vec2(level.flipperLength, level.flipperWidth / 3),
+      planck.Vec2(0, level.flipperWidth / 2),
     ]),
-    { density: flipperDensity, friction: 0.4, restitution: 0.15 }
+    { friction: 0.4, restitution: 0.35 }
   )
 
   const rightFlipper = world.createBody({
-    type: 'dynamic',
-    position: planck.Vec2(rightPivotX - level.flipperLength / 2 + 10, flipperY),
-    angle: -0.45,
-    bullet: true,
+    type: 'kinematic',
+    position: planck.Vec2(rightPivotX, flipperY),
+    angle: RIGHT_REST_ANGLE,
   })
-  rightFlipper.setSleepingAllowed(false)
   rightFlipper.createFixture(
     planck.Polygon([
-      planck.Vec2(level.flipperLength / 2, -level.flipperWidth / 2),
-      planck.Vec2(-level.flipperLength / 2, -level.flipperWidth / 3),
-      planck.Vec2(-level.flipperLength / 2, level.flipperWidth / 3),
-      planck.Vec2(level.flipperLength / 2, level.flipperWidth / 2),
+      planck.Vec2(0, -level.flipperWidth / 2),
+      planck.Vec2(-level.flipperLength, -level.flipperWidth / 3),
+      planck.Vec2(-level.flipperLength, level.flipperWidth / 3),
+      planck.Vec2(0, level.flipperWidth / 2),
     ]),
-    { density: flipperDensity, friction: 0.4, restitution: 0.15 }
+    { friction: 0.4, restitution: 0.35 }
   )
 
-  // Joint limits are relative to the spawn pose (reference angle).
-  // Left rest = tip down (positive), flip = tip up (negative).
-  const leftJoint = world.createJoint(
-    planck.RevoluteJoint(
-      {
-        enableLimit: true,
-        lowerAngle: -0.85,
-        upperAngle: 0.15,
-        enableMotor: true,
-        motorSpeed: 18,
-        maxMotorTorque: maxTorque,
-      },
-      leftAnchor,
-      leftFlipper,
-      planck.Vec2(leftPivotX, flipperY)
-    )
-  ) as planck.RevoluteJoint
-
-  const rightJoint = world.createJoint(
-    planck.RevoluteJoint(
-      {
-        enableLimit: true,
-        lowerAngle: -0.15,
-        upperAngle: 0.85,
-        enableMotor: true,
-        motorSpeed: -18,
-        maxMotorTorque: maxTorque,
-      },
-      rightAnchor,
-      rightFlipper,
-      planck.Vec2(rightPivotX, flipperY)
-    )
-  ) as planck.RevoluteJoint
-
-  return { leftBody: leftFlipper, rightBody: rightFlipper, leftJoint, rightJoint }
+  return { leftBody: leftFlipper, rightBody: rightFlipper }
 }
 
 export function createPinballWorld(
@@ -258,7 +221,7 @@ export function createPinballWorld(
   createWalls(world, level)
   const bumperBodies = createBumpers(world, level)
   const targetBodies = createTargets(world, level)
-  const { leftBody, rightBody, leftJoint, rightJoint } = createFlippers(world, level)
+  const { leftBody, rightBody } = createFlippers(world, level)
 
   /** True while the plunger is driving the ball up the shooter lane. */
   let plungerActive = false
@@ -269,8 +232,6 @@ export function createPinballWorld(
     ballBody: null,
     leftFlipperBody: leftBody,
     rightFlipperBody: rightBody,
-    leftFlipperJoint: leftJoint,
-    rightFlipperJoint: rightJoint,
     bumperBodies,
     targetBodies,
     hitTargets: new Set(),
@@ -279,9 +240,25 @@ export function createPinballWorld(
     ballsRemaining: 3,
     ballInPlay: false,
     ballLaunched: false,
+    leftFlipperActive: false,
+    rightFlipperActive: false,
     onCollision,
     onBallLost,
     step: () => {
+      // Drive kinematic flippers toward rest / active angles.
+      const driveFlipper = (body: PlanckBody, active: boolean, rest: number, raised: number) => {
+        const target = active ? raised : rest
+        const diff = target - body.getAngle()
+        if (Math.abs(diff) < 0.01) {
+          body.setAngle(target)
+          body.setAngularVelocity(0)
+        } else {
+          body.setAngularVelocity(Math.max(-FLIPPER_SPEED, Math.min(FLIPPER_SPEED, diff * 45)))
+        }
+      }
+      driveFlipper(leftBody, state.leftFlipperActive, LEFT_REST_ANGLE, LEFT_ACTIVE_ANGLE)
+      driveFlipper(rightBody, state.rightFlipperActive, RIGHT_REST_ANGLE, RIGHT_ACTIVE_ANGLE)
+
       for (let i = 0; i < PHYSICS_TIME_SCALE; i++) {
         state.simTime += FIXED_TIMESTEP
 
@@ -343,11 +320,10 @@ export function createPinballWorld(
       state.ballLaunched = true
     },
     activateLeftFlipper: (active: boolean) => {
-      // Negative speed flips tip up; positive returns tip down.
-      leftJoint.setMotorSpeed(active ? -45 : 18)
+      state.leftFlipperActive = active
     },
     activateRightFlipper: (active: boolean) => {
-      rightJoint.setMotorSpeed(active ? 45 : -18)
+      state.rightFlipperActive = active
     },
     resetBall: () => {
       if (state.ballBody) {
@@ -383,12 +359,12 @@ export function createPinballWorld(
     if (bumperSpec) {
       const vel = state.ballBody.getLinearVelocity()
       const speed = Math.hypot(vel.x, vel.y)
-      
+
       const pos = otherBody.getPosition()
       const ballPos = state.ballBody.getPosition()
       const dx = ballPos.x - pos.x
       const dy = ballPos.y - pos.y
-      const dist = Math.hypot(dx, dy)
+      const dist = Math.hypot(dx, dy) || 1
       const bounceStrength = 25
       state.ballBody.setLinearVelocity(
         planck.Vec2(
@@ -412,7 +388,7 @@ export function createPinballWorld(
     if (targetSpec && !state.hitTargets.has(targetSpec.id)) {
       state.hitTargets.add(targetSpec.id)
       state.score += targetSpec.points
-      
+
       const pos = otherBody.getPosition()
       onCollision({
         type: 'target',
@@ -438,22 +414,25 @@ export function createPinballWorld(
     }
 
     // Rail / wall / lane contacts (for SFX).
-    const pos = state.ballBody.getPosition()
-    const vel = state.ballBody.getLinearVelocity()
-    const speed = Math.hypot(vel.x, vel.y)
-    if (speed > 8) {
-      onCollision({
-        type: 'wall',
-        x: pos.x,
-        y: pos.y,
-        points: 0,
-        intensity: Math.min(1, speed / 40),
-      })
+    {
+      const pos = state.ballBody.getPosition()
+      const vel = state.ballBody.getLinearVelocity()
+      const speed = Math.hypot(vel.x, vel.y)
+      if (speed > 8) {
+        onCollision({
+          type: 'wall',
+          x: pos.x,
+          y: pos.y,
+          points: 0,
+          intensity: Math.min(1, speed / 40),
+        })
+      }
     }
   })
 
   return state
 }
+
 
 export function getBallPosition(world: PinballWorld): { x: number; y: number } | null {
   if (!world.ballBody) return null

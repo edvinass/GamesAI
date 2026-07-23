@@ -160,21 +160,33 @@ def _walkable(
     return True
 
 
-def _throw_cell_landable(state: dict, x: int, y: int) -> bool:
+def _throw_cell_landable(
+    state: dict, x: int, y: int, *, ignore_bomb_id: str | None = None
+) -> bool:
     width = state["grid_width"]
     height = state["grid_height"]
     if not (0 <= x < width and 0 <= y < height):
         return False
     if state["grid"][y][x] != TILE_EMPTY:
         return False
-    bomb = _bomb_cells(state).get((x, y))
-    if bomb is not None and bomb.get("flight") not in ("throw", "carried"):
+    for other in state.get("bombs") or []:
+        if ignore_bomb_id and other.get("id") == ignore_bomb_id:
+            continue
+        if other.get("x") != x or other.get("y") != y:
+            continue
+        if other.get("flight") == "carried":
+            continue
         return False
     return True
 
 
 def _throw_landing(
-    state: dict, start_x: int, start_y: int, direction: str
+    state: dict,
+    start_x: int,
+    start_y: int,
+    direction: str,
+    *,
+    ignore_bomb_id: str | None = None,
 ) -> tuple[int, int] | None:
     """Match engine: land 3 tiles away, or next empty further if that tile is blocked."""
     if direction not in DIRECTIONS:
@@ -188,7 +200,7 @@ def _throw_landing(
         x, y = x + dx, y + dy
         if not (0 <= x < width and 0 <= y < height):
             break
-        if not _throw_cell_landable(state, x, y):
+        if not _throw_cell_landable(state, x, y, ignore_bomb_id=ignore_bomb_id):
             continue
         if dist < THROW_LAND_DISTANCE:
             short_empty = (x, y)
