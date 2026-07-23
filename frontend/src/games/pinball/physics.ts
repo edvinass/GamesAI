@@ -17,10 +17,10 @@ const LEFT_REST_ANGLE = 0.55
 const LEFT_ACTIVE_ANGLE = -0.4
 const RIGHT_REST_ANGLE = -0.55
 const RIGHT_ACTIVE_ANGLE = 0.4
-const FLIPPER_SPEED = 65
+const FLIPPER_SPEED = 90
 /** Extra kick applied on flipper contact while the flipper is raised/swinging. */
-const FLIPPER_KICK_MIN = 55
-const FLIPPER_KICK_MAX = 115
+const FLIPPER_KICK_MIN = 95
+const FLIPPER_KICK_MAX = 160
 
 export interface BumperSpec {
   x: number
@@ -95,8 +95,8 @@ const DEFAULT_LEVEL: PinballLevel = {
   ballRadius: 10,
   launchX: 372,
   launchY: 600,
-  flipperLength: 70,
-  flipperWidth: 14,
+  flipperLength: 80,
+  flipperWidth: 16,
   bumpers: [
     { x: 120, y: 180, radius: 30, points: 100, color: '#ff4757' },
     { x: 280, y: 180, radius: 30, points: 100, color: '#ff4757' },
@@ -182,8 +182,8 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
   rightBody: PlanckBody
 } {
   const flipperY = 650
-  const leftPivotX = 100
-  const rightPivotX = 250
+  const leftPivotX = 95
+  const rightPivotX = 255
 
   // Kinematic flippers: infinite effective mass so the ball bounces instead of
   // shoving them. We drive angle via setAngularVelocity each step.
@@ -199,7 +199,7 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
       planck.Vec2(level.flipperLength, level.flipperWidth / 3),
       planck.Vec2(0, level.flipperWidth / 2),
     ]),
-    { friction: 0.85, restitution: 0.05 }
+    { friction: 0.7, restitution: 0.35 }
   )
 
   const rightFlipper = world.createBody({
@@ -214,7 +214,7 @@ function createFlippers(world: PlanckWorld, level: PinballLevel): {
       planck.Vec2(-level.flipperLength, level.flipperWidth / 3),
       planck.Vec2(0, level.flipperWidth / 2),
     ]),
-    { friction: 0.85, restitution: 0.05 }
+    { friction: 0.7, restitution: 0.35 }
   )
 
   return { leftBody: leftFlipper, rightBody: rightFlipper }
@@ -314,8 +314,8 @@ export function createPinballWorld(
 
         if (state.ballBody && pendingFlipperKick) {
           const cur = state.ballBody.getLinearVelocity()
-          // Don't stack kicks if already rocketing up-table.
-          if (cur.y > -85) {
+          // Always apply active kicks; only skip if already near the velocity cap upward.
+          if (cur.y > -110) {
             state.ballBody.setLinearVelocity(
               planck.Vec2(pendingFlipperKick.vx, pendingFlipperKick.vy)
             )
@@ -469,7 +469,7 @@ export function createPinballWorld(
         const power = FLIPPER_KICK_MIN + along * (FLIPPER_KICK_MAX - FLIPPER_KICK_MIN)
         // Up-table is -Y. Left flipper also kicks right; right kicks left.
         pendingFlipperKick = {
-          vx: (isLeft ? 1 : -1) * (12 + along * 40),
+          vx: (isLeft ? 1 : -1) * (22 + along * 60),
           vy: -power,
         }
       }
