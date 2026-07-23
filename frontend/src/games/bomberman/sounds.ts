@@ -366,130 +366,185 @@ export function playPowerup(kind: PowerupSoundKind = 'bomb'): void {
   })
 }
 
-/** Cartoonish scream — pitched yell + filtered noise formants. */
+/** Build a short glottal-ish pulse train buffer (voiced source). */
+function makeGlottalBuffer(audio: AudioContext, duration: number, startHz: number, endHz: number) {
+  const len = Math.max(1, Math.floor(audio.sampleRate * duration))
+  const buffer = audio.createBuffer(1, len, audio.sampleRate)
+  const data = buffer.getChannelData(0)
+  const sr = audio.sampleRate
+  let phase = 0
+  let aspir = 0
+  for (let i = 0; i < len; i++) {
+    const u = i / len
+    // Natural scream contour: quick rise, then fall
+    const pitchEase = u < 0.12 ? u / 0.12 : 1 - Math.pow((u - 0.12) / 0.88, 1.35)
+    const hz = endHz + (startHz - endHz) * pitchEase
+    const period = sr / Math.max(40, hz)
+    phase += 1
+    if (phase >= period) phase -= period
+    const p = phase / period
+    // Liljencrants–Fant-ish glottal pulse: sharp open, softer close
+    let pulse = 0
+    if (p < 0.4) {
+      const o = p / 0.4
+      pulse = Math.sin(Math.PI * o) * Math.sin(Math.PI * o)
+    } else if (p < 0.55) {
+      const c = (p - 0.4) / 0.15
+      pulse = Math.cos(Math.PI * 0.5 * c)
+    }
+    // Mild aspiration / roughness (jitter + breath)
+    const white = Math.random() * 2 - 1
+    aspir = aspir * 0.92 + white * 0.08
+    const env =
+      Math.sin(Math.PI * Math.min(1, u / 0.06)) *
+      (u < 0.72 ? 1 : Math.pow(1 - (u - 0.72) / 0.28, 0.85))
+    const tremor = 1 + 0.05 * Math.sin(2 * Math.PI * 5.5 * (i / sr))
+    data[i] = (pulse * 0.88 + aspir * 0.28) * env * tremor
+  }
+  return buffer
+}
+
+/** More realistic scream via glottal source + vowel formants. */
 function scream(opts: {
   volume?: number
   duration?: number
   startHz?: number
   endHz?: number
-  vibrato?: number
 } = {}) {
   const audio = alive()
   if (!audio) return
 
   const {
-    volume = 0.14,
-    duration = 0.55,
-    startHz = 720,
-    endHz = 180,
-    vibrato = 38,
+    volume = 0.35,
+    duration = 1.35,
+    startHz = 520,
+    endHz = 220,
   } = opts
 
   const t0 = audio.currentTime
+  const source = audio.createBufferSource()
+  source.buffer = makeGlottalBuffer(audio, duration, startHz, endHz)
 
-  // Core yell (saw + square for grit)
-  for (const [type, volMul, detune] of [
-    ['sawtooth', 0.72, 0],
-    ['square', 0.38, 7],
-    ['triangle', 0.28, -11],
-  ] as const) {
-    const osc = audio.createOscillator()
-    const gain = audio.createGain()
-    const filter = audio.createBiquadFilter()
-    const lfo = audio.createOscillator()
-    const lfoGain = audio.createGain()
+  const master = audio.createGain()
+  master.gain.setValueAtTime(0.0001, t0)
+  master.gain.linearRampToValueAtTime(volume, t0 + 0.04)
+  // Hold loud through most of the scream, then fade
+  master.gain.setValueAtTime(volume, t0 + duration * 0.65)
+  master.gain.linearRampToValueAtTime(volume * 0.55, t0 + duration * 0.85)
+  master.gain.exponentialRampToValueAtTime(0.0001, t0 + duration)
 
-    osc.type = type
-    osc.frequency.setValueAtTime(startHz, t0)
-    osc.frequency.exponentialRampToValueAtTime(Math.max(40, endHz), t0 + duration * 0.92)
-    osc.detune.setValueAtTime(detune, t0)
+  // Parallel formant bank (open scream vowel → slightly darker)
+  const formants: [number, number, number, number][] = [
+    // [startHz, endHz, Q, gain]
+    [780, 620, 6, 1.35],
+    [1450, 1180, 7, 1.2],
+    [2650, 2300, 8, 0.9],
+    [3500, 3000, 6, 0.55],
+  ]
 
-    // Pitch wobble = scream vibrato
-    lfo.type = 'sine'
-    lfo.frequency.setValueAtTime(vibrato, t0)
-    lfo.frequency.linearRampToValueAtTime(vibrato * 0.55, t0 + duration)
-    lfoGain.gain.setValueAtTime(startHz * 0.045, t0)
-    lfoGain.gain.linearRampToValueAtTime(endHz * 0.03, t0 + duration)
-    lfo.connect(lfoGain)
-    lfoGain.connect(osc.frequency)
+  for (const [fStart, fEnd, q, g] of formants) {
+    const bp = audio.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.setValueAtTime(fStart, t0)
+    bp.frequency.exponentialRampToValueAtTime(fEnd, t0 + duration)
+    bp.Q.setValueAtTime(q, t0)
 
-    filter.type = 'bandpass'
-    filter.frequency.setValueAtTime(1400, t0)
-    filter.frequency.exponentialRampToValueAtTime(700, t0 + duration)
-    filter.Q.setValueAtTime(3.2, t0)
+    const gNode = audio.createGain()
+    gNode.gain.setValueAtTime(g, t0)
 
-    gain.gain.setValueAtTime(0.0001, t0)
-    gain.gain.linearRampToValueAtTime(volume * volMul, t0 + 0.02)
-    gain.gain.setValueAtTime(volume * volMul * 0.85, t0 + duration * 0.35)
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration)
-
-    osc.connect(filter)
-    filter.connect(gain)
-    gain.connect(sfxDest())
-    osc.start(t0)
-    osc.stop(t0 + duration + 0.04)
-    lfo.start(t0)
-    lfo.stop(t0 + duration + 0.04)
+    source.connect(bp)
+    bp.connect(gNode)
+    gNode.connect(master)
   }
 
-  // Breath / rasp layer
-  noiseBurst(duration * 0.85, {
-    volume: volume * 0.55,
-    filterFreq: 1800,
-    filterType: 'bandpass',
-    filterQ: 1.4,
-  })
-  noiseBurst(duration * 0.55, {
-    volume: volume * 0.28,
-    filterFreq: 3200,
-    filterType: 'highpass',
-    filterQ: 0.7,
-    delay: 0.04,
-  })
+  // Body / chest resonance
+  const low = audio.createBiquadFilter()
+  low.type = 'lowpass'
+  low.frequency.setValueAtTime(1000, t0)
+  low.frequency.exponentialRampToValueAtTime(550, t0 + duration)
+  low.Q.setValueAtTime(0.7, t0)
+  const lowGain = audio.createGain()
+  lowGain.gain.setValueAtTime(0.55, t0)
+  source.connect(low)
+  low.connect(lowGain)
+  lowGain.connect(master)
 
-  // Quick attack yelp before the fall
-  tone(startHz * 1.15, 0.07, {
-    type: 'sawtooth',
-    volume: volume * 0.55,
-    slideTo: startHz * 0.95,
-    filterFreq: 2200,
-    attack: 0.004,
-  })
+  // Air / rasp noise through same formant region
+  const noiseDur = duration * 0.95
+  const noiseLen = Math.max(1, Math.floor(audio.sampleRate * noiseDur))
+  const noiseBuf = audio.createBuffer(1, noiseLen, audio.sampleRate)
+  const nd = noiseBuf.getChannelData(0)
+  let pink = 0
+  for (let i = 0; i < noiseLen; i++) {
+    const white = Math.random() * 2 - 1
+    pink = (pink + 0.02 * white) / 1.02
+    const u = i / noiseLen
+    const env =
+      Math.sin(Math.PI * Math.min(1, u / 0.08)) *
+      (u < 0.7 ? 1 : Math.pow(1 - (u - 0.7) / 0.3, 0.8))
+    nd[i] = (white * 0.45 + pink * 0.65) * env
+  }
+  const noise = audio.createBufferSource()
+  noise.buffer = noiseBuf
+  const nBp = audio.createBiquadFilter()
+  nBp.type = 'bandpass'
+  nBp.frequency.setValueAtTime(2400, t0)
+  nBp.frequency.exponentialRampToValueAtTime(1500, t0 + noiseDur)
+  nBp.Q.setValueAtTime(1.4, t0)
+  const nGain = audio.createGain()
+  nGain.gain.setValueAtTime(volume * 0.7, t0)
+  nGain.gain.setValueAtTime(volume * 0.55, t0 + noiseDur * 0.6)
+  nGain.gain.exponentialRampToValueAtTime(0.0001, t0 + noiseDur)
+  noise.connect(nBp)
+  nBp.connect(nGain)
+  nGain.connect(sfxDest())
+
+  // Presence shelf so it cuts through explosions
+  const presence = audio.createBiquadFilter()
+  presence.type = 'peaking'
+  presence.frequency.setValueAtTime(2800, t0)
+  presence.Q.setValueAtTime(1.1, t0)
+  presence.gain.setValueAtTime(7, t0)
+
+  master.connect(presence)
+  presence.connect(sfxDest())
+
+  source.start(t0)
+  source.stop(t0 + duration + 0.02)
+  noise.start(t0)
+  noise.stop(t0 + noiseDur + 0.02)
 }
 
-/** Local player eliminated — full scream. */
+/** Any bomber eliminated — full scream. */
 export function playDeath(): void {
   scream({
-    volume: 0.16,
-    duration: 0.62,
-    startHz: 780,
-    endHz: 140,
-    vibrato: 42,
+    volume: 0.55,
+    duration: 1.45,
+    startHz: 540 + Math.random() * 90,
+    endHz: 170 + Math.random() * 40,
   })
-  schedule(80, () =>
+  // Echoed second yell for length / intensity
+  schedule(280, () =>
     scream({
-      volume: 0.07,
-      duration: 0.38,
-      startHz: 520,
-      endHz: 110,
-      vibrato: 28,
+      volume: 0.32,
+      duration: 0.95,
+      startHz: 460 + Math.random() * 60,
+      endHz: 150 + Math.random() * 30,
     }),
   )
-  schedule(200, () => rumble(0.22, 0.07))
+  schedule(900, () =>
+    scream({
+      volume: 0.14,
+      duration: 0.55,
+      startHz: 300 + Math.random() * 40,
+      endHz: 130 + Math.random() * 25,
+    }),
+  )
 }
 
-/** Another bomber goes out — shorter scream. */
+/** @deprecated Use playDeath — same scream for every bomber. */
 export function playEnemyDeath(): void {
-  scream({
-    volume: 0.11,
-    duration: 0.42,
-    startHz: 640,
-    endHz: 160,
-    vibrato: 34,
-  })
-  schedule(90, () =>
-    noiseBurst(0.12, { volume: 0.05, filterFreq: 600, filterType: 'lowpass' }),
-  )
+  playDeath()
 }
 
 export function playCountdownTick(): void {

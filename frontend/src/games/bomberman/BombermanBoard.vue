@@ -26,7 +26,6 @@ import {
   playCountdownGo,
   playCountdownTick,
   playDeath,
-  playEnemyDeath,
   playExplosion,
   playLose,
   playPowerup,
@@ -478,12 +477,11 @@ function playStateSounds(state: BombermanGameState) {
     playStep()
   }
 
-  // Deaths
+  // Deaths — scream for every bomber that goes out
   for (const [pid, wasAlive] of Object.entries(prev.alive)) {
-    if (wasAlive && alive[pid] === false) {
+    if (wasAlive && !alive[pid]) {
       const dead = state.bombers[pid]
-      if (pid === props.playerId) playDeath()
-      else playEnemyDeath()
+      playDeath()
       if (dead) {
         particles.push(...spawnDeathParticles(dead.x, dead.y, dead.color))
         shake = Math.min(1, shake + 0.35)
