@@ -303,6 +303,48 @@ def test_trap_positions_include_choke_tile() -> None:
     assert (4, 2) in traps or (3, 2) in traps
 
 
+def test_ai_does_not_reenter_own_blast_lane() -> None:
+    """After escaping a soft-clear bomb, pathing must not walk back into the blast."""
+    state = _empty_corridor_state()
+    bomber = state["bombers"]["ai"]
+    human = state["bombers"]["human"]
+    for y in range(0, 5):
+        for x in range(0, 8):
+            state["grid"][y][x] = TILE_HARD
+    # Open row: AI safe at (1,2); bomb at (4,2) covers (2,2)-(5,2) with range 2.
+    for x in range(1, 7):
+        state["grid"][2][x] = TILE_EMPTY
+    state["grid"][3][1] = TILE_EMPTY
+    bomber["x"], bomber["y"] = 1, 2
+    bomber["bomb_range"] = 2
+    bomber["max_bombs"] = 1
+    human["x"], human["y"] = 6, 2
+    human["alive"] = True
+    state["bombs"] = [
+        {
+            "id": "bomb-1",
+            "x": 4,
+            "y": 2,
+            "owner_id": "ai",
+            "range": 2,
+            "fuse": 8,
+        }
+    ]
+    bomber["passable_bomb_ids"] = ["bomb-1"]
+
+    for _ in range(20):
+        direction, place = choose_ai_action(state, "ai", bomber)
+        assert place is False
+        assert direction != "right", "must not walk back toward own blast"
+        if direction in ("up", "down", "left", "right"):
+            dx, dy = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[
+                direction
+            ]
+            nx, ny = bomber["x"] + dx, bomber["y"] + dy
+            danger = _danger_times(state)
+            assert danger.get((nx, ny)) is None
+
+
 def test_ai_steps_onto_kill_tile_before_bombing() -> None:
     state = _empty_corridor_state()
     bomber = state["bombers"]["ai"]

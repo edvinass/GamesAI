@@ -1192,9 +1192,17 @@ class BombermanEngine(GamePlugin):
         for i, (pid, bomber) in enumerate(ai_seats):
             pos = (int(bomber["x"]), int(bomber["y"]))
             in_danger = danger.get(pos) is not None
-            # Always react when threatened, carrying, or standing on a bomb.
+            held = bomber.get("next_direction")
+            next_pos = None
+            if held in DIRECTIONS:
+                dx, dy = DIRECTIONS[held]
+                next_pos = (pos[0] + dx, pos[1] + dy)
+            # Always react when threatened, about to step into a blast/fire,
+            # carrying, or standing on a bomb. Stale committed directions are
+            # what causes most early self-kills after a soft clear.
             urgent = (
                 in_danger
+                or (next_pos is not None and danger.get(next_pos) is not None)
                 or bool(bomber.get("carrying_bomb_id"))
                 or any(
                     b.get("x") == pos[0]
@@ -1213,8 +1221,37 @@ class BombermanEngine(GamePlugin):
                 danger=danger,
                 heavy_think=True,
             )
+            # AI plans in real directions; pre-compensate so reverse disease does
+            # not flip a flee path into a wall.
+            if bomber.get("disease") == "reverse" and direction in DIRECTIONS:
+                direction = REVERSE_DIRS[direction]
             if direction in DIRECTIONS or direction == "stop":
                 bomber["next_direction"] = self._apply_reverse(bomber, direction)
+            # If the freshly chosen step still enters danger, abort movement.
+            # Flee logic may legally transit blast lanes; only block when we are
+            # currently safe and the AI asked to walk into fire/blast.
+            chosen = bomber.get("next_direction")
+            if (
+                not in_danger
+                and chosen in DIRECTIONS
+                and danger.get(
+                    (pos[0] + DIRECTIONS[chosen][0], pos[1] + DIRECTIONS[chosen][1])
+                )
+                is not None
+            ):
+                bomber["next_direction"] = "stop"
+                place = False
+            # Diarrhea auto-bombs on move are suicidal mid-escape — skip AI plants
+            # while cursed except when already holding a glove throw.
+            if place and bomber.get("disease") in (
+                "diarrhea",
+                "short_fuse",
+                "constipation",
+            ):
+                if not (
+                    bomber.get("can_throw") and bomber.get("carrying_bomb_id")
+                ):
+                    place = False
             if place:
                 events.extend(self._place_bomb(state, pid, bomber))
         return events

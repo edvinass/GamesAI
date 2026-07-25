@@ -386,14 +386,25 @@ def _safe_step_ok(
     nx: int,
     ny: int,
     *,
-    min_lethal: int = 3,
+    min_lethal: int | None = None,
+    avoid_skulls: bool = True,
 ) -> bool:
+    """Walkable and not on a pending blast.
+
+    Non-flee movement must stay off the danger map entirely. Escape BFS is
+    separate and may transit timed blast lanes. ``min_lethal`` is kept for the
+    rare kick case that needs to step onto a bomb tile.
+    """
     if not _walkable(state, nx, ny, bomber):
         return False
-    lethal = danger.get((nx, ny))
-    if lethal is not None and lethal <= min_lethal:
+    if avoid_skulls and (nx, ny) in _skull_cells(state):
         return False
-    return True
+    lethal = danger.get((nx, ny))
+    if lethal is None:
+        return True
+    if min_lethal is None:
+        return False
+    return lethal > min_lethal
 
 
 def _score_step(
@@ -403,14 +414,14 @@ def _score_step(
     nx: int,
     ny: int,
 ) -> int:
-    """Higher is better — prefer open tiles away from imminent blasts."""
+    """Higher is better — prefer open tiles away from pending blasts."""
     score = _exit_count(state, bomber, nx, ny) * 3
     lethal = danger.get((nx, ny))
     if lethal is None:
-        score += 8
+        score += 12
     else:
-        score += min(6, lethal)
-    # Slightly prefer not standing on bombs' future lanes near fuse end
+        # Still ranked for flee fallbacks; casual steps reject these via _safe_step_ok.
+        score += min(4, lethal)
     return score
 
 
@@ -469,11 +480,10 @@ def _bfs_to_targets(
     if not targets:
         return None, None
     start = (bomber["x"], bomber["y"])
-    if start in targets:
-        lethal = danger.get(start)
-        if lethal is None or lethal > ESCAPE_MARGIN:
-            return "stop", 0
+    if start in targets and danger.get(start) is None:
+        return "stop", 0
 
+    skulls = _skull_cells(state)
     momentum = _momentum_dir(bomber)
     queue: deque[tuple[int, int, str | None, int]] = deque([(start[0], start[1], None, 0)])
     seen = {start}
@@ -490,13 +500,14 @@ def _bfs_to_targets(
                 continue
             if not _walkable(state, nx, ny, bomber):
                 continue
+            # Never path through pending blasts when hunting / farming.
+            # (Fleeing uses _find_escape, which allows timed transit.)
+            if danger.get((nx, ny)) is not None:
+                continue
+            # Skulls curse the AI into reverse/diarrhea self-kills — walk around.
+            if (nx, ny) in skulls:
+                continue
             nsteps = steps + 1
-            lethal = danger.get((nx, ny))
-            if lethal is not None and nsteps >= lethal:
-                continue
-            # Avoid near-term death lanes
-            if lethal is not None and lethal <= 2:
-                continue
             seen.add((nx, ny))
             step_first = first or direction
             if (nx, ny) in targets:
@@ -835,7 +846,7 @@ def _hunting_positions(
                     continue
                 if state["grid"][sy][sx] != TILE_EMPTY:
                     continue
-                if danger.get((sx, sy)) is not None and danger[(sx, sy)] <= ESCAPE_MARGIN:
+                if danger.get((sx, sy)) is not None:
                     continue
                 if not _clear_line(state, sx, sy, ex, ey):
                     continue
@@ -844,7 +855,7 @@ def _hunting_positions(
         for dx, dy in DIRECTIONS.values():
             ax, ay = ex + dx, ey + dy
             if 0 <= ax < width and 0 <= ay < height and state["grid"][ay][ax] == TILE_EMPTY:
-                if danger.get((ax, ay)) is None or danger[(ax, ay)] > ESCAPE_MARGIN:
+                if danger.get((ax, ay)) is None:
                     targets.add((ax, ay))
     return targets
 
@@ -907,7 +918,7 @@ def _priority_powerup_targets(
     scored: list[tuple[int, tuple[int, int]]] = []
     for p in state.get("powerups") or []:
         cell = (p["x"], p["y"])
-        if danger.get(cell) is not None and danger.get(cell, 0) <= ESCAPE_MARGIN:
+        if danger.get(cell) is not None:
             continue
         ptype = p.get("type")
         if ptype == "skull":
@@ -932,15 +943,26 @@ def _priority_powerup_targets(
     return {c for s, c in scored if s >= top - 2}
 
 
+def _skull_cells(state: dict) -> set[tuple[int, int]]:
+    return {
+        (p["x"], p["y"])
+        for p in state.get("powerups") or []
+        if p.get("type") == "skull"
+    }
+
+
 def _soft_targets(
     state: dict, danger: dict[tuple[int, int], int]
 ) -> set[tuple[int, int]]:
     soft_adj: set[tuple[int, int]] = set()
+    skulls = _skull_cells(state)
     for y in range(state["grid_height"]):
         for x in range(state["grid_width"]):
             if state["grid"][y][x] != TILE_EMPTY:
                 continue
-            if danger.get((x, y)) is not None and danger[(x, y)] <= ESCAPE_MARGIN:
+            if danger.get((x, y)) is not None:
+                continue
+            if (x, y) in skulls:
                 continue
             if _adjacent_soft(state, x, y) and _exit_count(
                 state, {"passable_bomb_ids": []}, x, y
@@ -995,6 +1017,9 @@ def choose_ai_action(
             for d in preferred:
                 if _throw_landing(state, pos[0], pos[1], d) is not None:
                     return d, True
+        # While threatened, only throw a carried bomb or run. Glove pickups use
+        # place_bomb with facing from momentum, which often plants a second bomb
+        # instead of picking up — a common early self-kill.
         bomb_here = _bomb_cells(state).get(pos)
         if (
             bomb_here
@@ -1003,20 +1028,6 @@ def choose_ai_action(
             and bomb_here.get("flight") not in ("throw", "kick", "carried")
         ):
             return bomber.get("facing") if bomber.get("facing") in DIRECTIONS else "right", True
-        # Face an adjacent bomb and pick it up to escape the blast.
-        if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
-            for face in (
-                bomber.get("facing"),
-                bomber.get("direction"),
-                bomber.get("next_direction"),
-                *DIRECTIONS,
-            ):
-                if face not in DIRECTIONS:
-                    continue
-                dx, dy = DIRECTIONS[face]
-                adj = _bomb_cells(state).get((pos[0] + dx, pos[1] + dy))
-                if adj and adj.get("flight") not in ("throw", "kick", "carried"):
-                    return face, True
         flee_dir, _ = _find_escape(
             state, bomber, danger, max_steps=MAX_ESCAPE_STEPS + 3
         )
@@ -1033,6 +1044,10 @@ def choose_ai_action(
             value = key if key in DIRECTIONS else bomber.get(key)
             if value in DIRECTIONS and _throw_landing(state, pos[0], pos[1], value):
                 return value, True
+
+    # Diarrhea plants a bomb on every step — stand still unless fleeing above.
+    if bomber.get("disease") == "diarrhea":
+        return "stop", False
 
     active = sum(1 for b in state.get("bombs") or [] if b.get("owner_id") == player_id)
     max_bombs = int(bomber.get("max_bombs", 1))
@@ -1089,19 +1104,46 @@ def choose_ai_action(
                     chance = 0.85
                 else:
                     chance = 0.7
-            elif hit_soft and nearest_enemy_dist >= SOFT_FARM_MIN_ENEMY_DIST:
+            elif (
+                hit_soft
+                and active == 0
+                and not bomber.get("disease")
+                and nearest_enemy_dist >= SOFT_FARM_MIN_ENEMY_DIST
+                and esc_steps is not None
+                and esc_steps <= 4
+            ):
+                # Early soft clears must leave a short, reliable escape so the AI
+                # does not plant in tight spawn pockets it cannot fully clear.
                 chance = BOMB_CHANCE_SOFT
                 if int(bomber.get("bomb_range", 1)) <= 2:
-                    chance = max(chance, 0.6)
-                # Prefer clearing softs that open toward the fight.
-                if nearest_enemy_dist <= SOFT_FARM_MIN_ENEMY_DIST + 3:
-                    chance *= 0.75
+                    chance = max(chance, 0.55)
 
             if active > 0:
-                chance *= 0.9 if (trap or hit_enemy) else 0.4
+                # Never soft-stack; only chain for true traps (not speculative hits).
+                if trap:
+                    chance *= 0.85
+                else:
+                    chance = 0.0
+            if bomber.get("disease") in ("diarrhea", "short_fuse", "reverse", "slow"):
+                # Curses wreck escape timing — only plant guaranteed traps.
+                chance = BOMB_CHANCE_TRAP if trap else 0.0
 
             if chance > 0 and random.random() < chance:
                 return esc, True
+
+    # If we already planted and are clear of the blast, hold / stay off lanes
+    # until our bombs finish instead of wandering back into them.
+    if active > 0 and here_lethal is None:
+        soft = _soft_targets(state, danger) if heavy_think else set()
+        hunt = _hunting_positions(state, player_id, bomber, danger)
+        goals = soft | hunt
+        if enemies and heavy_think:
+            goals |= _trap_positions(state, player_id, bomber, danger)
+        move, dist = _bfs_to_targets(state, bomber, danger, goals, max_dist=20)
+        if move and move != "stop":
+            return move, False
+        # No safe path around our own blasts — wait them out.
+        return "stop", False
 
     # 2b) One-ply plant: step onto a tile that yields a trap/kill next tick.
     if heavy_think:
