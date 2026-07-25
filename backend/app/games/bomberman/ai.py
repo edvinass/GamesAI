@@ -1,4 +1,4 @@
-"""Aggressive Bomberman AI — survival first, then hunt, trap, and power up."""
+"""Deliberate Bomberman AI — survival first, then trap, hunt, and power up."""
 
 from __future__ import annotations
 
@@ -23,12 +23,15 @@ DEFAULT_FUSE = 14
 ESCAPE_MARGIN = 3
 MAX_ESCAPE_STEPS = DEFAULT_FUSE - ESCAPE_MARGIN
 THROW_LAND_DISTANCE = 3
-PREDICT_STEPS = 2
+# Longer lookahead so we plant on where the player is going, not was.
+PREDICT_STEPS = 4
 
-# Aggressive bomb rates (still gated by timed escape checks).
-BOMB_CHANCE_SOFT = 0.62
-BOMB_CHANCE_ENEMY = 0.95
+# Bomb rates (still gated by timed escape checks). Soft clears are patient.
+BOMB_CHANCE_SOFT = 0.48
+BOMB_CHANCE_ENEMY = 1.0
 BOMB_CHANCE_TRAP = 1.0
+# Don't soft-farm while an enemy is this close (manhattan).
+SOFT_FARM_MIN_ENEMY_DIST = 7
 
 # Power-up preference when missing that capability.
 POWERUP_BASE = {
@@ -411,6 +414,14 @@ def _score_step(
     return score
 
 
+def _momentum_dir(bomber: dict) -> str | None:
+    for key in ("direction", "next_direction", "facing"):
+        value = bomber.get(key)
+        if value in DIRECTIONS:
+            return value
+    return None
+
+
 def _best_safe_direction(
     state: dict,
     bomber: dict,
@@ -418,6 +429,7 @@ def _best_safe_direction(
     preferred: str | None = None,
 ) -> str:
     start = (bomber["x"], bomber["y"])
+    momentum = _momentum_dir(bomber)
     scored: list[tuple[int, str]] = []
     for direction, (dx, dy) in DIRECTIONS.items():
         nx, ny = start[0] + dx, start[1] + dy
@@ -426,16 +438,18 @@ def _best_safe_direction(
         score = _score_step(state, bomber, danger, nx, ny)
         if direction == preferred:
             score += 4
-        momentum = bomber.get("direction")
         if direction == momentum:
-            score += 2
+            score += 3
+        # Avoid pointless U-turns when safer options exist.
+        if momentum and direction == OPPOSITE.get(momentum):
+            score -= 4
         scored.append((score, direction))
     if not scored:
         return "stop"
     scored.sort(key=lambda t: -t[0])
-    # Small random among top ties for less predictability
+    # Prefer the top score; only randomize exact ties.
     top = scored[0][0]
-    choices = [d for s, d in scored if s >= top - 1]
+    choices = [d for s, d in scored if s == top]
     return random.choice(choices)
 
 
@@ -447,7 +461,11 @@ def _bfs_to_targets(
     *,
     max_dist: int = 40,
 ) -> tuple[str | None, int | None]:
-    """Return (first_direction, distance) to nearest target on a safe path."""
+    """Return (first_direction, distance) to nearest target on a safe path.
+
+    Among equal-length paths, prefer continuing current momentum and avoid
+    immediate U-turns so movement looks committed rather than twitchy.
+    """
     if not targets:
         return None, None
     start = (bomber["x"], bomber["y"])
@@ -456,12 +474,16 @@ def _bfs_to_targets(
         if lethal is None or lethal > ESCAPE_MARGIN:
             return "stop", 0
 
+    momentum = _momentum_dir(bomber)
     queue: deque[tuple[int, int, str | None, int]] = deque([(start[0], start[1], None, 0)])
     seen = {start}
+    best: tuple[int, int, str] | None = None  # dist, rank, direction
     while queue:
         x, y, first, steps = queue.popleft()
         if steps >= max_dist:
             continue
+        if best is not None and steps > best[0]:
+            break
         for direction, (dx, dy) in DIRECTIONS.items():
             nx, ny = x + dx, y + dy
             if (nx, ny) in seen:
@@ -478,9 +500,21 @@ def _bfs_to_targets(
             seen.add((nx, ny))
             step_first = first or direction
             if (nx, ny) in targets:
-                return step_first, nsteps
+                rank = 0
+                if step_first == momentum:
+                    rank += 2
+                if momentum and step_first == OPPOSITE.get(momentum):
+                    rank -= 2
+                # Prefer roomier arrival tiles among equal paths.
+                rank += min(3, _exit_count(state, bomber, nx, ny))
+                candidate = (nsteps, -rank, step_first)
+                if best is None or candidate[:2] < best[:2]:
+                    best = (nsteps, -rank, step_first)
+                continue
             queue.append((nx, ny, step_first, nsteps))
-    return None, None
+    if best is None:
+        return None, None
+    return best[2], best[0]
 
 
 def _adjacent_soft(state: dict, x: int, y: int) -> bool:
@@ -926,8 +960,8 @@ def choose_ai_action(
     """Return (direction, place_bomb).
 
     Pass a shared ``danger`` map when multiple AIs act in the same tick.
-    ``heavy_think=False`` skips expensive trap / soft-farm scans (survival and
-    bombing still run every tick).
+    The engine throttles calls; when invoked, ``heavy_think=True`` runs full
+    trap / soft-farm scans. Survival and combat planting always run.
     """
     if danger is None:
         danger = _danger_times(state)
@@ -1009,12 +1043,18 @@ def choose_ai_action(
         and not bomber.get("carrying_bomb_id")
     )
 
+    enemies = _alive_enemies(state, player_id)
+    nearest_enemy_dist = min(
+        (_manhattan(pos[0], pos[1], e["x"], e["y"]) for _, e in enemies),
+        default=99,
+    )
+
     # Kick a bomb toward enemies when it creates real pressure.
     kick_dir = _best_kick_direction(state, player_id, bomber, danger)
     if kick_dir:
         return kick_dir, False
 
-    # Glove: pick up a bomb underfoot or facing when useful.
+    # Glove: pick up underfoot/facing bombs mainly for combat or escape utility.
     if bomber.get("can_throw") and not bomber.get("carrying_bomb_id"):
         pick_target = bomb_here
         face = bomber.get("facing") if bomber.get("facing") in DIRECTIONS else "right"
@@ -1024,11 +1064,12 @@ def choose_ai_action(
         if (
             pick_target
             and pick_target.get("flight") not in ("throw", "kick", "carried")
-            and random.random() < 0.45
+            and nearest_enemy_dist <= 8
+            and random.random() < 0.55
         ):
             return face, True
 
-    # 2) Bombing decisions — traps first, then enemy line, then soft.
+    # 2) Bombing decisions — traps / kills first; soft clears only when safe.
     if can_bomb:
         ok, esc, esc_steps = _can_escape_after_bomb_with_steps(state, player_id, bomber)
         if ok and esc:
@@ -1040,18 +1081,24 @@ def choose_ai_action(
             if trap:
                 chance = BOMB_CHANCE_TRAP
             elif hit_enemy:
-                # Free / safe kills: plant deterministically.
-                if esc_steps is not None and esc_steps <= 4:
-                    chance = 1.0
-                else:
+                # Plant when escape is comfortable; still plant on longer escapes
+                # if the enemy is boxed in nearby.
+                if esc_steps is not None and esc_steps <= 5:
                     chance = BOMB_CHANCE_ENEMY
-            elif hit_soft:
+                elif nearest_enemy_dist <= 3:
+                    chance = 0.85
+                else:
+                    chance = 0.7
+            elif hit_soft and nearest_enemy_dist >= SOFT_FARM_MIN_ENEMY_DIST:
                 chance = BOMB_CHANCE_SOFT
                 if int(bomber.get("bomb_range", 1)) <= 2:
-                    chance = max(chance, 0.7)
+                    chance = max(chance, 0.6)
+                # Prefer clearing softs that open toward the fight.
+                if nearest_enemy_dist <= SOFT_FARM_MIN_ENEMY_DIST + 3:
+                    chance *= 0.75
 
             if active > 0:
-                chance *= 0.85 if (trap or hit_enemy) else 0.55
+                chance *= 0.9 if (trap or hit_enemy) else 0.4
 
             if chance > 0 and random.random() < chance:
                 return esc, True
@@ -1062,46 +1109,49 @@ def choose_ai_action(
         if approach:
             return approach, False
 
-    # 3) Priority power-ups (throw/kick/bomb before filler).
-    powerups = _priority_powerup_targets(state, bomber, danger)
-    move, dist = _bfs_to_targets(state, bomber, danger, powerups, max_dist=18)
-    if move and move != "stop" and dist is not None and dist <= 12:
-        return move, False
-
-    enemies = _alive_enemies(state, player_id)
-    nearest_enemy_dist = min(
-        (_manhattan(pos[0], pos[1], e["x"], e["y"]) for _, e in enemies),
-        default=99,
-    )
-
-    # 4) Path to trap tiles — expensive; only on heavy-think ticks.
-    if heavy_think:
+    # 3) Trap tiles before power-ups when an enemy is in play.
+    if heavy_think and enemies:
         traps = _trap_positions(state, player_id, bomber, danger)
-        move, dist = _bfs_to_targets(state, bomber, danger, traps, max_dist=24)
+        move, dist = _bfs_to_targets(state, bomber, danger, traps, max_dist=28)
         if move and move != "stop":
             if dist == 0:
+                # Already on a trap tile — plant was gated above; hold position.
                 return "stop", False
+            return move, False
+
+    # 4) Power-ups when not mid-fight (or when missing combat tools).
+    missing_tool = not bomber.get("can_throw") or not bomber.get("can_kick")
+    if nearest_enemy_dist > 5 or missing_tool:
+        powerups = _priority_powerup_targets(state, bomber, danger)
+        max_pu = 14 if nearest_enemy_dist > 5 else 8
+        move, dist = _bfs_to_targets(state, bomber, danger, powerups, max_dist=18)
+        if move and move != "stop" and dist is not None and dist <= max_pu:
             return move, False
 
     # 5) Hunt enemies — get onto a bombing line (uses predicted positions).
     hunt = _hunting_positions(state, player_id, bomber, danger)
-    move, dist = _bfs_to_targets(state, bomber, danger, hunt, max_dist=24)
+    move, dist = _bfs_to_targets(state, bomber, danger, hunt, max_dist=28)
     if move and move != "stop":
         if dist == 0:
+            # On a fire line: if we somehow didn't plant, stay put when roomy.
+            if can_bomb:
+                ok, esc, _ = _can_escape_after_bomb_with_steps(state, player_id, bomber)
+                if ok and esc and _enemy_in_blast_line(state, bomber, player_id):
+                    return esc, True
             if _exit_count(state, bomber, pos[0], pos[1]) < 2:
                 return _best_safe_direction(state, bomber, danger), False
             return "stop", False
         return move, False
 
-    # 6) Soft-wall farming when enemies are far or map is clogged.
-    if nearest_enemy_dist > 6 or int(bomber.get("bomb_range", 1)) < 2:
-        if heavy_think or nearest_enemy_dist > 8:
+    # 6) Soft-wall farming when enemies are far or we need range.
+    if nearest_enemy_dist >= SOFT_FARM_MIN_ENEMY_DIST or int(bomber.get("bomb_range", 1)) < 2:
+        if heavy_think or nearest_enemy_dist > 9:
             soft = _soft_targets(state, danger)
             move, _ = _bfs_to_targets(state, bomber, danger, soft, max_dist=20)
             if move and move != "stop":
                 return move, False
 
-    # 7) Close the gap — path toward enemy tile neighborhood (incl. predicted).
+    # 7) Close the gap — path toward enemy neighborhood (incl. predicted).
     if enemies:
         approach_cells: set[tuple[int, int]] = set()
         for _pid, enemy in enemies:
@@ -1109,6 +1159,16 @@ def choose_ai_action(
                 for dx, dy in DIRECTIONS.values():
                     approach_cells.add((cell[0] + dx, cell[1] + dy))
                     approach_cells.add((cell[0] + dx * 2, cell[1] + dy * 2))
+        # Prefer cells with an escape exit so we don't corner ourselves.
+        approach_cells = {
+            c
+            for c in approach_cells
+            if 0 <= c[0] < state["grid_width"]
+            and 0 <= c[1] < state["grid_height"]
+            and state["grid"][c[1]][c[0]] == TILE_EMPTY
+            and _exit_count(state, bomber, c[0], c[1]) >= 1
+            and (danger.get(c) is None or danger[c] > ESCAPE_MARGIN)
+        }
         move, _ = _bfs_to_targets(state, bomber, danger, approach_cells, max_dist=30)
         if move and move != "stop":
             return move, False

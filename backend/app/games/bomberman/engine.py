@@ -46,6 +46,8 @@ MAX_BOMBS_CAP = 8
 MAX_RANGE_CAP = 8
 MAX_SPEED_LEVEL = 5
 THROW_LAND_DISTANCE = 3
+# AI re-plans every N ticks (~450ms at 150ms) unless fleeing / throwing.
+AI_THINK_INTERVAL = 3
 POWERUP_TYPES = ("bomb", "range", "speed", "throw", "kick", "skull")
 POWERUP_WEIGHTS = (24, 24, 20, 12, 12, 8)
 DISEASE_TYPES = (
@@ -300,10 +302,9 @@ class BombermanEngine(GamePlugin):
                 if settings["game_mode"] == "team" and team
                 else BOMBER_COLORS[i % len(BOMBER_COLORS)]
             )
-            # AI seats get a mild head start so they stay competitive.
+            # AI seats get a mild bomb/range head start; no free speed (acts slower).
             bombs = max(start_bombs, 2 if is_ai else start_bombs)
             brange = max(start_range, 2 if is_ai else start_range)
-            speed = 1 if is_ai else 0
             bombers[player["id"]] = {
                 "x": sx,
                 "y": sy,
@@ -318,7 +319,7 @@ class BombermanEngine(GamePlugin):
                 "lives": lives,
                 "max_bombs": bombs,
                 "bomb_range": brange,
-                "speed_level": speed,
+                "speed_level": 0,
                 "can_throw": start_throw,
                 "can_kick": start_kick,
                 "carrying_bomb_id": None,
@@ -1185,17 +1186,32 @@ class BombermanEngine(GamePlugin):
         if not ai_seats:
             return events
 
-        # One danger map per tick for all AIs; stagger heavy trap/soft scans.
+        # Shared danger map; AIs commit to a plan between think ticks.
         danger = _danger_times(state)
         playing_tick = int(state.get("playing_tick", 0))
         for i, (pid, bomber) in enumerate(ai_seats):
-            heavy_think = (playing_tick + i) % 2 == 0
+            pos = (int(bomber["x"]), int(bomber["y"]))
+            in_danger = danger.get(pos) is not None
+            # Always react when threatened, carrying, or standing on a bomb.
+            urgent = (
+                in_danger
+                or bool(bomber.get("carrying_bomb_id"))
+                or any(
+                    b.get("x") == pos[0]
+                    and b.get("y") == pos[1]
+                    and b.get("flight") not in ("throw", "carried")
+                    for b in (state.get("bombs") or [])
+                )
+            )
+            due = (playing_tick + i) % AI_THINK_INTERVAL == 0
+            if not urgent and not due:
+                continue
             direction, place = choose_ai_action(
                 state,
                 pid,
                 bomber,
                 danger=danger,
-                heavy_think=heavy_think,
+                heavy_think=True,
             )
             if direction in DIRECTIONS or direction == "stop":
                 bomber["next_direction"] = self._apply_reverse(bomber, direction)

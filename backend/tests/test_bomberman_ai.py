@@ -182,7 +182,8 @@ def test_ai_starts_with_stat_boost() -> None:
     assert state["bombers"]["h"]["max_bombs"] == 1
     assert state["bombers"]["a"]["bomb_range"] == 2
     assert state["bombers"]["a"]["max_bombs"] == 2
-    assert state["bombers"]["a"]["speed_level"] == 1
+    # No free speed — AI acts at base move rate and thinks on an interval.
+    assert state["bombers"]["a"]["speed_level"] == 0
 
 
 def test_danger_times_marks_blast_lane() -> None:
