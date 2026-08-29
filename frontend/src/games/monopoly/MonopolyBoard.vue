@@ -265,23 +265,140 @@ function send(action: Record<string, unknown>) {
   emit('action', action)
 }
 
+const actorPlayer = computed(() => {
+  const id = gs.value.current_actor_id
+  return id ? (gs.value.players[id] ?? null) : null
+})
+
+const statusTone = computed(() => {
+  if (isFinished.value) return 'over'
+  if (boardBusy.value) return 'busy'
+  if (isActor.value) return 'mine'
+  return 'waiting'
+})
+
 const statusText = computed(() => {
   if (isFinished.value) {
     const w = gs.value.winner ? gs.value.players[gs.value.winner]?.nickname : null
     return w ? `${w} wins the game!` : 'Game over'
   }
+  if (boardBusy.value) return 'Watching the board…'
+
+  const actor = actorPlayer.value
+  const aiSuffix = actor?.is_ai ? ' (AI)' : ''
   const p = phase.value
-  if (p === 'awaiting_roll') return isActor.value ? 'Your turn — roll the dice' : `${actorName.value} to roll`
+
+  if (p === 'awaiting_roll') {
+    if (isActor.value) {
+      if (me.value?.in_jail) return 'In jail — get out or roll'
+      if (gs.value.can_roll_again) return 'Doubles — roll again!'
+      return 'Your turn — roll the dice'
+    }
+    return `${actorName.value}${aiSuffix} to roll`
+  }
   if (p === 'awaiting_buy') {
     const name = landSpace.value?.name ?? 'property'
-    return isActor.value ? `Buy ${name}?` : `${actorName.value} deciding`
+    return isActor.value ? `Buy ${name}?` : `${actorName.value}${aiSuffix} deciding`
   }
-  if (p === 'auction') return isActor.value ? 'Your bid' : `Auction — ${actorName.value}`
-  if (p === 'awaiting_payment') return isActor.value ? 'Raise cash or go bankrupt' : `${actorName.value} settling debt`
-  if (p === 'trade_pending') return isActor.value ? 'Respond to trade' : 'Trade pending'
-  if (p === 'awaiting_end') return isActor.value ? 'Build, trade, or end turn' : `${actorName.value}'s turn`
-  return `${actorName.value}'s turn`
+  if (p === 'auction') {
+    return isActor.value ? 'Your bid' : `Auction — ${actorName.value}${aiSuffix}`
+  }
+  if (p === 'awaiting_payment') {
+    return isActor.value
+      ? `Raise $${gs.value.debt?.amount ?? 0}`
+      : `${actorName.value}${aiSuffix} settling debt`
+  }
+  if (p === 'trade_pending') {
+    const trade = pendingTrade.value
+    if (isActor.value) return 'Respond to trade'
+    if (trade?.from_id === props.playerId) {
+      return `Waiting for ${gs.value.players[trade.to_id]?.nickname ?? 'partner'}…`
+    }
+    return 'Trade pending'
+  }
+  if (p === 'awaiting_end') {
+    return isActor.value ? 'Build, trade, or end turn' : `${actorName.value}${aiSuffix}'s turn`
+  }
+  return `${actorName.value}${aiSuffix}'s turn`
 })
+
+const waitingDockText = computed(() => {
+  if (isFinished.value || isActor.value) return null
+  if (boardBusy.value) return 'Watching the board…'
+  const actor = actorPlayer.value
+  if (!actor) return 'Waiting…'
+  if (actor.is_ai) return `${actor.nickname} (AI) is deciding…`
+  if (phase.value === 'trade_pending' && pendingTrade.value?.from_id === props.playerId) {
+    return `Waiting for ${gs.value.players[pendingTrade.value.to_id]?.nickname ?? 'partner'}…`
+  }
+  return `Waiting for ${actor.nickname}…`
+})
+
+const tradeBannerLines = computed(() => {
+  const trade = pendingTrade.value
+  if (!trade) return [] as string[]
+  const lines: string[] = []
+  if (trade.offer_cash) lines.push(`Offers $${trade.offer_cash}`)
+  if (trade.request_cash) lines.push(`Wants $${trade.request_cash}`)
+  for (const sid of trade.offer_props || []) {
+    const name = gs.value.spaces.find((s) => s.id === sid)?.name
+    if (name) lines.push(`Offers ${name}`)
+  }
+  for (const sid of trade.request_props || []) {
+    const name = gs.value.spaces.find((s) => s.id === sid)?.name
+    if (name) lines.push(`Wants ${name}`)
+  }
+  return lines
+})
+
+function colorSetIds(color: string | null | undefined): number[] {
+  if (!color) return []
+  return gs.value.spaces.filter((s) => s.color === color).map((s) => s.id)
+}
+
+function canBuildOn(prop: { id: number; houses: number; mortgaged: boolean; space?: { kind?: string; color?: string | null; house_cost?: number | null } | null }): boolean {
+  if (!prop.space || prop.space.kind !== 'property' || prop.mortgaged) return false
+  if (prop.houses >= 5) return false
+  const color = prop.space.color
+  if (!color) return false
+  const ids = colorSetIds(color)
+  if (!ids.length) return false
+  if (!ids.every((id) => gs.value.properties[String(id)]?.owner_id === props.playerId)) return false
+  if (ids.some((id) => gs.value.properties[String(id)]?.mortgaged)) return false
+  const houses = ids.map((id) => gs.value.properties[String(id)]?.houses ?? 0)
+  if (prop.houses > Math.min(...houses)) return false
+  const cost = prop.space.house_cost ?? 0
+  if ((me.value?.cash ?? 0) < cost) return false
+  if (prop.houses === 4) return (gs.value.hotels_remaining ?? 0) >= 1
+  return (gs.value.houses_remaining ?? 0) >= 1
+}
+
+function canSellBuilding(prop: {
+  id: number
+  houses: number
+  space?: { color?: string | null } | null
+}): boolean {
+  if (prop.houses < 1) return false
+  const color = prop.space?.color
+  if (!color) return true
+  const ids = colorSetIds(color)
+  const houses = ids.map((id) => gs.value.properties[String(id)]?.houses ?? 0)
+  if (prop.houses < Math.max(...houses, 0)) return false
+  if (prop.houses === 5 && (gs.value.houses_remaining ?? 0) < 4) return false
+  return true
+}
+
+function canMortgage(prop: { id: number; houses: number; mortgaged: boolean; space?: { color?: string | null } | null }): boolean {
+  if (prop.mortgaged || prop.houses > 0) return false
+  const color = prop.space?.color
+  if (!color) return true
+  const ids = colorSetIds(color)
+  return ids.every((id) => (gs.value.properties[String(id)]?.houses ?? 0) === 0)
+}
+
+function unmortgageCost(mortgage: number | null | undefined): number {
+  return Math.floor((mortgage ?? 0) * 1.1)
+}
 
 const selectedDeed = computed(() => {
   const id = selectedSpaceId.value
@@ -320,6 +437,7 @@ const selectedDeedRentRows = computed(() => {
     return space.rents.map((amount, i) => ({
       label: labels[i] ?? `Tier ${i}`,
       amount,
+      note: undefined as string | undefined,
       active: (houses <= 4 && houses === i) || (houses >= 5 && i === 5),
     }))
   }
@@ -328,6 +446,7 @@ const selectedDeedRentRows = computed(() => {
     return [1, 2, 3, 4].map((n) => ({
       label: n === 1 ? 'Rent' : `If ${n} R.R.'s owned`,
       amount: 25 * 2 ** (n - 1),
+      note: undefined as string | undefined,
       active: rrCount === n,
     }))
   }
@@ -433,9 +552,22 @@ function selectSpace(id: number) {
 </script>
 
 <template>
-  <div class="mono-play">
+  <div
+    class="mono-play"
+    :class="{
+      'mono-play--acting': statusTone === 'mine',
+      'mono-play--waiting': statusTone === 'waiting',
+      'mono-play--busy': statusTone === 'busy',
+      'mono-play--over': statusTone === 'over',
+    }"
+  >
     <aside class="sidebar">
-      <div class="status-card" :class="{ 'status-pulse': isActor && !boardBusy }">
+      <div
+        class="status-card"
+        :class="[`tone-${statusTone}`, { 'status-pulse': statusTone === 'mine' }]"
+        role="status"
+        aria-live="polite"
+      >
         <p class="status-label">Status</p>
         <h2 class="status">{{ statusText }}</h2>
         <div
@@ -479,6 +611,7 @@ function selectSpace(id: number) {
           {{ gs.players[pendingTrade.from_id]?.nickname }} →
           {{ gs.players[pendingTrade.to_id]?.nickname }}
         </span>
+        <span v-for="(line, i) in tradeBannerLines" :key="i" class="trade-term">{{ line }}</span>
       </div>
 
       <section class="players-section">
@@ -833,14 +966,17 @@ function selectSpace(id: number) {
                   </div>
                   <div v-if="isMortgaged(space.id)" class="mort-stamp">MORTGAGED</div>
                 </div>
-                <div class="tokens">
+                <div class="tokens" :class="{ crowded: (tokensBySpace[space.id] || []).length >= 3 }">
                   <span
                     v-for="t in tokensBySpace[space.id] || []"
                     :key="t.id"
                     class="token"
-                    :class="{ hop: movingPlayerId === t.id }"
+                    :class="{
+                      hop: movingPlayerId === t.id,
+                      jailed: t.in_jail && space.id === 10,
+                    }"
                     :style="{ background: t.token_color }"
-                    :title="t.nickname"
+                    :title="t.in_jail && space.id === 10 ? `${t.nickname} (in jail)` : t.nickname"
                   >
                     {{ tokenGlyph(playerIndex[t.id] ?? 0) }}
                   </span>
@@ -875,7 +1011,8 @@ function selectSpace(id: number) {
       </div>
 
       <div v-if="!isFinished" class="actions" :class="{ busy: boardBusy }">
-        <p v-if="boardBusy" class="busy-hint">Watching the board…</p>
+        <p v-if="waitingDockText" class="waiting-dock">{{ waitingDockText }}</p>
+        <p v-else-if="boardBusy" class="busy-hint">Watching the board…</p>
         <template v-if="phase === 'awaiting_roll' && isTurnPlayer">
           <template v-if="me?.in_jail">
             <button
@@ -1043,6 +1180,7 @@ function selectSpace(id: number) {
           type="button"
           class="btn-danger resign"
           title="Resign from the game"
+          :disabled="boardBusy"
           @click="send({ type: 'resign' })"
         >
           Resign
@@ -1053,6 +1191,9 @@ function selectSpace(id: number) {
     <div v-if="showManage" class="modal" @click.self="showManage = false">
       <div class="modal-card">
         <h3>Manage properties</h3>
+        <p class="bank-stock">
+          Bank · {{ gs.houses_remaining ?? 0 }} houses · {{ gs.hotels_remaining ?? 0 }} hotels
+        </p>
         <ul class="prop-list">
           <li v-for="prop in myProps" :key="prop.id">
             <div
@@ -1061,20 +1202,40 @@ function selectSpace(id: number) {
             />
             <div class="prop-meta">
               <strong>{{ prop.space?.name ?? prop.id }}</strong>
-              <span v-if="prop.mortgaged" class="muted">Mortgaged</span>
-              <span v-else-if="prop.houses">{{ prop.houses === 5 ? 'Hotel' : `${prop.houses} houses` }}</span>
+              <span v-if="prop.mortgaged" class="muted">
+                Mortgaged · unmortgage ${{ unmortgageCost(prop.space?.mortgage) }}
+              </span>
+              <span v-else-if="prop.houses">
+                {{ prop.houses === 5 ? 'Hotel' : `${prop.houses} house(s)` }}
+                · sell +${{ Math.floor((prop.space?.house_cost ?? 0) / 2) }}
+              </span>
+              <span v-else-if="prop.space?.house_cost" class="muted">
+                Build ${{ prop.space.house_cost }} · mortgage ${{ prop.space.mortgage ?? 0 }}
+              </span>
             </div>
             <div class="prop-actions">
-              <button type="button" class="btn-mini" @click="send({ type: 'build', space_id: prop.id })">
+              <button
+                type="button"
+                class="btn-mini"
+                :disabled="!canBuildOn(prop)"
+                :title="canBuildOn(prop) ? `Build for $${prop.space?.house_cost ?? 0}` : 'Cannot build now'"
+                @click="send({ type: 'build', space_id: prop.id })"
+              >
                 Build
               </button>
-              <button type="button" class="btn-mini" @click="send({ type: 'sell_building', space_id: prop.id })">
+              <button
+                type="button"
+                class="btn-mini"
+                :disabled="!canSellBuilding(prop)"
+                @click="send({ type: 'sell_building', space_id: prop.id })"
+              >
                 Sell
               </button>
               <button
                 v-if="!prop.mortgaged"
                 type="button"
                 class="btn-mini"
+                :disabled="!canMortgage(prop)"
                 @click="send({ type: 'mortgage', space_id: prop.id })"
               >
                 Mortgage
@@ -1083,6 +1244,7 @@ function selectSpace(id: number) {
                 v-else
                 type="button"
                 class="btn-mini"
+                :disabled="(me?.cash ?? 0) < unmortgageCost(prop.space?.mortgage)"
                 @click="send({ type: 'unmortgage', space_id: prop.id })"
               >
                 Unmortgage
@@ -1193,6 +1355,24 @@ function selectSpace(id: number) {
   border-radius: 10px;
   padding: 0.7rem 0.8rem;
 }
+.status-card.tone-mine {
+  border-color: rgba(232, 201, 122, 0.55);
+  background: rgba(15, 92, 58, 0.38);
+}
+.status-card.tone-waiting {
+  border-color: rgba(243, 230, 200, 0.12);
+  opacity: 0.92;
+}
+.status-card.tone-busy {
+  border-color: rgba(120, 170, 220, 0.4);
+}
+.status-card.tone-over {
+  border-color: rgba(232, 201, 122, 0.45);
+  background: rgba(70, 48, 12, 0.35);
+}
+.mono-play--acting .status-card.tone-mine {
+  box-shadow: 0 0 0 1px rgba(232, 201, 122, 0.2);
+}
 .status-label {
   margin: 0;
   font-size: 0.65rem;
@@ -1290,6 +1470,10 @@ function selectSpace(id: number) {
 .banner.trade {
   background: rgba(91, 141, 239, 0.2);
   border: 1px solid rgba(91, 141, 239, 0.4);
+}
+.trade-term {
+  font-size: 0.72rem;
+  opacity: 0.9;
 }
 .banner-cash {
   font-weight: 700;
@@ -2004,12 +2188,15 @@ function selectSpace(id: number) {
   font-size: clamp(0.38rem, 1cqi, 0.62rem);
   font-weight: 600;
   opacity: 0.85;
+  writing-mode: horizontal-tb;
 }
 .buildings {
   display: flex;
   gap: 2px;
   flex-wrap: wrap;
   justify-content: center;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
 }
 .house {
   width: clamp(7px, 1.4cqi, 12px);
@@ -2020,11 +2207,12 @@ function selectSpace(id: number) {
   box-shadow: inset 0 1px 0 #fff4;
 }
 .hotel {
-  width: clamp(12px, 2.2cqi, 18px);
-  height: clamp(8px, 1.6cqi, 14px);
+  width: clamp(14px, 2.6cqi, 22px);
+  height: clamp(10px, 1.9cqi, 16px);
   background: var(--accent);
-  border: 0.5px solid #7a1020;
-  border-radius: 1px;
+  border: 1px solid #7a1020;
+  border-radius: 2px;
+  box-shadow: 0 1px 2px #0005, inset 0 1px 0 #fff3;
 }
 .mort-stamp {
   position: absolute;
@@ -2038,6 +2226,7 @@ function selectSpace(id: number) {
   transform: rotate(-25deg);
   opacity: 0.75;
   pointer-events: none;
+  writing-mode: horizontal-tb;
 }
 .tokens {
   position: absolute;
@@ -2054,6 +2243,20 @@ function selectSpace(id: number) {
   bottom: auto;
   top: 3px;
 }
+.side-left .tokens {
+  right: auto;
+  left: 3px;
+  bottom: 3px;
+}
+.side-right .tokens {
+  right: 3px;
+  bottom: 3px;
+}
+.tokens.crowded .token {
+  width: clamp(14px, 2.6cqi, 22px);
+  height: clamp(14px, 2.6cqi, 22px);
+  font-size: clamp(7px, 1.3cqi, 11px);
+}
 .token {
   width: clamp(18px, 3.4cqi, 28px);
   height: clamp(18px, 3.4cqi, 28px);
@@ -2063,7 +2266,18 @@ function selectSpace(id: number) {
   place-items: center;
   font-size: clamp(9px, 1.7cqi, 14px);
   line-height: 1;
-  box-shadow: 0 2px 4px #0008;
+  box-shadow: 0 2px 4px #0008, 0 0 0 1px #0007;
+  transition: transform 0.2s ease;
+  text-shadow: 0 1px 1px #0008;
+}
+.token.jailed {
+  outline: 2px dashed #111;
+  outline-offset: 1px;
+  filter: grayscale(0.25);
+}
+.token.hop {
+  animation: token-hop 0.65s cubic-bezier(0.22, 1.2, 0.36, 1);
+  z-index: 5;
 }
 .owner-pip {
   position: absolute;
@@ -2314,6 +2528,19 @@ function selectSpace(id: number) {
   font-size: 0.78rem;
   color: #c4b08a;
   letter-spacing: 0.04em;
+}
+.waiting-dock {
+  flex: 1;
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: rgba(243, 230, 200, 0.88);
+}
+.bank-stock {
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
+  opacity: 0.75;
+  font-weight: 600;
 }
 .btn-primary:disabled,
 .btn-secondary:disabled {

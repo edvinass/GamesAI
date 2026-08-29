@@ -210,3 +210,42 @@ def test_mortgage():
     state, _ = engine.apply_action(state, {"type": "mortgage", "space_id": 1}, {"id": "p1"})
     assert state["properties"]["1"]["mortgaged"] is True
     assert state["players"]["p1"]["cash"] == 1500 + 30
+
+
+def test_get_out_of_jail_card_returns_to_discard():
+    engine, state = _engine_state()
+    state["players"]["p1"]["in_jail"] = True
+    state["players"]["p1"]["position"] = 10
+    state["players"]["p1"]["get_out_cards"] = 1
+    state["players"]["p1"]["get_out_card_ids"] = ["chance_jail_card"]
+    before = len(state["chance_discard"])
+    state, _ = engine.apply_action(state, {"type": "use_jail_card"}, {"id": "p1"})
+    p1 = state["players"]["p1"]
+    assert p1["in_jail"] is False
+    assert p1["get_out_cards"] == 0
+    assert p1["get_out_card_ids"] == []
+    assert len(state["chance_discard"]) == before + 1
+    assert state["chance_discard"][-1]["id"] == "chance_jail_card"
+
+
+def test_resign_during_auction():
+    engine, state = _engine_state()
+    state, _ = engine.apply_action(state, {"type": "roll", "d1": 1, "d2": 2}, {"id": "p1"})
+    state, _ = engine.apply_action(state, {"type": "decline"}, {"id": "p1"})
+    assert state["phase"] == "auction"
+    state, _ = engine.apply_action(state, {"type": "resign"}, {"id": "p1"})
+    assert state["players"]["p1"]["bankrupt"] is True
+    assert state["auction"] is None
+    assert state["winner"] == "p2"
+
+
+def test_ai_skips_illegal_hotel_sell():
+    from app.games.monopoly.ai import _liquidatable
+
+    engine, state = _engine_state()
+    for sid in (1, 3):
+        state["properties"][str(sid)]["owner_id"] = "p1"
+        state["properties"][str(sid)]["houses"] = 5
+    state["houses_remaining"] = 0
+    actions = _liquidatable(state, "p1")
+    assert all(a.get("type") != "sell_building" for a in actions)

@@ -129,16 +129,19 @@ def _liquidatable(state: dict, pid: str) -> list[dict]:
         props = [(sid, state["properties"][str(sid)]) for sid in sids]
         if any(p["owner_id"] != pid for _, p in props):
             continue
-        while True:
-            houses = [state["properties"][str(sid)]["houses"] for sid in sids]
-            if max(houses) == 0:
-                break
-            # Sell from max
-            for sid in sids:
-                if state["properties"][str(sid)]["houses"] == max(houses):
-                    actions.append({"type": "sell_building", "space_id": sid})
-                    # Simulate locally for planning — caller applies one at a time
-                    return actions
+        houses = [state["properties"][str(sid)]["houses"] for sid in sids]
+        if max(houses) == 0:
+            continue
+        mx = max(houses)
+        for sid in sids:
+            if state["properties"][str(sid)]["houses"] != mx:
+                continue
+            # Breaking a hotel requires 4 houses in the bank
+            if mx == 5 and state.get("houses_remaining", 0) < 4:
+                continue
+            actions.append({"type": "sell_building", "space_id": sid})
+            # Simulate locally for planning — caller applies one at a time
+            return actions
     for sid_str, prop in state["properties"].items():
         if prop["owner_id"] != pid or prop["mortgaged"]:
             continue

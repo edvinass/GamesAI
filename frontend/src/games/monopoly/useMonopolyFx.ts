@@ -362,7 +362,44 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
       prevPhase = state.phase
 
       void enqueue(async () => {
-        let passedGoThisTick = false
+        const MOVE_CARD_EFFECTS = new Set([
+          'advance',
+          'go_to_jail',
+          'move_relative',
+          'nearest_utility',
+          'nearest_railroad',
+        ])
+
+        async function revealCardIfNew() {
+          const card = state.last_card
+          if (!card || card.id === capturedPrevCardId) return
+          const cardKind = card.id.startsWith('chance') ? 'chance' : 'community_chest'
+          const event = push({ kind: 'card', text: card.text, cardKind })
+          cardFlipped.value = false
+          cardLeaving.value = false
+          await announce(cardKind === 'chance' ? 'CHANCE!' : 'COMMUNITY CHEST', {
+            tone: 'card',
+            ms: 900,
+          })
+          cardOverlay.value = event
+          playCardDraw(cardKind === 'chance')
+          await sleep(480)
+          if (cardOverlay.value?.id === event.id) {
+            cardFlipped.value = true
+            playCardFlip()
+            await sleep(2400)
+          }
+          if (cardOverlay.value?.id === event.id) {
+            cardLeaving.value = true
+            await sleep(320)
+          }
+          if (cardOverlay.value?.id === event.id) {
+            cardOverlay.value = null
+            cardFlipped.value = false
+            cardLeaving.value = false
+          }
+          await sleep(120)
+        }
 
         const dice = state.last_dice
         if (
@@ -375,6 +412,11 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
         }
 
         const playerIds = Object.keys(nextPlayers)
+        const card = state.last_card
+        const cardCausesMove =
+          !!card &&
+          card.id !== capturedPrevCardId &&
+          MOVE_CARD_EFFECTS.has(card.effect)
 
         for (const id of playerIds) {
           const before = capturedPrevPlayers[id]
@@ -388,6 +430,12 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
           setDisplayPos(id, after.position)
         }
 
+        // Advance / jail cards: reveal before the token moves
+        if (cardCausesMove) {
+          await revealCardIfNew()
+        }
+
+        const passedGoPlayerIds = new Set<string>()
         for (const id of playerIds) {
           const before = capturedPrevPlayers[id]
           const after = nextPlayers[id]
@@ -403,7 +451,7 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
               wentToJail,
               player.nickname,
             )
-            if (result.passedGo) passedGoThisTick = true
+            if (result.passedGo) passedGoPlayerIds.add(id)
           } else if (!before.in_jail && after.in_jail) {
             playJail()
             await announce('GO TO JAIL', { subtitle: player.nickname, tone: 'jail', ms: 1600 })
@@ -419,16 +467,21 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
           }
         }
 
-        // Cash: pair transfers into one “A → B” banner; skip GO $200 if we already announced it
+        // Cash: peel already-announced GO $200, then pair transfers into one “A → B” banner
         const cashDeltas: { id: string; delta: number; nick: string; color: string }[] = []
         for (const id of playerIds) {
           const before = capturedPrevPlayers[id]
           const after = nextPlayers[id]
           if (!after || !before || before.cash === after.cash) continue
           const player = state.players[id]
+          let delta = after.cash - before.cash
+          if (passedGoPlayerIds.has(id)) {
+            delta -= 200
+          }
+          if (delta === 0) continue
           cashDeltas.push({
             id,
-            delta: after.cash - before.cash,
+            delta,
             nick: player.nickname,
             color: player.token_color,
           })
@@ -485,11 +538,6 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
           if (a.delta > 0) playCashGain()
           else playCashLoss()
 
-          // Already told via PASSED GO
-          if (passedGoThisTick && a.delta === 200) {
-            await sleep(200)
-            continue
-          }
           if (Math.abs(a.delta) >= 25) {
             await announce(a.delta > 0 ? `+$${a.delta}` : `-$${Math.abs(a.delta)}`, {
               subtitle: a.nick,
@@ -523,37 +571,31 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
             const built = after.houses === 5 ? 'HOTEL' : `HOUSE ×${after.houses}`
             await announce(built, { subtitle: name, tone: 'build', ms: 1100 })
             buyFlashId.value = null
+          } else if (after.houses < before.houses) {
+            buyFlashId.value = spaceId
+            playCashGain()
+            const name = state.spaces.find((s) => s.id === spaceId)?.name ?? 'Property'
+            await announce('SOLD BUILDING', { subtitle: name, tone: 'gain', ms: 900 })
+            buyFlashId.value = null
+          }
+          if (!before.mortgaged && after.mortgaged) {
+            buyFlashId.value = spaceId
+            playCashGain()
+            const name = state.spaces.find((s) => s.id === spaceId)?.name ?? 'Property'
+            await announce('MORTGAGED', { subtitle: name, tone: 'default', ms: 900 })
+            buyFlashId.value = null
+          } else if (before.mortgaged && !after.mortgaged) {
+            buyFlashId.value = spaceId
+            playCashLoss()
+            const name = state.spaces.find((s) => s.id === spaceId)?.name ?? 'Property'
+            await announce('UNMORTGAGED', { subtitle: name, tone: 'buy', ms: 900 })
+            buyFlashId.value = null
           }
         }
 
-        const card = state.last_card
-        if (card && card.id !== capturedPrevCardId) {
-          const cardKind = card.id.startsWith('chance') ? 'chance' : 'community_chest'
-          const event = push({ kind: 'card', text: card.text, cardKind })
-          cardFlipped.value = false
-          cardLeaving.value = false
-          await announce(cardKind === 'chance' ? 'CHANCE!' : 'COMMUNITY CHEST', {
-            tone: 'card',
-            ms: 900,
-          })
-          cardOverlay.value = event
-          playCardDraw(cardKind === 'chance')
-          await sleep(480)
-          if (cardOverlay.value?.id === event.id) {
-            cardFlipped.value = true
-            playCardFlip()
-            await sleep(2400)
-          }
-          if (cardOverlay.value?.id === event.id) {
-            cardLeaving.value = true
-            await sleep(320)
-          }
-          if (cardOverlay.value?.id === event.id) {
-            cardOverlay.value = null
-            cardFlipped.value = false
-            cardLeaving.value = false
-          }
-          await sleep(120)
+        // Landing-triggered Chance/Chest (cash, repairs, etc.): reveal after the move
+        if (!cardCausesMove) {
+          await revealCardIfNew()
         }
 
         const bid = state.auction?.high_bid ?? null

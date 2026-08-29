@@ -819,6 +819,7 @@ class RoomService:
                 )
             )
         await self.db.flush()
+        await self.db.refresh(room, ["players"])
 
         settings = dict(room.settings or {})
         difficulties = dict(settings.get("ai_difficulties") or {})
@@ -827,7 +828,7 @@ class RoomService:
         for p in room.players:
             if p.is_ai:
                 default = solo_defaults[ai_index] if ai_index < len(solo_defaults) else "medium"
-                difficulties.setdefault(str(p.id), default)
+                difficulties[str(p.id)] = default
                 ai_index += 1
         settings["ai_difficulties"] = difficulties
         room.settings = get_game("monopoly").validate_settings(settings)

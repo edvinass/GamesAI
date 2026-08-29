@@ -108,20 +108,39 @@ const activeCashPreset = computed(
 )
 
 const seatSlots = computed(() => {
-  const total = maxPlayers.value
+  const total = soloPractice.value ? 3 : maxPlayers.value
   const players = props.room.players
+  const humanIndex = Math.max(
+    0,
+    players.findIndex((p) => p.id === props.currentPlayerId || !p.is_ai),
+  )
   return Array.from({ length: total }, (_, index) => {
     const player = players[index] ?? null
     const angle = (index / total) * 2 * Math.PI - Math.PI / 2
+    let soloGhost: { nickname: string; difficulty: string } | null = null
+    if (soloPractice.value && !player && index !== humanIndex) {
+      const ghostOrder = Array.from({ length: total }, (_, i) => i).filter((i) => i !== humanIndex)
+      const ghostIdx = ghostOrder.indexOf(index)
+      soloGhost = {
+        nickname: `Opponent ${ghostIdx + 1}`,
+        difficulty: soloAiDifficulties.value[ghostIdx] ?? 'medium',
+      }
+    }
     return {
       index,
       player,
+      soloGhost,
       style: {
         left: `${50 + 40 * Math.cos(angle)}%`,
         top: `${50 + 36 * Math.sin(angle)}%`,
       },
     }
   })
+})
+
+const seatCountLabel = computed(() => {
+  if (soloPractice.value) return 'You + 2 AI'
+  return `${playerCount.value} / ${maxPlayers.value} seats`
 })
 
 function playerAiDifficulty(player: { id: string; ai_difficulty?: string }): string {
@@ -248,18 +267,22 @@ function seatInitial(nickname: string): string {
       <section class="card table-card">
         <div class="table-header">
           <h2 class="section-title">The board</h2>
-          <span class="count">{{ playerCount }} / {{ maxPlayers }} seats</span>
+          <span class="count">{{ seatCountLabel }}</span>
         </div>
 
         <div class="table-stage">
-          <div class="felt">
+          <div class="felt" :class="{ solo: soloPractice }">
             <div class="felt-brand">MONOPOLY</div>
             <div class="felt-sub">{{ soloPractice ? 'Solo practice' : 'Multiplayer' }}</div>
             <div
               v-for="slot in seatSlots"
               :key="slot.index"
               class="seat"
-              :class="{ empty: !slot.player, filled: Boolean(slot.player) }"
+              :class="{
+                empty: !slot.player && !slot.soloGhost,
+                filled: Boolean(slot.player),
+                ghost: Boolean(slot.soloGhost),
+              }"
               :style="slot.style"
             >
               <template v-if="slot.player">
@@ -296,6 +319,16 @@ function seatInitial(nickname: string): string {
                 >
                   ×
                 </button>
+              </template>
+              <template v-else-if="slot.soloGhost">
+                <span
+                  class="seat-token ghost-tok"
+                  :style="{ background: TOKEN_COLORS[slot.index % TOKEN_COLORS.length] }"
+                >
+                  {{ TOKEN_GLYPHS[slot.index % TOKEN_GLYPHS.length] }}
+                </span>
+                <span class="seat-name">{{ slot.soloGhost.nickname }}</span>
+                <span class="seat-tag ai">AI · {{ slot.soloGhost.difficulty }}</span>
               </template>
               <template v-else>
                 <span class="seat-empty-ring">{{ slot.index + 1 }}</span>
@@ -672,6 +705,13 @@ function seatInitial(nickname: string): string {
   color: rgba(243, 230, 200, 0.4);
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+.seat.ghost .seat-name {
+  opacity: 0.95;
+}
+.ghost-tok {
+  outline: 2px dashed rgba(255, 255, 255, 0.4);
+  outline-offset: 2px;
 }
 
 .roster {

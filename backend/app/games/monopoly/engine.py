@@ -8,7 +8,9 @@ from typing import Any
 
 from app.games.base import GamePlugin
 from app.games.monopoly.board import (
+    CHANCE_CARDS,
     COLOR_SETS,
+    COMMUNITY_CHEST_CARDS,
     RAILROADS,
     SPACES,
     TOKEN_COLORS,
@@ -19,6 +21,8 @@ from app.games.monopoly.board import (
     space_by_id,
     utility_rent,
 )
+
+_CARD_BY_ID = {c["id"]: c for c in CHANCE_CARDS + COMMUNITY_CHEST_CARDS}
 
 DIFFICULTIES = ("easy", "medium", "hard")
 
@@ -122,6 +126,7 @@ class MonopolyEngine(GamePlugin):
                 "in_jail": False,
                 "jail_turns": 0,
                 "get_out_cards": 0,
+                "get_out_card_ids": [],
                 "bankrupt": False,
                 "token_color": TOKEN_COLORS[i % len(TOKEN_COLORS)],
             }
@@ -526,6 +531,7 @@ class MonopolyEngine(GamePlugin):
 
         if effect == "get_out_of_jail":
             p["get_out_cards"] += 1
+            p.setdefault("get_out_card_ids", []).append(card["id"])
             # Card is held — do not discard until used
             self._finish_turn_or_roll_again(state, events)
             return
@@ -791,6 +797,17 @@ class MonopolyEngine(GamePlugin):
         if p["get_out_cards"] < 1:
             raise ValueError("No Get Out of Jail Free card")
         p["get_out_cards"] -= 1
+        card_ids = p.setdefault("get_out_card_ids", [])
+        if card_ids:
+            card_id = card_ids.pop()
+        else:
+            # Legacy states without tracked ids — return Chance copy if possible
+            card_id = "chance_jail_card"
+        card = deepcopy(_CARD_BY_ID.get(card_id) or _CARD_BY_ID["chance_jail_card"])
+        discard_key = (
+            "chance_discard" if card["id"].startswith("chance") else "community_discard"
+        )
+        state[discard_key].append(card)
         p["in_jail"] = False
         p["jail_turns"] = 0
         self._log(state, f"{p['nickname']} used Get Out of Jail Free")
@@ -1243,9 +1260,11 @@ class MonopolyEngine(GamePlugin):
     ) -> None:
         """Give all properties/cash/cards from bankrupt player to creditor or bank."""
         bankrupt = state["players"][from_id]
+        held_ids = list(bankrupt.get("get_out_card_ids") or [])
         if to_id and to_id in state["players"] and not state["players"][to_id]["bankrupt"]:
             state["players"][to_id]["cash"] += bankrupt["cash"]
             state["players"][to_id]["get_out_cards"] += bankrupt["get_out_cards"]
+            state["players"][to_id].setdefault("get_out_card_ids", []).extend(held_ids)
             for prop in state["properties"].values():
                 if prop["owner_id"] == from_id:
                     # Clear buildings when transferring to creditor? Classic: houses sold to bank first
@@ -1258,8 +1277,19 @@ class MonopolyEngine(GamePlugin):
                     prop["owner_id"] = None
                     prop["mortgaged"] = False
                     prop["houses"] = 0
+            for card_id in held_ids:
+                card = deepcopy(_CARD_BY_ID.get(card_id))
+                if not card:
+                    continue
+                discard_key = (
+                    "chance_discard"
+                    if card["id"].startswith("chance")
+                    else "community_discard"
+                )
+                state[discard_key].append(card)
         bankrupt["cash"] = 0
         bankrupt["get_out_cards"] = 0
+        bankrupt["get_out_card_ids"] = []
         bankrupt["bankrupt"] = True
         bankrupt["in_jail"] = False
         events.append({"type": "bankrupt", "player_id": from_id, "to": to_id})
@@ -1267,11 +1297,26 @@ class MonopolyEngine(GamePlugin):
     def _handle_declare_bankruptcy(
         self, state: dict, action: dict, pid: str, events: list[dict]
     ) -> tuple[dict, list[dict]]:
-        if state["phase"] != "awaiting_payment" or not state.get("debt"):
-            # Also allow resign-style from awaiting_end
-            if state["phase"] not in ("awaiting_end", "awaiting_roll", "awaiting_payment"):
-                raise ValueError("Cannot go bankrupt now")
         debt = state.get("debt") or {}
+        resigning = debt.get("reason") == "resign" and debt.get("debtor_id") == pid
+        allowed = (
+            "awaiting_end",
+            "awaiting_roll",
+            "awaiting_payment",
+            "awaiting_buy",
+            "auction",
+            "trade_pending",
+        )
+        if state["phase"] == "awaiting_payment" and debt.get("debtor_id") == pid:
+            pass
+        elif resigning and state["phase"] in allowed:
+            pass
+        elif state["phase"] in ("awaiting_end", "awaiting_roll") and (
+            not debt or debt.get("debtor_id") == pid
+        ):
+            pass
+        else:
+            raise ValueError("Cannot go bankrupt now")
         creditor = debt.get("creditor_id") if debt.get("debtor_id") == pid else None
         # Sell buildings to bank for half before transfer
         for sid_str, prop in state["properties"].items():
@@ -1290,6 +1335,7 @@ class MonopolyEngine(GamePlugin):
         self._transfer_assets(state, pid, creditor, events)
         state["debt"] = None
         state["pending_trade"] = None
+        state["auction"] = None
         self._check_last_standing(state)
         if state.get("winner"):
             return state, events
@@ -1307,7 +1353,16 @@ class MonopolyEngine(GamePlugin):
     ) -> tuple[dict, list[dict]]:
         if state["players"][pid]["bankrupt"]:
             raise ValueError("Already bankrupt")
-        state["debt"] = {"debtor_id": pid, "amount": 0, "creditor_id": None, "reason": "resign"}
+        if state.get("phase") == "finished":
+            raise ValueError("Game is over")
+        state["pending_trade"] = None
+        state["auction"] = None
+        state["debt"] = {
+            "debtor_id": pid,
+            "amount": 0,
+            "creditor_id": None,
+            "reason": "resign",
+        }
         return self._handle_declare_bankruptcy(state, action, pid, events)
 
     def _handle_end_turn(
