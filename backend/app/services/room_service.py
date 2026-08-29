@@ -1112,8 +1112,10 @@ AI_TURN_PAUSE_SEC = 0.8
 AI_SPYFALL_THINK_PAUSE_SEC = 2.0
 AI_POKER_THINK_PAUSE_SEC = 3.0
 AI_POKER_TURN_PAUSE_SEC = 1.5
-AI_MONOPOLY_THINK_PAUSE_SEC = 1.2
-AI_MONOPOLY_TURN_PAUSE_SEC = 0.6
+AI_MONOPOLY_THINK_PAUSE_SEC = 2.4
+AI_MONOPOLY_TURN_PAUSE_SEC = 2.2
+AI_MONOPOLY_MOVE_PAUSE_SEC = 6.5
+AI_MONOPOLY_DECISION_PAUSE_SEC = 2.8
 AI_CHESS_THINK_PAUSE_SEC = 1.2
 AI_CHESS_TURN_PAUSE_SEC = 0.6
 AI_CONNECT4_THINK_PAUSE_SEC = 0.7
@@ -1359,6 +1361,7 @@ async def _process_monopoly_ai_turn(
 
     await asyncio.sleep(AI_MONOPOLY_THINK_PAUSE_SEC)
     action = choose_monopoly_action(state, str(actor_data["id"]))
+    action_type = str(action.get("type") or "")
     try:
         room, state, events = await service.apply_game_action(
             room_id, actor.id, action, allow_ai=True
@@ -1377,6 +1380,7 @@ async def _process_monopoly_ai_turn(
             fallback = {"type": "end_turn"}
         else:
             fallback = {"type": "roll"}
+        action_type = str(fallback.get("type") or "")
         try:
             room, state, events = await service.apply_game_action(
                 room_id, actor.id, fallback, allow_ai=True
@@ -1384,7 +1388,14 @@ async def _process_monopoly_ai_turn(
         except ValueError:
             return False
     await broadcast_fn(room, events)
-    await asyncio.sleep(AI_MONOPOLY_TURN_PAUSE_SEC)
+    # Give the client time to animate dice + token hops before the next AI act
+    if action_type in ("roll", "roll_jail"):
+        pause = AI_MONOPOLY_MOVE_PAUSE_SEC
+    elif action_type in ("buy", "decline", "bid", "pass_auction", "pay_debt", "build"):
+        pause = AI_MONOPOLY_DECISION_PAUSE_SEC
+    else:
+        pause = AI_MONOPOLY_TURN_PAUSE_SEC
+    await asyncio.sleep(pause)
     return True
 
 

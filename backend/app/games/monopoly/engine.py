@@ -147,6 +147,9 @@ class MonopolyEngine(GamePlugin):
                     "kind": s["kind"],
                     "color": s.get("color"),
                     "price": s.get("price"),
+                    "house_cost": s.get("house_cost"),
+                    "rents": s.get("rents"),
+                    "mortgage": s.get("mortgage"),
                 }
                 for s in SPACES
             ],
@@ -220,6 +223,21 @@ class MonopolyEngine(GamePlugin):
 
     def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
         public = deepcopy(state)
+        # Ensure title-deed fields are present (older in-progress games may lack them)
+        by_id = {s["id"]: s for s in SPACES}
+        enriched = []
+        for space in public.get("spaces") or []:
+            src = by_id.get(space.get("id"), {})
+            enriched.append(
+                {
+                    **space,
+                    "house_cost": space.get("house_cost", src.get("house_cost")),
+                    "rents": space.get("rents") or src.get("rents"),
+                    "mortgage": space.get("mortgage", src.get("mortgage")),
+                    "price": space.get("price", src.get("price")),
+                }
+            )
+        public["spaces"] = enriched
         # Decks are hidden; expose counts only
         public["chance_remaining"] = len(state.get("chance_deck") or [])
         public["community_remaining"] = len(state.get("community_deck") or [])

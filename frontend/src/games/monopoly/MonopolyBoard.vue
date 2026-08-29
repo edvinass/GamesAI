@@ -9,6 +9,8 @@ import {
   spaceSide,
   tokenGlyph,
 } from './boardData'
+import { useMonopolyFx } from './useMonopolyFx'
+import { disposeSounds, isSoundMuted, setSoundMuted, unlockAudio } from './sounds'
 
 const props = defineProps<{
   gameState: MonopolyGameState
@@ -20,6 +22,7 @@ const emit = defineEmits<{
   action: [data: Record<string, unknown>]
 }>()
 
+const soundMuted = ref(isSoundMuted())
 const showManage = ref(false)
 const showTrade = ref(false)
 const tradeToId = ref('')
@@ -125,16 +128,26 @@ function onPanEnd(event: PointerEvent) {
 
 let resizeObserver: ResizeObserver | null = null
 
+function toggleSoundMute() {
+  const next = !soundMuted.value
+  setSoundMuted(next)
+  soundMuted.value = next
+  if (!next) void unlockAudio()
+}
+
 onMounted(() => {
   measureBoard()
   if (boardWrapRef.value) {
     resizeObserver = new ResizeObserver(() => measureBoard())
     resizeObserver.observe(boardWrapRef.value)
   }
+  window.addEventListener('pointerdown', unlockAudio, { once: true })
 })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  window.removeEventListener('pointerdown', unlockAudio)
+  disposeSounds()
 })
 
 watch(zoom, () => {
@@ -145,6 +158,22 @@ watch(zoom, () => {
 })
 
 const gs = computed(() => props.gameState)
+const {
+  movingPlayerId,
+  landPulseId,
+  buyFlashId,
+  hopSpaceId,
+  diceRolling,
+  displayDice,
+  cardOverlay,
+  cardFlipped,
+  cardLeaving,
+  banner: boardBanner,
+  cashFxByPlayer,
+  displayPositions,
+  boardBusy,
+} = useMonopolyFx(gs)
+
 const me = computed(() => gs.value.players[props.playerId] ?? null)
 const isActor = computed(() => gs.value.current_actor_id === props.playerId)
 const isTurnPlayer = computed(() => {
@@ -195,11 +224,18 @@ const tokensBySpace = computed(() => {
   const map: Record<number, MonopolyPlayerState[]> = {}
   for (const p of playersList.value) {
     if (p.bankrupt) continue
-    if (!map[p.position]) map[p.position] = []
-    map[p.position].push(p)
+    const pos = displayPositions.value[p.id] ?? p.position
+    if (!map[pos]) map[pos] = []
+    map[pos].push(p)
   }
   return map
 })
+
+function send(action: Record<string, unknown>) {
+  if (boardBusy.value && action.type !== 'resign') return
+  void unlockAudio()
+  emit('action', action)
+}
 
 const statusText = computed(() => {
   if (isFinished.value) {
@@ -228,9 +264,54 @@ const selectedDeed = computed(() => {
   return { space, prop }
 })
 
-function send(action: Record<string, unknown>) {
-  emit('action', action)
-}
+const selectedDeedRentRows = computed(() => {
+  const space = selectedDeed.value?.space
+  if (!space) return [] as { label: string; amount: number | null; note?: string; active: boolean }[]
+  const houses = selectedDeed.value?.prop?.houses ?? 0
+  const ownerId = selectedDeed.value?.prop?.owner_id ?? null
+
+  function ownedOfKind(kind: string): number {
+    if (!ownerId) return 0
+    let n = 0
+    for (const [sid, p] of Object.entries(gs.value.properties)) {
+      if (p.owner_id !== ownerId) continue
+      if (gs.value.spaces.find((s) => s.id === Number(sid))?.kind === kind) n += 1
+    }
+    return n
+  }
+
+  if (space.kind === 'property' && space.rents?.length) {
+    const labels = [
+      'Rent',
+      'With 1 House',
+      'With 2 Houses',
+      'With 3 Houses',
+      'With 4 Houses',
+      'With Hotel',
+    ]
+    return space.rents.map((amount, i) => ({
+      label: labels[i] ?? `Tier ${i}`,
+      amount,
+      active: (houses <= 4 && houses === i) || (houses >= 5 && i === 5),
+    }))
+  }
+  if (space.kind === 'railroad') {
+    const rrCount = ownedOfKind('railroad')
+    return [1, 2, 3, 4].map((n) => ({
+      label: n === 1 ? 'Rent' : `If ${n} R.R.'s owned`,
+      amount: 25 * 2 ** (n - 1),
+      active: rrCount === n,
+    }))
+  }
+  if (space.kind === 'utility') {
+    const utilCount = ownedOfKind('utility')
+    return [
+      { label: 'If one Utility owned', amount: null, note: '4× dice roll', active: utilCount === 1 },
+      { label: 'If both Utilities owned', amount: null, note: '10× dice roll', active: utilCount >= 2 },
+    ]
+  }
+  return []
+})
 
 function ownerColor(spaceId: number): string | null {
   const owner = gs.value.properties[String(spaceId)]?.owner_id
@@ -309,21 +390,39 @@ function selectSpace(id: number) {
 <template>
   <div class="mono-play">
     <aside class="sidebar">
-      <div class="status-card">
+      <div class="status-card" :class="{ 'status-pulse': isActor }">
         <p class="status-label">Status</p>
         <h2 class="status">{{ statusText }}</h2>
-        <div v-if="gs.last_dice" class="dice-row" aria-label="Last dice roll">
-          <span class="die" :data-face="gs.last_dice[0]">{{ gs.last_dice[0] }}</span>
+        <div
+          v-if="displayDice || gs.last_dice"
+          class="dice-row"
+          :class="{ rolling: diceRolling }"
+          aria-label="Last dice roll"
+        >
+          <span class="die">{{ (displayDice ?? gs.last_dice)![0] }}</span>
           <span class="die-plus">+</span>
-          <span class="die" :data-face="gs.last_dice[1]">{{ gs.last_dice[1] }}</span>
-          <span class="die-total">= {{ gs.last_dice[0] + gs.last_dice[1] }}</span>
+          <span class="die">{{ (displayDice ?? gs.last_dice)![1] }}</span>
+          <span class="die-total">
+            =
+            {{
+              (displayDice ?? gs.last_dice)![0] + (displayDice ?? gs.last_dice)![1]
+            }}
+          </span>
         </div>
       </div>
 
-      <div v-if="gs.last_card" class="drawn-card" :class="gs.last_card.id.startsWith('chance') ? 'chance' : 'chest'">
-        <span class="drawn-label">{{ gs.last_card.id.startsWith('chance') ? 'Chance' : 'Community Chest' }}</span>
-        <p>{{ gs.last_card.text }}</p>
-      </div>
+      <Transition name="fx-fade">
+        <div
+          v-if="gs.last_card && !cardOverlay"
+          class="drawn-card mono-mini"
+          :class="gs.last_card.id.startsWith('chance') ? 'chance' : 'chest'"
+        >
+          <header class="mono-mini-banner">
+            {{ gs.last_card.id.startsWith('chance') ? 'Chance' : 'Community Chest' }}
+          </header>
+          <p>{{ gs.last_card.text }}</p>
+        </div>
+      </Transition>
 
       <div v-if="gs.auction" class="banner auction">
         <strong>Auction</strong>
@@ -352,6 +451,8 @@ function selectSpace(id: number) {
               active: p.id === gs.current_actor_id,
               me: p.id === playerId,
               out: p.bankrupt,
+              moving: movingPlayerId === p.id,
+              jailed: p.in_jail,
             }"
           >
             <span class="tok" :style="{ background: p.token_color }" :title="p.nickname">
@@ -364,6 +465,16 @@ function selectSpace(id: number) {
                 <span v-if="p.in_jail" class="jail">Jail</span>
               </div>
               <span class="cash">${{ p.cash.toLocaleString() }}</span>
+            </div>
+            <div class="cash-fx-layer" aria-hidden="true">
+              <span
+                v-for="event in cashFxByPlayer[p.id] || []"
+                :key="event.id"
+                class="cash-float"
+                :class="{ gain: (event.amount ?? 0) > 0, loss: (event.amount ?? 0) < 0 }"
+              >
+                {{ (event.amount ?? 0) > 0 ? '+' : '' }}${{ event.amount }}
+              </span>
             </div>
           </li>
         </ul>
@@ -398,16 +509,26 @@ function selectSpace(id: number) {
               ? COLOR_HEX[selectedDeed.space.color]
               : selectedDeed.space.kind === 'railroad'
                 ? '#1a1a1a'
-                : '#6b8e23',
+                : selectedDeed.space.kind === 'utility'
+                  ? '#6b8e23'
+                  : '#444',
           }"
         >
           <span v-if="selectedDeed.space.color" class="deed-group">
-            {{ COLOR_LABEL[selectedDeed.space.color] }}
+            TITLE DEED · {{ COLOR_LABEL[selectedDeed.space.color] }}
+          </span>
+          <span v-else-if="selectedDeed.space.kind === 'railroad'" class="deed-group">
+            RAILROAD
+          </span>
+          <span v-else-if="selectedDeed.space.kind === 'utility'" class="deed-group">
+            UTILITY
           </span>
           <strong>{{ selectedDeed.space.name }}</strong>
         </div>
         <div class="deed-body">
-          <p v-if="selectedDeed.space.price">Price ${{ selectedDeed.space.price }}</p>
+          <p v-if="selectedDeed.space.price" class="deed-price">
+            Price ${{ selectedDeed.space.price }}
+          </p>
           <p v-if="selectedDeed.prop?.owner_id">
             Owner: {{ gs.players[selectedDeed.prop.owner_id]?.nickname }}
           </p>
@@ -415,6 +536,30 @@ function selectSpace(id: number) {
           <p v-if="selectedDeed.prop?.mortgaged" class="mort-tag">Mortgaged</p>
           <p v-if="(selectedDeed.prop?.houses ?? 0) > 0">
             {{ selectedDeed.prop!.houses === 5 ? 'Hotel' : `${selectedDeed.prop!.houses} house(s)` }}
+          </p>
+
+          <table v-if="selectedDeedRentRows.length" class="deed-rents">
+            <tbody>
+              <tr
+                v-for="row in selectedDeedRentRows"
+                :key="row.label"
+                :class="{ active: row.active }"
+              >
+                <th>{{ row.label }}</th>
+                <td>{{ row.note ?? `$${row.amount}` }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div v-if="selectedDeed.space.house_cost" class="deed-meta">
+            <p>Houses cost ${{ selectedDeed.space.house_cost }} each</p>
+            <p>Hotels, ${{ selectedDeed.space.house_cost }} plus 4 houses</p>
+          </div>
+          <p v-if="selectedDeed.space.mortgage" class="deed-mortgage">
+            Mortgage value ${{ selectedDeed.space.mortgage }}
+          </p>
+          <p v-if="selectedDeed.space.kind === 'property'" class="deed-note">
+            If a player owns all lots of a color group, rent is doubled on unimproved lots.
           </p>
         </div>
       </div>
@@ -435,6 +580,15 @@ function selectSpace(id: number) {
           <button type="button" class="zoom-btn" title="Zoom in" @click="zoomIn">+</button>
         </div>
         <p class="zoom-hint">Scroll to zoom · drag to pan when zoomed</p>
+        <button
+          type="button"
+          class="mute-btn"
+          :aria-label="soundMuted ? 'Unmute sound' : 'Mute sound'"
+          :title="soundMuted ? 'Unmute' : 'Mute'"
+          @click="toggleSoundMute"
+        >
+          {{ soundMuted ? '🔇' : '🔊' }}
+        </button>
       </div>
 
       <div
@@ -452,17 +606,127 @@ function selectSpace(id: number) {
             <div class="board">
               <div class="center">
                 <div class="center-texture" />
-                <div class="brand-wrap">
+                <div class="brand-wrap" :class="{ dimmed: diceRolling || (cardOverlay && cardFlipped) }">
                   <div class="brand">MONOPOLY</div>
                   <div class="brand-sub">PROPERTY TRADING GAME</div>
                 </div>
-                <div class="center-decks">
-                  <div class="deck chest-deck">
+                <div class="center-decks" :class="{ dimmed: diceRolling || (cardOverlay && cardFlipped) }">
+                  <div
+                    class="deck chest-deck"
+                    :class="{ draw: cardOverlay?.cardKind === 'community_chest' && !cardFlipped }"
+                  >
+                    <div class="deck-back-art chest-art" aria-hidden="true">
+                      <svg viewBox="0 0 64 48" class="deck-icon">
+                        <rect x="8" y="18" width="48" height="26" rx="3" fill="#c9a227" stroke="#5a3d0a" stroke-width="2" />
+                        <rect x="14" y="10" width="36" height="12" rx="2" fill="#a67c1a" stroke="#5a3d0a" stroke-width="2" />
+                        <circle cx="32" cy="30" r="4" fill="#5a3d0a" />
+                        <rect x="30" y="30" width="4" height="8" fill="#5a3d0a" />
+                      </svg>
+                    </div>
                     <span>COMMUNITY</span>
                     <span>CHEST</span>
                   </div>
-                  <div class="deck chance-deck">
+                  <div
+                    class="deck chance-deck"
+                    :class="{ draw: cardOverlay?.cardKind === 'chance' && !cardFlipped }"
+                  >
+                    <span class="deck-q" aria-hidden="true">?</span>
                     <span>CHANCE</span>
+                  </div>
+                </div>
+
+                <Transition name="fx-dice">
+                  <div v-if="diceRolling || displayDice" class="center-dice" :class="{ settle: !diceRolling }">
+                    <span class="center-die">{{ (displayDice ?? gs.last_dice)?.[0] }}</span>
+                    <span class="center-die">{{ (displayDice ?? gs.last_dice)?.[1] }}</span>
+                  </div>
+                </Transition>
+
+                <div
+                  v-if="cardOverlay"
+                  class="mono-card-stage"
+                  :class="[
+                    cardOverlay.cardKind === 'chance' ? 'chance' : 'chest',
+                    { flipped: cardFlipped, leaving: cardLeaving },
+                  ]"
+                >
+                  <div class="mono-card">
+                    <div class="mono-card-inner">
+                      <div class="mono-face back" aria-hidden="true">
+                        <div class="mono-back-frame">
+                          <div class="mono-back-pattern" />
+                          <div class="mono-back-center">
+                            <template v-if="cardOverlay.cardKind === 'chance'">
+                              <span class="mono-back-q">?</span>
+                              <span class="mono-back-title">CHANCE</span>
+                            </template>
+                            <template v-else>
+                              <svg viewBox="0 0 64 48" class="mono-back-chest">
+                                <rect
+                                  x="8"
+                                  y="18"
+                                  width="48"
+                                  height="26"
+                                  rx="3"
+                                  fill="#c9a227"
+                                  stroke="#3d2a08"
+                                  stroke-width="2"
+                                />
+                                <rect
+                                  x="14"
+                                  y="10"
+                                  width="36"
+                                  height="12"
+                                  rx="2"
+                                  fill="#a67c1a"
+                                  stroke="#3d2a08"
+                                  stroke-width="2"
+                                />
+                                <circle cx="32" cy="30" r="4.5" fill="#3d2a08" />
+                                <rect x="29.5" y="30" width="5" height="9" fill="#3d2a08" />
+                              </svg>
+                              <span class="mono-back-title">COMMUNITY<br />CHEST</span>
+                            </template>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="mono-face front">
+                        <header class="mono-front-banner">
+                          {{
+                            cardOverlay.cardKind === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST'
+                          }}
+                        </header>
+                        <div class="mono-front-art" aria-hidden="true">
+                          <span v-if="cardOverlay.cardKind === 'chance'" class="mono-front-q">?</span>
+                          <svg v-else viewBox="0 0 64 48" class="mono-front-chest">
+                            <rect
+                              x="8"
+                              y="18"
+                              width="48"
+                              height="26"
+                              rx="3"
+                              fill="#c9a227"
+                              stroke="#3d2a08"
+                              stroke-width="2"
+                            />
+                            <rect
+                              x="14"
+                              y="10"
+                              width="36"
+                              height="12"
+                              rx="2"
+                              fill="#a67c1a"
+                              stroke="#3d2a08"
+                              stroke-width="2"
+                            />
+                            <circle cx="32" cy="30" r="4.5" fill="#3d2a08" />
+                            <rect x="29.5" y="30" width="5" height="9" fill="#3d2a08" />
+                          </svg>
+                        </div>
+                        <p class="mono-front-text">{{ cardOverlay.text }}</p>
+                        <footer class="mono-front-footer">MONOPOLY</footer>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -479,6 +743,10 @@ function selectSpace(id: number) {
                     corner: [0, 10, 20, 30].includes(space.id),
                     mortgaged: isMortgaged(space.id),
                     selected: selectedSpaceId === space.id,
+                    'land-pulse': landPulseId === space.id || hopSpaceId === space.id,
+                    'buy-flash': buyFlashId === space.id,
+                    'auction-hot': gs.auction?.space_id === space.id,
+                    'hop-trail': hopSpaceId === space.id,
                   },
                 ]"
                 :style="{
@@ -491,17 +759,26 @@ function selectSpace(id: number) {
                 @click="selectSpace(space.id)"
               >
                 <div v-if="space.color" class="stripe" />
+                <div
+                  v-if="kindIcon(space.kind, space.id)"
+                  class="kind-slot"
+                  aria-hidden="true"
+                >
+                  <span class="kind-icon">{{ kindIcon(space.kind, space.id) }}</span>
+                </div>
                 <div class="cell-inner">
-                  <div v-if="kindIcon(space.kind, space.id)" class="kind-icon">
-                    {{ kindIcon(space.kind, space.id) }}
-                  </div>
                   <div class="name">{{ SPACE_TINY[space.id] ?? space.name }}</div>
                   <div v-if="houseCount(space.id) > 0" class="buildings">
                     <template v-if="houseCount(space.id) === 5">
-                      <span class="hotel" />
+                      <span class="hotel pop-in" />
                     </template>
                     <template v-else>
-                      <span v-for="n in houseCount(space.id)" :key="n" class="house" />
+                      <span
+                        v-for="n in houseCount(space.id)"
+                        :key="n"
+                        class="house"
+                        :class="{ 'pop-in': buyFlashId === space.id && n === houseCount(space.id) }"
+                      />
                     </template>
                   </div>
                   <div v-if="space.price && ![0, 10, 20, 30].includes(space.id)" class="price">
@@ -514,6 +791,7 @@ function selectSpace(id: number) {
                     v-for="t in tokensBySpace[space.id] || []"
                     :key="t.id"
                     class="token"
+                    :class="{ hop: movingPlayerId === t.id }"
                     :style="{ background: t.token_color }"
                     :title="t.nickname"
                   >
@@ -523,24 +801,49 @@ function selectSpace(id: number) {
                 <div
                   v-if="ownerColor(space.id)"
                   class="owner-pip"
+                  :class="{ stamp: buyFlashId === space.id }"
                   :style="{ background: ownerColor(space.id)! }"
                 />
               </button>
             </div>
           </div>
         </div>
+
+        <Transition name="fx-banner">
+          <div
+            v-if="boardBanner"
+            :key="boardBanner.id"
+            class="board-banner"
+            :class="boardBanner.tone"
+            role="status"
+            aria-live="polite"
+          >
+            <div class="board-banner-scrim" />
+            <div class="board-banner-panel">
+              <p class="board-banner-title">{{ boardBanner.title }}</p>
+              <p v-if="boardBanner.subtitle" class="board-banner-sub">{{ boardBanner.subtitle }}</p>
+            </div>
+          </div>
+        </Transition>
       </div>
 
-      <div v-if="!isFinished" class="actions">
+      <div v-if="!isFinished" class="actions" :class="{ busy: boardBusy }">
+        <p v-if="boardBusy" class="busy-hint">Watching the board…</p>
         <template v-if="phase === 'awaiting_roll' && isTurnPlayer">
           <template v-if="me?.in_jail">
-            <button type="button" class="btn-primary" @click="send({ type: 'roll_jail' })">
+            <button
+              type="button"
+              class="btn-primary"
+              :disabled="boardBusy"
+              @click="send({ type: 'roll_jail' })"
+            >
               Roll for doubles
             </button>
             <button
               v-if="(me?.cash ?? 0) >= 50"
               type="button"
               class="btn-secondary"
+              :disabled="boardBusy"
               @click="send({ type: 'pay_jail' })"
             >
               Pay $50
@@ -549,12 +852,19 @@ function selectSpace(id: number) {
               v-if="(me?.get_out_cards ?? 0) > 0"
               type="button"
               class="btn-secondary"
+              :disabled="boardBusy"
               @click="send({ type: 'use_jail_card' })"
             >
               Get Out of Jail Free
             </button>
           </template>
-          <button v-else type="button" class="btn-primary btn-roll" @click="send({ type: 'roll' })">
+          <button
+            v-else
+            type="button"
+            class="btn-primary btn-roll"
+            :disabled="boardBusy"
+            @click="send({ type: 'roll' })"
+          >
             🎲 Roll dice
           </button>
         </template>
@@ -563,12 +873,17 @@ function selectSpace(id: number) {
           <button
             type="button"
             class="btn-primary"
-            :disabled="landPrice != null && (me?.cash ?? 0) < landPrice"
+            :disabled="boardBusy || (landPrice != null && (me?.cash ?? 0) < landPrice)"
             @click="send({ type: 'buy' })"
           >
             Buy{{ landPrice != null ? ` for $${landPrice}` : '' }}
           </button>
-          <button type="button" class="btn-secondary" @click="send({ type: 'decline' })">
+          <button
+            type="button"
+            class="btn-secondary"
+            :disabled="boardBusy"
+            @click="send({ type: 'decline' })"
+          >
             Auction instead
           </button>
         </template>
@@ -576,41 +891,93 @@ function selectSpace(id: number) {
         <template v-if="phase === 'auction' && isActor">
           <label class="bid-label">
             Bid
-            <input v-model.number="bidAmount" type="number" min="1" step="10" />
+            <input v-model.number="bidAmount" type="number" min="1" step="10" :disabled="boardBusy" />
           </label>
-          <button type="button" class="btn-primary" @click="send({ type: 'bid', amount: bidAmount })">
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="boardBusy"
+            @click="send({ type: 'bid', amount: bidAmount })"
+          >
             Bid ${{ bidAmount }}
           </button>
-          <button type="button" class="btn-secondary" @click="send({ type: 'pass_auction' })">Pass</button>
+          <button
+            type="button"
+            class="btn-secondary"
+            :disabled="boardBusy"
+            @click="send({ type: 'pass_auction' })"
+          >
+            Pass
+          </button>
         </template>
 
         <template v-if="phase === 'awaiting_payment' && isActor">
           <button
             type="button"
             class="btn-primary"
-            :disabled="(me?.cash ?? 0) < (gs.debt?.amount ?? 0)"
+            :disabled="boardBusy || (me?.cash ?? 0) < (gs.debt?.amount ?? 0)"
             @click="send({ type: 'pay_debt' })"
           >
             Pay ${{ gs.debt?.amount ?? 0 }}
           </button>
-          <button type="button" class="btn-secondary" @click="showManage = true">Manage assets</button>
-          <button type="button" class="btn-danger" @click="send({ type: 'declare_bankruptcy' })">
+          <button
+            type="button"
+            class="btn-secondary"
+            :disabled="boardBusy"
+            @click="showManage = true"
+          >
+            Manage assets
+          </button>
+          <button
+            type="button"
+            class="btn-danger"
+            :disabled="boardBusy"
+            @click="send({ type: 'declare_bankruptcy' })"
+          >
             Bankruptcy
           </button>
         </template>
 
         <template v-if="phase === 'trade_pending' && isActor">
-          <button type="button" class="btn-primary" @click="send({ type: 'accept_trade' })">Accept trade</button>
-          <button type="button" class="btn-secondary" @click="send({ type: 'reject_trade' })">Reject</button>
-        </template>
-
-        <template v-if="phase === 'awaiting_end' && isTurnPlayer">
-          <button type="button" class="btn-secondary" @click="showManage = true">Build / Mortgage</button>
-          <button type="button" class="btn-secondary" @click="showTrade = true">Trade</button>
           <button
             type="button"
             class="btn-primary"
-            :disabled="gs.can_roll_again"
+            :disabled="boardBusy"
+            @click="send({ type: 'accept_trade' })"
+          >
+            Accept trade
+          </button>
+          <button
+            type="button"
+            class="btn-secondary"
+            :disabled="boardBusy"
+            @click="send({ type: 'reject_trade' })"
+          >
+            Reject
+          </button>
+        </template>
+
+        <template v-if="phase === 'awaiting_end' && isTurnPlayer">
+          <button
+            type="button"
+            class="btn-secondary"
+            :disabled="boardBusy"
+            @click="showManage = true"
+          >
+            Build / Mortgage
+          </button>
+          <button
+            type="button"
+            class="btn-secondary"
+            :disabled="boardBusy"
+            @click="showTrade = true"
+          >
+            Trade
+          </button>
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="boardBusy || gs.can_roll_again"
             @click="send({ type: 'end_turn' })"
           >
             End turn
@@ -790,6 +1157,9 @@ function selectSpace(id: number) {
   align-items: center;
   gap: 0.35rem;
 }
+.dice-row.rolling .die {
+  animation: die-tumble 0.12s linear infinite;
+}
 .die {
   width: 1.7rem;
   height: 1.7rem;
@@ -800,6 +1170,10 @@ function selectSpace(id: number) {
   border-radius: 5px;
   font-weight: 700;
   box-shadow: 1px 2px 0 #0005;
+  transition: transform 0.2s ease;
+}
+.status-card.status-pulse {
+  animation: status-breathe 2.4s ease-in-out infinite;
 }
 .die-plus,
 .die-total {
@@ -807,30 +1181,39 @@ function selectSpace(id: number) {
   color: #c8d5c0;
 }
 
-.drawn-card {
-  border-radius: 8px;
-  padding: 0.55rem 0.7rem;
-  font-size: 0.8rem;
+.drawn-card.mono-mini {
+  border-radius: 6px;
+  padding: 0;
+  overflow: hidden;
+  background: #f7f1e3;
+  color: #1a1208;
+  border: 2px solid #1a1208;
+  box-shadow: 2px 3px 0 #0004;
+  font-size: 0.78rem;
   line-height: 1.35;
 }
-.drawn-card.chance {
-  background: #f7941d;
+.mono-mini-banner {
+  display: block;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+  font-family: 'Libre Baskerville', Georgia, serif;
+}
+.drawn-card.chest .mono-mini-banner {
+  background: #2f6fd4;
+  color: #f7f1e3;
+}
+.drawn-card.chance .mono-mini-banner {
+  background: #e67e16;
   color: #1a1208;
 }
-.drawn-card.chest {
-  background: #5b8def;
-  color: #0c1528;
-}
-.drawn-label {
-  display: block;
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  margin-bottom: 0.2rem;
-}
-.drawn-card p {
+.drawn-card.mono-mini p {
   margin: 0;
+  padding: 0.45rem 0.55rem 0.55rem;
+  font-weight: 600;
 }
 
 .banner {
@@ -874,16 +1257,26 @@ function selectSpace(id: number) {
   gap: 0.35rem;
 }
 .players li {
+  position: relative;
   display: flex;
   gap: 0.55rem;
   align-items: center;
   padding: 0.45rem 0.5rem;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
+  transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
 }
 .players li.active {
   background: rgba(15, 92, 58, 0.45);
   box-shadow: inset 0 0 0 1px rgba(243, 230, 200, 0.25);
+  animation: turn-glow 1.8s ease-in-out infinite;
+}
+.players li.moving .tok {
+  animation: tok-bounce 0.55s ease;
+}
+.players li.jailed .tok {
+  filter: grayscale(0.35);
+  box-shadow: inset 0 0 0 2px #c41e3a;
 }
 .players li.me {
   outline: 1px solid rgba(243, 230, 200, 0.28);
@@ -1010,6 +1403,58 @@ function selectSpace(id: number) {
 .deed-body p {
   margin: 0.15rem 0;
 }
+.deed-price {
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 0.25rem !important;
+}
+.deed-rents {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.4rem 0 0.35rem;
+  font-size: 0.72rem;
+}
+.deed-rents th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.18rem 0.2rem;
+  border-bottom: 1px solid #0002;
+}
+.deed-rents td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  padding: 0.18rem 0.2rem;
+  border-bottom: 1px solid #0002;
+  white-space: nowrap;
+}
+.deed-rents tr.active th,
+.deed-rents tr.active td {
+  background: rgba(15, 92, 58, 0.12);
+  color: #0f5c3a;
+}
+.deed-meta {
+  margin-top: 0.35rem;
+  padding-top: 0.3rem;
+  border-top: 1px dashed #0003;
+  font-size: 0.68rem;
+  opacity: 0.9;
+}
+.deed-meta p {
+  margin: 0.1rem 0;
+}
+.deed-mortgage {
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-top: 0.25rem !important;
+}
+.deed-note {
+  margin-top: 0.35rem !important;
+  font-size: 0.62rem;
+  line-height: 1.3;
+  opacity: 0.75;
+  font-style: italic;
+}
 .mort-tag {
   color: var(--accent);
   font-weight: 700;
@@ -1034,6 +1479,7 @@ function selectSpace(id: number) {
   min-height: 0;
   gap: 0.4rem;
   height: 100%;
+  position: relative;
 }
 
 .board-toolbar {
@@ -1090,6 +1536,23 @@ function selectSpace(id: number) {
   margin: 0;
   font-size: 0.72rem;
   color: #8a9584;
+  flex: 1;
+}
+
+.mute-btn {
+  flex-shrink: 0;
+  border: 1px solid rgba(243, 230, 200, 0.18);
+  background: rgba(18, 22, 26, 0.9);
+  color: var(--cream);
+  border-radius: 999px;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.mute-btn:hover {
+  background: rgba(243, 230, 200, 0.12);
 }
 
 .board-wrap {
@@ -1103,6 +1566,7 @@ function selectSpace(id: number) {
   background: rgba(0, 0, 0, 0.2);
   touch-action: none;
   cursor: default;
+  position: relative;
 }
 
 .board-wrap.zoomed {
@@ -1148,6 +1612,18 @@ function selectSpace(id: number) {
   overflow: hidden;
   display: grid;
   place-items: center;
+}
+.brand-wrap.dimmed,
+.center-decks.dimmed {
+  opacity: 0.28;
+  transition: opacity 0.25s ease;
+}
+.deck {
+  transition: box-shadow 0.35s ease;
+}
+.deck.draw {
+  animation: deck-draw 0.55s ease;
+  box-shadow: 0 0 16px rgba(255, 255, 255, 0.35);
 }
 .center-texture {
   position: absolute;
@@ -1196,32 +1672,62 @@ function selectSpace(id: number) {
 .deck {
   position: absolute;
   width: 22%;
-  aspect-ratio: 0.7;
-  border: 2px solid rgba(243, 230, 200, 0.55);
-  border-radius: 4px;
+  aspect-ratio: 5 / 7;
+  border: 2.5px solid rgba(20, 16, 10, 0.55);
+  border-radius: 5px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: clamp(0.4rem, 0.85vw, 0.65rem);
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  gap: 0.15rem;
+  font-size: clamp(0.38rem, 0.8vw, 0.6rem);
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-align: center;
-  line-height: 1.2;
-  box-shadow: 2px 3px 0 #0003;
+  line-height: 1.15;
+  box-shadow:
+    2px 3px 0 #0004,
+    inset 0 0 0 3px rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+  transition: box-shadow 0.35s ease;
+}
+.deck-icon {
+  width: 42%;
+  height: auto;
+  margin-bottom: 0.1rem;
+}
+.deck-q {
+  font-family: 'Libre Baskerville', Georgia, serif;
+  font-size: clamp(1.1rem, 2.8cqi, 2rem);
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 0.05rem;
 }
 .chest-deck {
   top: 8%;
   left: 8%;
   transform: rotate(45deg);
-  background: #5b8def;
-  color: #0c1528;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.22), transparent 45%),
+    repeating-linear-gradient(
+      45deg,
+      #3a6fd0 0 6px,
+      #2f5fba 6px 12px
+    );
+  color: #f4efe4;
+  text-shadow: 0 1px 0 #1a3a7a;
 }
 .chance-deck {
   bottom: 8%;
   right: 8%;
   transform: rotate(45deg);
-  background: #f7941d;
+  background:
+    radial-gradient(circle at 70% 30%, rgba(255, 255, 255, 0.28), transparent 45%),
+    repeating-linear-gradient(
+      -45deg,
+      #f0a020 0 6px,
+      #e08910 6px 12px
+    );
   color: #1a1208;
 }
 
@@ -1238,7 +1744,7 @@ function selectSpace(id: number) {
   flex-direction: column;
   font-family: 'Source Sans 3', system-ui, sans-serif;
   box-shadow: inset 0 0 0 2.5px var(--owner);
-  transition: filter 0.12s ease;
+  transition: filter 0.12s ease, transform 0.2s ease, box-shadow 0.25s ease;
 }
 .cell:hover,
 .cell.selected {
@@ -1318,6 +1824,7 @@ function selectSpace(id: number) {
 
 .cell-inner {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1335,9 +1842,50 @@ function selectSpace(id: number) {
 .side-left .cell-inner {
   transform: rotate(180deg);
 }
+
+/* Reserved slot so icons never sit on top of the label. */
+.kind-slot {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  line-height: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.side-bottom .kind-slot,
+.side-top .kind-slot,
+.cell.corner .kind-slot {
+  width: 100%;
+  height: clamp(0.95rem, 2.6cqi, 1.45rem);
+}
+.side-left .kind-slot,
+.side-right .kind-slot {
+  width: clamp(0.95rem, 2.6cqi, 1.45rem);
+  height: 100%;
+  align-self: stretch;
+}
 .kind-icon {
-  font-size: clamp(0.7rem, 1.8cqi, 1.25rem);
+  display: grid;
+  place-items: center;
+  width: 1.15em;
+  height: 1.15em;
+  font-size: clamp(0.62rem, 1.55cqi, 1.05rem);
   line-height: 1;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  transform-origin: center center;
+}
+/* Rotate only the glyph inside its square box — layout space stays reserved. */
+.side-right .kind-icon {
+  transform: rotate(90deg);
+}
+.side-left .kind-icon {
+  transform: rotate(-90deg);
+}
+.side-top .kind-icon,
+.side-bottom .kind-icon,
+.cell.corner .kind-icon {
+  transform: none;
 }
 .name {
   font-size: clamp(0.42rem, 1.15cqi, 0.72rem);
@@ -1613,6 +2161,539 @@ function selectSpace(id: number) {
 .modal-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+/* ——— Motion / FX ——— */
+.cash-fx-layer {
+  position: absolute;
+  right: 0.4rem;
+  top: 0.15rem;
+  pointer-events: none;
+  z-index: 2;
+}
+.cash-float {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  animation: cash-rise 1.4s ease-out forwards;
+  text-shadow: 0 1px 2px #0008;
+}
+.cash-float.gain {
+  color: #7dce8a;
+}
+.cash-float.loss {
+  color: #ff8a7a;
+}
+
+.cell.land-pulse {
+  animation: land-pulse 0.9s ease;
+  z-index: 4;
+}
+.cell.buy-flash {
+  animation: buy-flash 1s ease;
+  z-index: 4;
+}
+.cell.auction-hot {
+  animation: auction-pulse 1.2s ease-in-out infinite;
+}
+.cell.hop-trail {
+  filter: brightness(1.12);
+}
+
+.actions.busy {
+  opacity: 0.92;
+}
+.busy-hint {
+  width: 100%;
+  margin: 0 0 0.15rem;
+  font-size: 0.78rem;
+  color: #c4b08a;
+  letter-spacing: 0.04em;
+}
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  animation: none;
+}
+
+.token {
+  transition: transform 0.2s ease;
+}
+.token.hop {
+  animation: token-hop 0.65s cubic-bezier(0.22, 1.2, 0.36, 1);
+  z-index: 5;
+}
+.owner-pip.stamp {
+  animation: pip-stamp 0.55s ease;
+}
+.house.pop-in,
+.hotel.pop-in {
+  animation: build-pop 0.45s cubic-bezier(0.2, 1.4, 0.3, 1);
+}
+
+.center-dice {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+}
+.center-die {
+  width: clamp(2.6rem, 8cqi, 4.2rem);
+  height: clamp(2.6rem, 8cqi, 4.2rem);
+  border-radius: 12px;
+  background: #fff;
+  color: #111;
+  display: grid;
+  place-items: center;
+  font-size: clamp(1.3rem, 4cqi, 2rem);
+  font-weight: 800;
+  box-shadow: 0 8px 24px #0006;
+  animation: die-tumble 0.1s linear infinite;
+}
+.center-dice.settle .center-die {
+  animation: die-land 0.45s ease;
+}
+
+.mono-card-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  perspective: 1100px;
+  pointer-events: none;
+}
+.mono-card-stage.leaving {
+  animation: mono-card-leave 0.4s ease forwards;
+}
+.mono-card {
+  width: min(54%, 250px);
+  aspect-ratio: 5 / 7;
+  transform-style: preserve-3d;
+  filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.45));
+}
+.mono-card-stage.chest .mono-card {
+  animation: draw-from-chest 0.62s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.mono-card-stage.chance .mono-card {
+  animation: draw-from-chance 0.62s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.mono-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.72s cubic-bezier(0.4, 0.05, 0.2, 1);
+}
+.mono-card-stage.flipped .mono-card-inner {
+  transform: rotateY(180deg);
+}
+.mono-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2.5px solid #1a1208;
+}
+.mono-face.back {
+  transform: rotateY(0deg);
+}
+.mono-face.front {
+  transform: rotateY(180deg);
+  display: flex;
+  flex-direction: column;
+  background: #f7f1e3;
+  color: #1a1208;
+}
+.mono-back-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8%;
+}
+.mono-card-stage.chest .mono-face.back {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.25), transparent 50%),
+    repeating-linear-gradient(45deg, #3a6fd0 0 7px, #2f5fba 7px 14px);
+}
+.mono-card-stage.chance .mono-face.back {
+  background:
+    radial-gradient(circle at 70% 25%, rgba(255, 255, 255, 0.3), transparent 50%),
+    repeating-linear-gradient(-45deg, #f0a020 0 7px, #e08910 7px 14px);
+}
+.mono-back-pattern {
+  position: absolute;
+  inset: 7%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 3px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+}
+.mono-back-center {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  text-align: center;
+}
+.mono-back-q {
+  font-family: 'Libre Baskerville', Georgia, serif;
+  font-size: clamp(2.4rem, 9cqi, 4rem);
+  font-weight: 700;
+  line-height: 0.9;
+  color: #1a1208;
+  text-shadow: 0 2px 0 rgba(255, 255, 255, 0.35);
+}
+.mono-back-chest {
+  width: clamp(3.2rem, 12cqi, 5rem);
+  height: auto;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.25));
+}
+.mono-back-title {
+  font-family: 'Libre Baskerville', Georgia, serif;
+  font-size: clamp(0.55rem, 2cqi, 0.78rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  color: #f7f1e3;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+.mono-card-stage.chance .mono-back-title {
+  color: #1a1208;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.mono-front-banner {
+  flex-shrink: 0;
+  padding: 0.45rem 0.5rem;
+  font-family: 'Libre Baskerville', Georgia, serif;
+  font-size: clamp(0.58rem, 2.1cqi, 0.78rem);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-align: center;
+  color: #f7f1e3;
+}
+.mono-card-stage.chest .mono-front-banner {
+  background: linear-gradient(180deg, #3f7ee0, #2a5fbe);
+  border-bottom: 2px solid #1a3a7a;
+}
+.mono-card-stage.chance .mono-front-banner {
+  background: linear-gradient(180deg, #f5a623, #e07b10);
+  color: #1a1208;
+  border-bottom: 2px solid #a35a08;
+}
+.mono-front-art {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0.45rem 0.35rem 0.15rem;
+  min-height: 22%;
+}
+.mono-front-q {
+  font-family: 'Libre Baskerville', Georgia, serif;
+  font-size: clamp(1.6rem, 6cqi, 2.6rem);
+  font-weight: 700;
+  color: #e07b10;
+  line-height: 1;
+}
+.mono-front-chest {
+  width: clamp(2.4rem, 9cqi, 3.6rem);
+  height: auto;
+}
+.mono-front-text {
+  flex: 1;
+  margin: 0;
+  padding: 0.35rem 0.7rem 0.5rem;
+  font-size: clamp(0.72rem, 2.35cqi, 0.92rem);
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mono-front-footer {
+  flex-shrink: 0;
+  padding: 0.28rem 0.5rem 0.4rem;
+  font-family: 'Libre Baskerville', Georgia, serif;
+  font-size: clamp(0.45rem, 1.5cqi, 0.58rem);
+  letter-spacing: 0.22em;
+  text-align: center;
+  color: #8a7a62;
+  border-top: 1px dashed #cbbfa8;
+}
+
+.board-banner {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  padding: 1rem;
+}
+.board-banner-scrim {
+  position: absolute;
+  inset: 8%;
+  border-radius: 16px;
+  background: radial-gradient(circle at center, rgba(8, 12, 10, 0.55), rgba(8, 12, 10, 0.18) 70%, transparent);
+}
+.board-banner-panel {
+  position: relative;
+  z-index: 1;
+  max-width: min(92%, 520px);
+  text-align: center;
+  padding: 1rem 1.4rem 1.15rem;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(18, 24, 20, 0.94), rgba(10, 14, 12, 0.92));
+  border: 2px solid rgba(243, 230, 200, 0.35);
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.board-banner-title {
+  margin: 0;
+  font-family: 'Libre Baskerville', Georgia, serif;
+  font-weight: 700;
+  font-size: clamp(1.55rem, 4.8cqi, 3rem);
+  line-height: 1.05;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cream);
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+  word-break: break-word;
+}
+.board-banner-sub {
+  margin: 0.45rem 0 0;
+  font-size: clamp(0.85rem, 2.2cqi, 1.15rem);
+  font-weight: 600;
+  color: rgba(243, 230, 200, 0.82);
+  line-height: 1.25;
+}
+
+.board-banner.doubles .board-banner-panel,
+.board-banner.win .board-banner-panel {
+  border-color: rgba(232, 201, 122, 0.7);
+  background: linear-gradient(180deg, rgba(70, 48, 12, 0.95), rgba(28, 18, 6, 0.94));
+}
+.board-banner.doubles .board-banner-title,
+.board-banner.win .board-banner-title {
+  color: #f3d48a;
+}
+.board-banner.jail .board-banner-panel,
+.board-banner.bankrupt .board-banner-panel {
+  border-color: rgba(220, 80, 70, 0.65);
+  background: linear-gradient(180deg, rgba(70, 18, 18, 0.95), rgba(28, 8, 8, 0.94));
+}
+.board-banner.jail .board-banner-title,
+.board-banner.bankrupt .board-banner-title {
+  color: #ffb4a8;
+}
+.board-banner.buy .board-banner-panel,
+.board-banner.build .board-banner-panel,
+.board-banner.gain .board-banner-panel {
+  border-color: rgba(80, 190, 120, 0.55);
+}
+.board-banner.buy .board-banner-title,
+.board-banner.build .board-banner-title,
+.board-banner.gain .board-banner-title {
+  color: #9be7b0;
+}
+.board-banner.rent .board-banner-title {
+  color: #ffc28a;
+}
+.board-banner.auction .board-banner-title {
+  color: #9ec5ff;
+}
+.board-banner.card .board-banner-title {
+  color: #f0a020;
+}
+.board-banner.turn .board-banner-title {
+  color: #e8c97a;
+}
+.board-banner.land .board-banner-title {
+  font-size: clamp(1.2rem, 3.6cqi, 2.2rem);
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+.board-banner.dice .board-banner-title {
+  font-size: clamp(2.2rem, 7cqi, 4rem);
+}
+
+.fx-banner-enter-active {
+  animation: banner-in 0.45s cubic-bezier(0.2, 1.2, 0.3, 1) both;
+}
+.fx-banner-leave-active {
+  animation: banner-out 0.32s ease forwards;
+}
+@keyframes banner-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.55);
+    filter: blur(6px);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.08);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+@keyframes banner-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.12) translateY(-12px);
+  }
+}
+
+.fx-dice-enter-active,
+.fx-dice-leave-active,
+.fx-fade-enter-active,
+.fx-fade-leave-active {
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+.fx-dice-enter-from {
+  opacity: 0;
+  transform: scale(0.7) rotate(-8deg);
+}
+.fx-dice-leave-to {
+  opacity: 0;
+  transform: scale(0.85);
+}
+.fx-fade-enter-from,
+.fx-fade-leave-to {
+  opacity: 0;
+}
+
+.btn-primary,
+.btn-secondary {
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.btn-primary:active,
+.btn-secondary:active {
+  transform: scale(0.97);
+}
+.btn-roll {
+  animation: roll-ready 1.6s ease-in-out infinite;
+}
+
+@keyframes die-tumble {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(12deg) scale(1.05); }
+  100% { transform: rotate(-8deg) scale(0.98); }
+}
+@keyframes die-land {
+  0% { transform: scale(1.25) rotate(-10deg); }
+  60% { transform: scale(0.94) rotate(4deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+@keyframes token-hop {
+  0% { transform: translateY(0) scale(1); }
+  35% { transform: translateY(-12px) scale(1.25); }
+  70% { transform: translateY(2px) scale(1.05); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes land-pulse {
+  0% { box-shadow: inset 0 0 0 2px transparent; filter: brightness(1); }
+  35% { box-shadow: inset 0 0 0 3px #f0c36a; filter: brightness(1.18); }
+  100% { box-shadow: inset 0 0 0 2.5px var(--owner); filter: brightness(1); }
+}
+@keyframes buy-flash {
+  0% { filter: brightness(1); }
+  30% { filter: brightness(1.35); transform: scale(1.04); }
+  100% { filter: brightness(1); transform: scale(1); }
+}
+@keyframes auction-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 2px #f7941d88; }
+  50% { box-shadow: inset 0 0 0 3px #f7941d; filter: brightness(1.08); }
+}
+@keyframes cash-rise {
+  0% { opacity: 0; transform: translateY(6px); }
+  15% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-18px); }
+}
+@keyframes tok-bounce {
+  0%, 100% { transform: scale(1); }
+  40% { transform: scale(1.2); }
+}
+@keyframes turn-glow {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(243, 230, 200, 0.25); }
+  50% { box-shadow: inset 0 0 0 1px rgba(243, 230, 200, 0.55), 0 0 12px rgba(15, 92, 58, 0.35); }
+}
+@keyframes status-breathe {
+  0%, 100% { border-color: rgba(243, 230, 200, 0.15); }
+  50% { border-color: rgba(232, 201, 122, 0.45); }
+}
+@keyframes deck-draw {
+  0% { transform: rotate(45deg) scale(1); }
+  40% { transform: rotate(45deg) scale(1.12); }
+  100% { transform: rotate(45deg) scale(1); }
+}
+@keyframes draw-from-chest {
+  0% {
+    opacity: 0.7;
+    transform: translate(-42%, -38%) rotate(45deg) scale(0.42);
+  }
+  55% {
+    opacity: 1;
+    transform: translate(4%, 2%) rotate(-4deg) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+}
+@keyframes draw-from-chance {
+  0% {
+    opacity: 0.7;
+    transform: translate(42%, 38%) rotate(45deg) scale(0.42);
+  }
+  55% {
+    opacity: 1;
+    transform: translate(-4%, -2%) rotate(5deg) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+}
+@keyframes mono-card-leave {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.88) translateY(-10px);
+  }
+}
+@keyframes pip-stamp {
+  0% { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes build-pop {
+  0% { transform: scale(0.2); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes roll-ready {
+  0%, 100% { box-shadow: 0 2px 0 #8a6a28; }
+  50% { box-shadow: 0 2px 0 #8a6a28, 0 0 0 4px rgba(232, 201, 122, 0.25); }
 }
 
 @media (max-width: 900px) {

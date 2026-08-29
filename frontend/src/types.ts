@@ -585,6 +585,10 @@ export interface MonopolySpaceInfo {
   kind: string
   color?: string | null
   price?: number | null
+  house_cost?: number | null
+  /** [site, 1 house, 2 houses, 3 houses, 4 houses, hotel] for color properties */
+  rents?: number[] | null
+  mortgage?: number | null
 }
 
 export interface MonopolyPropertyState {
