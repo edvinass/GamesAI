@@ -59,12 +59,30 @@ function clampZoom(value: number) {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100))
 }
 
-function setZoom(next: number) {
-  zoom.value = clampZoom(next)
-  if (zoom.value <= 1.01) {
+/** Zoom while keeping the wrap-local point (ox, oy) from the wrap center fixed on screen. */
+function zoomToward(next: number, offsetX: number, offsetY: number) {
+  const prev = zoom.value
+  const z = clampZoom(next)
+  if (z === prev) return
+
+  if (z <= 1.01) {
+    zoom.value = z
     panX.value = 0
     panY.value = 0
+    return
   }
+
+  // screen = pan + content * zoom  (offsets from wrap/board center)
+  const contentX = (offsetX - panX.value) / prev
+  const contentY = (offsetY - panY.value) / prev
+  zoom.value = z
+  panX.value = offsetX - contentX * z
+  panY.value = offsetY - contentY * z
+}
+
+function setZoom(next: number) {
+  // Toolbar +/- zooms toward the center of the viewport.
+  zoomToward(next, 0, 0)
 }
 
 function zoomIn() {
@@ -76,7 +94,7 @@ function zoomOut() {
 }
 
 function zoomReset() {
-  setZoom(1)
+  zoom.value = 1
   panX.value = 0
   panY.value = 0
 }
@@ -90,11 +108,21 @@ function measureBoard() {
 }
 
 function onBoardWheel(event: WheelEvent) {
-  if (event.ctrlKey || event.metaKey || Math.abs(event.deltaY) > 0) {
-    event.preventDefault()
-    const delta = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
-    setZoom(zoom.value + delta)
+  if (!(event.ctrlKey || event.metaKey || Math.abs(event.deltaY) > 0)) return
+  event.preventDefault()
+
+  const wrap = boardWrapRef.value
+  if (!wrap) {
+    setZoom(zoom.value + (event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP))
+    return
   }
+
+  const rect = wrap.getBoundingClientRect()
+  // Cursor offset from the wrap center (matches transform-origin: center).
+  const offsetX = event.clientX - rect.left - rect.width / 2
+  const offsetY = event.clientY - rect.top - rect.height / 2
+  const delta = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
+  zoomToward(zoom.value + delta, offsetX, offsetY)
 }
 
 function onPanStart(event: PointerEvent) {
@@ -150,8 +178,8 @@ onUnmounted(() => {
   disposeSounds()
 })
 
-watch(zoom, () => {
-  if (zoom.value <= 1.01) {
+watch(zoom, (z) => {
+  if (z <= 1.01) {
     panX.value = 0
     panY.value = 0
   }
@@ -759,15 +787,17 @@ function selectSpace(id: number) {
                 @click="selectSpace(space.id)"
               >
                 <div v-if="space.color" class="stripe" />
-                <div
-                  v-if="kindIcon(space.kind, space.id)"
-                  class="kind-slot"
-                  aria-hidden="true"
-                >
-                  <span class="kind-icon">{{ kindIcon(space.kind, space.id) }}</span>
-                </div>
                 <div class="cell-inner">
-                  <div class="name">{{ SPACE_TINY[space.id] ?? space.name }}</div>
+                  <div class="label-stack">
+                    <div
+                      v-if="kindIcon(space.kind, space.id)"
+                      class="kind-slot"
+                      aria-hidden="true"
+                    >
+                      <span class="kind-icon">{{ kindIcon(space.kind, space.id) }}</span>
+                    </div>
+                    <div class="name">{{ SPACE_TINY[space.id] ?? space.name }}</div>
+                  </div>
                   <div v-if="houseCount(space.id) > 0" class="buildings">
                     <template v-if="houseCount(space.id) === 5">
                       <span class="hotel pop-in" />
@@ -809,22 +839,22 @@ function selectSpace(id: number) {
           </div>
         </div>
 
-        <Transition name="fx-banner">
-          <div
-            v-if="boardBanner"
-            :key="boardBanner.id"
-            class="board-banner"
-            :class="boardBanner.tone"
-            role="status"
-            aria-live="polite"
-          >
-            <div class="board-banner-scrim" />
-            <div class="board-banner-panel">
-              <p class="board-banner-title">{{ boardBanner.title }}</p>
-              <p v-if="boardBanner.subtitle" class="board-banner-sub">{{ boardBanner.subtitle }}</p>
+        <div class="board-fx-layer" aria-live="polite">
+          <Transition name="fx-banner">
+            <div
+              v-if="boardBanner"
+              :key="boardBanner.id"
+              class="board-banner"
+              :class="boardBanner.tone"
+              role="status"
+            >
+              <div class="board-banner-panel">
+                <p class="board-banner-title">{{ boardBanner.title }}</p>
+                <p v-if="boardBanner.subtitle" class="board-banner-sub">{{ boardBanner.subtitle }}</p>
+              </div>
             </div>
-          </div>
-        </Transition>
+          </Transition>
+        </div>
       </div>
 
       <div v-if="!isFinished" class="actions" :class="{ busy: boardBusy }">
@@ -1569,6 +1599,15 @@ function selectSpace(id: number) {
   position: relative;
 }
 
+.board-fx-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  /* Keep out of the wrap’s centering grid so the board never shifts. */
+  display: block;
+}
+
 .board-wrap.zoomed {
   cursor: grab;
 }
@@ -1580,6 +1619,8 @@ function selectSpace(id: number) {
 .board-scaler {
   will-change: transform;
   transition: transform 0.05s linear;
+  /* Explicit grid placement so overlays never share the centering track. */
+  grid-area: 1 / 1;
 }
 
 .board-frame {
@@ -1834,35 +1875,39 @@ function selectSpace(id: number) {
   gap: 1px;
   position: relative;
 }
-.side-left .cell-inner,
+/*
+ * Rotate the whole content stack on side cells so “icon above name” stays
+ * correct in the text’s local orientation (not just screen-up).
+ */
 .side-right .cell-inner {
-  writing-mode: vertical-rl;
+  writing-mode: horizontal-tb;
   text-orientation: mixed;
+  transform: rotate(90deg);
 }
 .side-left .cell-inner {
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  transform: rotate(-90deg);
+}
+.side-top .cell-inner {
   transform: rotate(180deg);
 }
 
-/* Reserved slot so icons never sit on top of the label. */
+/* Icon sits directly above the name; the parent rotation carries both. */
+.label-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.14em;
+  max-width: 100%;
+  max-height: 100%;
+}
 .kind-slot {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
   line-height: 0;
-  z-index: 1;
-  pointer-events: none;
-}
-.side-bottom .kind-slot,
-.side-top .kind-slot,
-.cell.corner .kind-slot {
-  width: 100%;
-  height: clamp(0.95rem, 2.6cqi, 1.45rem);
-}
-.side-left .kind-slot,
-.side-right .kind-slot {
-  width: clamp(0.95rem, 2.6cqi, 1.45rem);
-  height: 100%;
-  align-self: stretch;
 }
 .kind-icon {
   display: grid;
@@ -1871,21 +1916,6 @@ function selectSpace(id: number) {
   height: 1.15em;
   font-size: clamp(0.62rem, 1.55cqi, 1.05rem);
   line-height: 1;
-  writing-mode: horizontal-tb;
-  text-orientation: mixed;
-  transform-origin: center center;
-}
-/* Rotate only the glyph inside its square box — layout space stays reserved. */
-.side-right .kind-icon {
-  transform: rotate(90deg);
-}
-.side-left .kind-icon {
-  transform: rotate(-90deg);
-}
-.side-top .kind-icon,
-.side-bottom .kind-icon,
-.cell.corner .kind-icon {
-  transform: none;
 }
 .name {
   font-size: clamp(0.42rem, 1.15cqi, 0.72rem);
@@ -2434,17 +2464,10 @@ function selectSpace(id: number) {
 .board-banner {
   position: absolute;
   inset: 0;
-  z-index: 30;
   display: grid;
   place-items: center;
   pointer-events: none;
   padding: 1rem;
-}
-.board-banner-scrim {
-  position: absolute;
-  inset: 8%;
-  border-radius: 16px;
-  background: radial-gradient(circle at center, rgba(8, 12, 10, 0.55), rgba(8, 12, 10, 0.18) 70%, transparent);
 }
 .board-banner-panel {
   position: relative;
@@ -2458,6 +2481,37 @@ function selectSpace(id: number) {
   box-shadow:
     0 18px 48px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.fx-banner-enter-active .board-banner-panel {
+  animation: banner-panel-in 0.45s cubic-bezier(0.2, 1.2, 0.3, 1) both;
+}
+.fx-banner-leave-active .board-banner-panel {
+  animation: banner-panel-out 0.28s ease forwards;
+}
+@keyframes banner-panel-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes banner-panel-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92) translateY(-8px);
+  }
 }
 .board-banner-title {
   margin: 0;
@@ -2526,40 +2580,6 @@ function selectSpace(id: number) {
 }
 .board-banner.dice .board-banner-title {
   font-size: clamp(2.2rem, 7cqi, 4rem);
-}
-
-.fx-banner-enter-active {
-  animation: banner-in 0.45s cubic-bezier(0.2, 1.2, 0.3, 1) both;
-}
-.fx-banner-leave-active {
-  animation: banner-out 0.32s ease forwards;
-}
-@keyframes banner-in {
-  0% {
-    opacity: 0;
-    transform: scale(0.55);
-    filter: blur(6px);
-  }
-  60% {
-    opacity: 1;
-    transform: scale(1.08);
-    filter: blur(0);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-    filter: blur(0);
-  }
-}
-@keyframes banner-out {
-  0% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.12) translateY(-12px);
-  }
 }
 
 .fx-dice-enter-active,

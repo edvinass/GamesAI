@@ -381,18 +381,27 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
           await animateDice([dice[0], dice[1]])
         }
 
-        for (const id of Object.keys(nextPlayers)) {
+        const playerIds = Object.keys(nextPlayers)
+
+        // 1) Bankruptcies first (no movement yet)
+        for (const id of playerIds) {
+          const before = capturedPrevPlayers[id]
+          const after = nextPlayers[id]
+          if (!after || !before) continue
+          if (before.bankrupt || !after.bankrupt) continue
+          const player = state.players[id]
+          push({ kind: 'bankrupt', playerId: id, text: `${player.nickname} went bankrupt` })
+          playBankrupt()
+          await announce('BANKRUPT!', { subtitle: player.nickname, tone: 'bankrupt', ms: 2400 })
+          setDisplayPos(id, after.position)
+        }
+
+        // 2) Finish every token move before any other event banners
+        for (const id of playerIds) {
           const before = capturedPrevPlayers[id]
           const after = nextPlayers[id]
           if (!after || !before) continue
           const player = state.players[id]
-
-          if (!before.bankrupt && after.bankrupt) {
-            push({ kind: 'bankrupt', playerId: id, text: `${player.nickname} went bankrupt` })
-            playBankrupt()
-            await announce('BANKRUPT!', { subtitle: player.nickname, tone: 'bankrupt', ms: 2400 })
-            setDisplayPos(id, after.position)
-          }
 
           if (before.position !== after.position) {
             const wentToJail = !before.in_jail && after.in_jail
@@ -412,36 +421,39 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
             await sleep(600)
             landPulseId.value = null
           }
-
-          if (before.cash !== after.cash) {
-            const delta = after.cash - before.cash
-            const event = push({
-              kind: 'cash',
-              playerId: id,
-              amount: delta,
-              color: player.token_color,
-            })
-            addCashFx(event)
-            if (delta > 0) playCashGain()
-            else playCashLoss()
-            if (Math.abs(delta) >= 10) {
-              await announce(delta > 0 ? `+$${delta}` : `-$${Math.abs(delta)}`, {
-                subtitle: player.nickname,
-                tone: delta > 0 ? 'gain' : 'rent',
-                ms: 1300,
-              })
-            } else {
-              await sleep(350)
-            }
-          }
         }
 
         // Keep display positions synced for anyone who didn't animate
         for (const [id, p] of Object.entries(nextPlayers)) {
           if (displayPositions.value[id] !== p.position && movingPlayerId.value !== id) {
-            if (movingPlayerId.value !== id) {
-              setDisplayPos(id, p.position)
-            }
+            setDisplayPos(id, p.position)
+          }
+        }
+
+        // 3) Cash / rent banners only after all figures have stopped
+        for (const id of playerIds) {
+          const before = capturedPrevPlayers[id]
+          const after = nextPlayers[id]
+          if (!after || !before || before.cash === after.cash) continue
+          const player = state.players[id]
+          const delta = after.cash - before.cash
+          const event = push({
+            kind: 'cash',
+            playerId: id,
+            amount: delta,
+            color: player.token_color,
+          })
+          addCashFx(event)
+          if (delta > 0) playCashGain()
+          else playCashLoss()
+          if (Math.abs(delta) >= 10) {
+            await announce(delta > 0 ? `+$${delta}` : `-$${Math.abs(delta)}`, {
+              subtitle: player.nickname,
+              tone: delta > 0 ? 'gain' : 'rent',
+              ms: 1300,
+            })
+          } else {
+            await sleep(350)
           }
         }
 
