@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { MonopolyGameState, MonopolyPlayerState, Room } from '@/types'
 import {
   COLOR_HEX,
@@ -29,6 +29,120 @@ const tradeOfferProps = ref<number[]>([])
 const tradeRequestProps = ref<number[]>([])
 const bidAmount = ref(10)
 const selectedSpaceId = ref<number | null>(null)
+
+const ZOOM_MIN = 0.7
+const ZOOM_MAX = 2.5
+const ZOOM_STEP = 0.15
+
+const boardWrapRef = ref<HTMLElement | null>(null)
+const boardSizePx = ref(640)
+const zoom = ref(1)
+const panX = ref(0)
+const panY = ref(0)
+const isPanning = ref(false)
+const panStart = ref({ x: 0, y: 0, panX: 0, panY: 0 })
+
+const boardFitStyle = computed(() => ({
+  width: `${boardSizePx.value}px`,
+  height: `${boardSizePx.value}px`,
+}))
+
+const boardTransformStyle = computed(() => ({
+  transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoom.value})`,
+  transformOrigin: 'center center',
+}))
+
+function clampZoom(value: number) {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100))
+}
+
+function setZoom(next: number) {
+  zoom.value = clampZoom(next)
+  if (zoom.value <= 1.01) {
+    panX.value = 0
+    panY.value = 0
+  }
+}
+
+function zoomIn() {
+  setZoom(zoom.value + ZOOM_STEP)
+}
+
+function zoomOut() {
+  setZoom(zoom.value - ZOOM_STEP)
+}
+
+function zoomReset() {
+  setZoom(1)
+  panX.value = 0
+  panY.value = 0
+}
+
+function measureBoard() {
+  const el = boardWrapRef.value
+  if (!el) return
+  const pad = 8
+  const size = Math.floor(Math.min(el.clientWidth, el.clientHeight) - pad)
+  boardSizePx.value = Math.max(280, size)
+}
+
+function onBoardWheel(event: WheelEvent) {
+  if (event.ctrlKey || event.metaKey || Math.abs(event.deltaY) > 0) {
+    event.preventDefault()
+    const delta = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
+    setZoom(zoom.value + delta)
+  }
+}
+
+function onPanStart(event: PointerEvent) {
+  if (zoom.value <= 1.02) return
+  if ((event.target as HTMLElement | null)?.closest?.('.cell, button, input, select, a')) return
+  isPanning.value = true
+  panStart.value = {
+    x: event.clientX,
+    y: event.clientY,
+    panX: panX.value,
+    panY: panY.value,
+  }
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
+
+function onPanMove(event: PointerEvent) {
+  if (!isPanning.value) return
+  panX.value = panStart.value.panX + (event.clientX - panStart.value.x)
+  panY.value = panStart.value.panY + (event.clientY - panStart.value.y)
+}
+
+function onPanEnd(event: PointerEvent) {
+  if (!isPanning.value) return
+  isPanning.value = false
+  try {
+    ;(event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId)
+  } catch {
+    /* ignore */
+  }
+}
+
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  measureBoard()
+  if (boardWrapRef.value) {
+    resizeObserver = new ResizeObserver(() => measureBoard())
+    resizeObserver.observe(boardWrapRef.value)
+  }
+})
+
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+})
+
+watch(zoom, () => {
+  if (zoom.value <= 1.01) {
+    panX.value = 0
+    panY.value = 0
+  }
+})
 
 const gs = computed(() => props.gameState)
 const me = computed(() => gs.value.players[props.playerId] ?? null)
@@ -312,81 +426,107 @@ function selectSpace(id: number) {
     </aside>
 
     <div class="main">
-      <div class="board-wrap">
-        <div class="board-frame">
-          <div class="board">
-            <div class="center">
-              <div class="center-texture" />
-              <div class="brand-wrap">
-                <div class="brand">MONOPOLY</div>
-                <div class="brand-sub">PROPERTY TRADING GAME</div>
-              </div>
-              <div class="center-decks">
-                <div class="deck chest-deck">
-                  <span>COMMUNITY</span>
-                  <span>CHEST</span>
-                </div>
-                <div class="deck chance-deck">
-                  <span>CHANCE</span>
-                </div>
-              </div>
-            </div>
+      <div class="board-toolbar">
+        <div class="zoom-controls" role="group" aria-label="Board zoom">
+          <button type="button" class="zoom-btn" title="Zoom out" @click="zoomOut">−</button>
+          <button type="button" class="zoom-label" title="Reset zoom" @click="zoomReset">
+            {{ Math.round(zoom * 100) }}%
+          </button>
+          <button type="button" class="zoom-btn" title="Zoom in" @click="zoomIn">+</button>
+        </div>
+        <p class="zoom-hint">Scroll to zoom · drag to pan when zoomed</p>
+      </div>
 
-            <button
-              v-for="space in gs.spaces"
-              :key="space.id"
-              type="button"
-              class="cell"
-              :class="[
-                `side-${spaceSide(space.id)}`,
-                `kind-${space.kind}`,
-                {
-                  corner: [0, 10, 20, 30].includes(space.id),
-                  mortgaged: isMortgaged(space.id),
-                  selected: selectedSpaceId === space.id,
-                },
-              ]"
-              :style="{
-                gridRow: spaceGridPos(space.id).row,
-                gridColumn: spaceGridPos(space.id).col,
-                '--stripe': space.color ? COLOR_HEX[space.color] : 'transparent',
-                '--owner': ownerColor(space.id) || 'transparent',
-              }"
-              :title="space.name"
-              @click="selectSpace(space.id)"
-            >
-              <div v-if="space.color" class="stripe" />
-              <div class="cell-inner">
-                <div v-if="kindIcon(space.kind, space.id)" class="kind-icon">
-                  {{ kindIcon(space.kind, space.id) }}
+      <div
+        ref="boardWrapRef"
+        class="board-wrap"
+        :class="{ panning: isPanning, zoomed: zoom > 1.02 }"
+        @wheel.prevent="onBoardWheel"
+        @pointerdown="onPanStart"
+        @pointermove="onPanMove"
+        @pointerup="onPanEnd"
+        @pointercancel="onPanEnd"
+      >
+        <div class="board-scaler" :style="boardTransformStyle">
+          <div class="board-frame" :style="boardFitStyle">
+            <div class="board">
+              <div class="center">
+                <div class="center-texture" />
+                <div class="brand-wrap">
+                  <div class="brand">MONOPOLY</div>
+                  <div class="brand-sub">PROPERTY TRADING GAME</div>
                 </div>
-                <div class="name">{{ SPACE_TINY[space.id] ?? space.name }}</div>
-                <div v-if="houseCount(space.id) > 0" class="buildings">
-                  <template v-if="houseCount(space.id) === 5">
-                    <span class="hotel" />
-                  </template>
-                  <template v-else>
-                    <span v-for="n in houseCount(space.id)" :key="n" class="house" />
-                  </template>
+                <div class="center-decks">
+                  <div class="deck chest-deck">
+                    <span>COMMUNITY</span>
+                    <span>CHEST</span>
+                  </div>
+                  <div class="deck chance-deck">
+                    <span>CHANCE</span>
+                  </div>
                 </div>
-                <div v-if="space.price && ![0, 10, 20, 30].includes(space.id)" class="price">
-                  ${{ space.price }}
-                </div>
-                <div v-if="isMortgaged(space.id)" class="mort-stamp">MORTGAGED</div>
               </div>
-              <div class="tokens">
-                <span
-                  v-for="t in tokensBySpace[space.id] || []"
-                  :key="t.id"
-                  class="token"
-                  :style="{ background: t.token_color }"
-                  :title="t.nickname"
-                >
-                  {{ tokenGlyph(playerIndex[t.id] ?? 0) }}
-                </span>
-              </div>
-              <div v-if="ownerColor(space.id)" class="owner-pip" :style="{ background: ownerColor(space.id)! }" />
-            </button>
+
+              <button
+                v-for="space in gs.spaces"
+                :key="space.id"
+                type="button"
+                class="cell"
+                :class="[
+                  `side-${spaceSide(space.id)}`,
+                  `kind-${space.kind}`,
+                  {
+                    corner: [0, 10, 20, 30].includes(space.id),
+                    mortgaged: isMortgaged(space.id),
+                    selected: selectedSpaceId === space.id,
+                  },
+                ]"
+                :style="{
+                  gridRow: spaceGridPos(space.id).row,
+                  gridColumn: spaceGridPos(space.id).col,
+                  '--stripe': space.color ? COLOR_HEX[space.color] : 'transparent',
+                  '--owner': ownerColor(space.id) || 'transparent',
+                }"
+                :title="space.name"
+                @click="selectSpace(space.id)"
+              >
+                <div v-if="space.color" class="stripe" />
+                <div class="cell-inner">
+                  <div v-if="kindIcon(space.kind, space.id)" class="kind-icon">
+                    {{ kindIcon(space.kind, space.id) }}
+                  </div>
+                  <div class="name">{{ SPACE_TINY[space.id] ?? space.name }}</div>
+                  <div v-if="houseCount(space.id) > 0" class="buildings">
+                    <template v-if="houseCount(space.id) === 5">
+                      <span class="hotel" />
+                    </template>
+                    <template v-else>
+                      <span v-for="n in houseCount(space.id)" :key="n" class="house" />
+                    </template>
+                  </div>
+                  <div v-if="space.price && ![0, 10, 20, 30].includes(space.id)" class="price">
+                    ${{ space.price }}
+                  </div>
+                  <div v-if="isMortgaged(space.id)" class="mort-stamp">MORTGAGED</div>
+                </div>
+                <div class="tokens">
+                  <span
+                    v-for="t in tokensBySpace[space.id] || []"
+                    :key="t.id"
+                    class="token"
+                    :style="{ background: t.token_color }"
+                    :title="t.nickname"
+                  >
+                    {{ tokenGlyph(playerIndex[t.id] ?? 0) }}
+                  </span>
+                </div>
+                <div
+                  v-if="ownerColor(space.id)"
+                  class="owner-pip"
+                  :style="{ background: ownerColor(space.id)! }"
+                />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -601,10 +741,11 @@ function selectSpace(id: number) {
   --wood-light: #8b5a2b;
   --accent: #c41e3a;
   display: grid;
-  grid-template-columns: minmax(220px, 280px) 1fr;
-  gap: 0.75rem;
-  height: min(100%, calc(100vh - 4.5rem));
-  padding: 0.5rem;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  gap: 0.5rem;
+  height: 100%;
+  min-height: 0;
+  padding: 0.35rem 0.5rem 0.5rem;
   color: #f2ebe0;
   font-family: 'Source Sans 3', system-ui, sans-serif;
   background:
@@ -891,7 +1032,64 @@ function selectSpace(id: number) {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  gap: 0.55rem;
+  gap: 0.4rem;
+  height: 100%;
+}
+
+.board-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  padding: 0 0.15rem;
+}
+
+.zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: rgba(18, 22, 26, 0.9);
+  border: 1px solid rgba(243, 230, 200, 0.14);
+  border-radius: 999px;
+  padding: 0.15rem;
+}
+
+.zoom-btn,
+.zoom-label {
+  border: none;
+  background: transparent;
+  color: var(--cream);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+}
+
+.zoom-btn {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.zoom-btn:hover,
+.zoom-label:hover {
+  background: rgba(243, 230, 200, 0.12);
+}
+
+.zoom-label {
+  min-width: 3.4rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #8a9584;
 }
 
 .board-wrap {
@@ -899,12 +1097,30 @@ function selectSpace(id: number) {
   display: grid;
   place-items: center;
   min-height: 0;
-  overflow: auto;
-  padding: 0.25rem;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  touch-action: none;
+  cursor: default;
+}
+
+.board-wrap.zoomed {
+  cursor: grab;
+}
+
+.board-wrap.panning {
+  cursor: grabbing;
+}
+
+.board-scaler {
+  will-change: transform;
+  transition: transform 0.05s linear;
 }
 
 .board-frame {
-  padding: 10px;
+  padding: clamp(6px, 1.1%, 14px);
+  box-sizing: border-box;
   background: linear-gradient(145deg, var(--wood-light), var(--wood) 40%, #3d2412);
   border-radius: 8px;
   box-shadow:
@@ -913,16 +1129,15 @@ function selectSpace(id: number) {
 }
 
 .board {
-  --corner: min(9.2vh, 7.4vw, 72px);
-  --edge: min(6.4vh, 5.1vw, 50px);
   display: grid;
-  grid-template-columns: var(--corner) repeat(9, var(--edge)) var(--corner);
-  grid-template-rows: var(--corner) repeat(9, var(--edge)) var(--corner);
+  grid-template-columns: 1.45fr repeat(9, 1fr) 1.45fr;
+  grid-template-rows: 1.45fr repeat(9, 1fr) 1.45fr;
   gap: 0;
   background: #2c2118;
   border: 2px solid #1a120c;
-  width: calc(2 * var(--corner) + 9 * var(--edge));
-  height: calc(2 * var(--corner) + 9 * var(--edge));
+  width: 100%;
+  height: 100%;
+  container-type: size;
 }
 
 .center {
@@ -1121,11 +1336,11 @@ function selectSpace(id: number) {
   transform: rotate(180deg);
 }
 .kind-icon {
-  font-size: clamp(0.55rem, 1.1vw, 0.9rem);
+  font-size: clamp(0.7rem, 1.8cqi, 1.25rem);
   line-height: 1;
 }
 .name {
-  font-size: clamp(0.32rem, 0.72vw, 0.55rem);
+  font-size: clamp(0.42rem, 1.15cqi, 0.72rem);
   font-weight: 700;
   line-height: 1.05;
   text-align: center;
@@ -1134,30 +1349,30 @@ function selectSpace(id: number) {
   text-transform: uppercase;
 }
 .corner .name {
-  font-size: clamp(0.45rem, 0.95vw, 0.72rem);
+  font-size: clamp(0.55rem, 1.5cqi, 0.95rem);
 }
 .price {
-  font-size: clamp(0.3rem, 0.65vw, 0.48rem);
+  font-size: clamp(0.38rem, 1cqi, 0.62rem);
   font-weight: 600;
   opacity: 0.85;
 }
 .buildings {
   display: flex;
-  gap: 1px;
+  gap: 2px;
   flex-wrap: wrap;
   justify-content: center;
 }
 .house {
-  width: 6px;
-  height: 5px;
+  width: clamp(7px, 1.4cqi, 12px);
+  height: clamp(6px, 1.15cqi, 10px);
   background: #1fb25a;
   border: 0.5px solid #0a5c2e;
   border-radius: 1px 1px 0 0;
   box-shadow: inset 0 1px 0 #fff4;
 }
 .hotel {
-  width: 10px;
-  height: 7px;
+  width: clamp(12px, 2.2cqi, 18px);
+  height: clamp(8px, 1.6cqi, 14px);
   background: var(--accent);
   border: 0.5px solid #7a1020;
   border-radius: 1px;
@@ -1167,7 +1382,7 @@ function selectSpace(id: number) {
   inset: 0;
   display: grid;
   place-items: center;
-  font-size: clamp(0.28rem, 0.55vw, 0.42rem);
+  font-size: clamp(0.35rem, 0.9cqi, 0.55rem);
   font-weight: 800;
   color: var(--accent);
   letter-spacing: 0.04em;
@@ -1177,36 +1392,36 @@ function selectSpace(id: number) {
 }
 .tokens {
   position: absolute;
-  bottom: 2px;
-  right: 2px;
+  bottom: 3px;
+  right: 3px;
   display: flex;
   flex-wrap: wrap;
-  gap: 1px;
-  max-width: 90%;
+  gap: 2px;
+  max-width: 92%;
   justify-content: flex-end;
   z-index: 3;
 }
 .side-top .tokens {
   bottom: auto;
-  top: 2px;
+  top: 3px;
 }
 .token {
-  width: 14px;
-  height: 14px;
+  width: clamp(18px, 3.4cqi, 28px);
+  height: clamp(18px, 3.4cqi, 28px);
   border-radius: 50%;
-  border: 1.5px solid #fff;
+  border: 2px solid #fff;
   display: grid;
   place-items: center;
-  font-size: 7px;
+  font-size: clamp(9px, 1.7cqi, 14px);
   line-height: 1;
-  box-shadow: 0 1px 2px #0008;
+  box-shadow: 0 2px 4px #0008;
 }
 .owner-pip {
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 5px;
-  height: 5px;
+  top: 3px;
+  left: 3px;
+  width: clamp(6px, 1.2cqi, 10px);
+  height: clamp(6px, 1.2cqi, 10px);
   border-radius: 50%;
   border: 1px solid #fff8;
   z-index: 2;
@@ -1403,14 +1618,18 @@ function selectSpace(id: number) {
 @media (max-width: 900px) {
   .mono-play {
     grid-template-columns: 1fr;
-    height: auto;
+    height: 100%;
   }
   .sidebar {
-    max-height: 14rem;
+    max-height: 11rem;
     order: 2;
   }
   .main {
     order: 1;
+    min-height: 55vh;
+  }
+  .zoom-hint {
+    display: none;
   }
 }
 </style>

@@ -351,6 +351,7 @@ function backToLobby() {
 
     <MonopolyBoard
       v-else-if="monopolyState && room"
+      class="monopoly-board-host"
       :game-state="monopolyState"
       :room="room"
       :player-id="playerStore.playerId"
@@ -602,6 +603,13 @@ function backToLobby() {
   max-width: none;
 }
 
+.game-page--monopoly :deep(.mono-play),
+.monopoly-board-host {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
 .game-header--poker {
   max-width: 1440px;
   margin-left: auto;
@@ -610,9 +618,8 @@ function backToLobby() {
 }
 
 .game-header--monopoly {
-  max-width: 1440px;
-  margin-left: auto;
-  margin-right: auto;
+  max-width: none;
+  margin: 0;
   width: 100%;
 }
 
