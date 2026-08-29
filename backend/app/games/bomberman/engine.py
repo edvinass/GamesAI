@@ -1652,9 +1652,72 @@ class BombermanEngine(GamePlugin):
             events.extend(self._respawn_bomber(state, pid, bomber))
         return events
 
+    def _playable_bounds(self, state: dict) -> tuple[int, int, int, int]:
+        """Inclusive empty-area inset after sudden-death shrink rings."""
+        width = int(state["grid_width"])
+        height = int(state["grid_height"])
+        margin = int(state.get("shrink_level", 0))
+        return margin, margin, width - 1 - margin, height - 1 - margin
+
+    def _find_respawn_cell(
+        self,
+        state: dict,
+        pid: str,
+        bomber: dict,
+        preferred: tuple[int, int] | None = None,
+    ) -> tuple[int, int]:
+        """Pick an empty tile inside the current playable area (not shrunk walls)."""
+        x0, y0, x1, y1 = self._playable_bounds(state)
+        occupied = {
+            (b["x"], b["y"])
+            for oid, b in state["bombers"].items()
+            if oid != pid and b.get("alive")
+        }
+
+        def score(cell: tuple[int, int]) -> tuple[int, int, int]:
+            x, y = cell
+            bomb_penalty = 1 if self._bomb_at(state, x, y, grounded_only=True) else 0
+            occ_penalty = 1 if cell in occupied else 0
+            pref = preferred or (
+                int(bomber.get("spawn_x", x)),
+                int(bomber.get("spawn_y", y)),
+            )
+            dist = abs(x - pref[0]) + abs(y - pref[1])
+            return (bomb_penalty + occ_penalty, dist, random.randrange(1 << 16))
+
+        candidates: list[tuple[int, int]] = []
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                if state["grid"][y][x] == TILE_EMPTY:
+                    candidates.append((x, y))
+
+        if preferred is not None:
+            px, py = preferred
+            if (
+                x0 <= px <= x1
+                and y0 <= py <= y1
+                and state["grid"][py][px] == TILE_EMPTY
+                and preferred not in occupied
+                and self._bomb_at(state, px, py, grounded_only=True) is None
+            ):
+                return preferred
+
+        if candidates:
+            return min(candidates, key=score)
+
+        # Last resort: any empty tile on the map.
+        for y in range(int(state["grid_height"])):
+            for x in range(int(state["grid_width"])):
+                if state["grid"][y][x] == TILE_EMPTY:
+                    return (x, y)
+        return preferred or (int(bomber.get("spawn_x", 0)), int(bomber.get("spawn_y", 0)))
+
     def _respawn_bomber(self, state: dict, pid: str, bomber: dict) -> list[dict]:
-        sx = int(bomber.get("spawn_x", bomber["x"]))
-        sy = int(bomber.get("spawn_y", bomber["y"]))
+        preferred = (
+            int(bomber.get("spawn_x", bomber["x"])),
+            int(bomber.get("spawn_y", bomber["y"])),
+        )
+        sx, sy = self._find_respawn_cell(state, pid, bomber, preferred=preferred)
         bomber["x"] = sx
         bomber["y"] = sy
         bomber["direction"] = "stop"
@@ -1763,7 +1826,23 @@ class BombermanEngine(GamePlugin):
                 for pid, bomber in state["bombers"].items():
                     if not bomber.get("alive"):
                         continue
-                    if (bomber["x"], bomber["y"]) in hard_set:
+                    if (bomber["x"], bomber["y"]) not in hard_set:
+                        continue
+                    # Mid-respawn players are immune to hurt — relocate off the new wall.
+                    if int(bomber.get("respawn_ticks", 0)) > 0:
+                        nx, ny = self._find_respawn_cell(state, pid, bomber)
+                        bomber["x"] = nx
+                        bomber["y"] = ny
+                        events.append(
+                            {
+                                "type": "player_relocated",
+                                "player_id": pid,
+                                "x": nx,
+                                "y": ny,
+                                "reason": "sudden_death",
+                            }
+                        )
+                    else:
                         events.extend(
                             self._hurt_bomber(
                                 state, pid, reason="sudden_death", by=None

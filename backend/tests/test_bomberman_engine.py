@@ -992,6 +992,74 @@ def test_sudden_death_hardens_ring(engine: BombermanEngine) -> None:
     assert state["grid"][0][0] == TILE_HARD
 
 
+def test_kill_race_respawn_avoids_shrunk_walls(engine: BombermanEngine) -> None:
+    """After sudden death hardens perimeter spawns, respawns must land on empty tiles."""
+    players = make_players(2)
+    state = engine.create_initial_state(
+        players,
+        {
+            "game_mode": "kill_race",
+            "kill_target": 99,
+            "match_time_sec": 180,
+            "countdown_sec": 0,
+            "sudden_death_sec": 1,
+            "tick_ms": 100,
+        },
+    )
+    state["phase"] = "playing"
+    p0 = players[0]["id"]
+    p1 = players[1]["id"]
+    b0 = state["bombers"][p0]
+    spawn = (b0["spawn_x"], b0["spawn_y"])
+
+    # Shrink the outer ring (where default spawns live).
+    state["playing_tick"] = state["sudden_death_ticks"]
+    for bomber in state["bombers"].values():
+        bomber["x"] = state["grid_width"] // 2
+        bomber["y"] = state["grid_height"] // 2
+    engine._apply_sudden_death(state)
+    assert state["shrink_level"] >= 1
+    assert state["grid"][spawn[1]][spawn[0]] == TILE_HARD
+
+    events = engine._hurt_bomber(state, p0, reason="explosion", by=p1)
+    assert any(e["type"] == "player_respawn" for e in events)
+    rx, ry = b0["x"], b0["y"]
+    assert state["grid"][ry][rx] == TILE_EMPTY
+    margin = state["shrink_level"]
+    assert margin <= rx < state["grid_width"] - margin
+    assert margin <= ry < state["grid_height"] - margin
+
+
+def test_sudden_death_relocates_mid_respawn(engine: BombermanEngine) -> None:
+    """Players waiting to respawn on a ring that hardens are moved, not stuck in walls."""
+    players = make_players(2)
+    state = engine.create_initial_state(
+        players,
+        {
+            "game_mode": "kill_race",
+            "countdown_sec": 0,
+            "sudden_death_sec": 1,
+            "tick_ms": 100,
+            "match_time_sec": 180,
+        },
+    )
+    state["phase"] = "playing"
+    p0 = players[0]["id"]
+    b0 = state["bombers"][p0]
+    # Simulate mid-respawn sitting on the perimeter spawn.
+    b0["x"], b0["y"] = b0["spawn_x"], b0["spawn_y"]
+    b0["respawn_ticks"] = 5
+    b0["alive"] = True
+    state["bombers"][players[1]["id"]]["x"] = state["grid_width"] // 2
+    state["bombers"][players[1]["id"]]["y"] = state["grid_height"] // 2
+
+    state["playing_tick"] = state["sudden_death_ticks"]
+    events = engine._apply_sudden_death(state)
+    assert any(e["type"] == "player_relocated" and e["player_id"] == p0 for e in events)
+    assert state["grid"][b0["y"]][b0["x"]] == TILE_EMPTY
+    assert b0["respawn_ticks"] == 5
+
+
 def test_rule_preset_fields_validated(engine: BombermanEngine) -> None:
     settings = engine.validate_settings(
         {

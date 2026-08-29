@@ -13,6 +13,7 @@ import DuelBoard from '@/games/duel/DuelBoard.vue'
 import TetrisBoard from '@/games/tetris/TetrisBoard.vue'
 import GravityMasterBoard from '@/games/gravity_master/GravityMasterBoard.vue'
 import PokerBoard from '@/games/poker/PokerBoard.vue'
+import MonopolyBoard from '@/games/monopoly/MonopolyBoard.vue'
 import ChessBoard from '@/games/chess/ChessBoard.vue'
 import GoBoard from '@/games/go/GoBoard.vue'
 import RoboRallyBoard from '@/games/roborally/RoboRallyBoard.vue'
@@ -25,8 +26,8 @@ import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
 import { pokerReactionSet } from '@/games/poker/reactions'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState, PinballGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState, isPinballState, mergeBombermanGameState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, MonopolyGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState, PinballGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isMonopolyState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState, isPinballState, mergeBombermanGameState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -55,6 +56,7 @@ const gameTitle = computed(() => {
   if (type === 'tetris') return 'Multiplier Tetris'
   if (type === 'gravity_master') return 'Gravity Master'
   if (type === 'poker') return 'Poker'
+  if (type === 'monopoly') return 'Monopoly'
   if (type === 'chess') return 'Chess'
   if (type === 'go') return 'Go'
   if (type === 'roborally') return 'RoboRally'
@@ -103,6 +105,10 @@ const pokerState = computed(() =>
   gameState.value && isPokerState(gameState.value) ? gameState.value as PokerGameState : null,
 )
 
+const monopolyState = computed(() =>
+  gameState.value && isMonopolyState(gameState.value) ? gameState.value as MonopolyGameState : null,
+)
+
 const chessState = computed(() =>
   gameState.value && isChessState(gameState.value) ? gameState.value as ChessGameState : null,
 )
@@ -134,11 +140,12 @@ const pinballState = computed(() =>
 const playerId = computed(() => playerStore.playerId)
 
 const isPoker = computed(() => room.value?.game_type === 'poker')
+const isMonopoly = computed(() => room.value?.game_type === 'monopoly')
 
 const isRoboRally = computed(() => room.value?.game_type === 'roborally')
 
 const isFullscreenGame = computed(() =>
-  Boolean(snakeState.value || bombermanState.value || pacmanState.value || duelState.value || tetrisState.value || gravityMasterState.value || chessState.value || goState.value || roborallyState.value || connect4State.value || battleshipState.value || solitaireState.value || pinballState.value),
+  Boolean(snakeState.value || bombermanState.value || pacmanState.value || duelState.value || tetrisState.value || gravityMasterState.value || monopolyState.value || chessState.value || goState.value || roborallyState.value || connect4State.value || battleshipState.value || solitaireState.value || pinballState.value),
 )
 
 const loadingMessage = computed(() => {
@@ -230,6 +237,7 @@ function backToLobby() {
     :class="{
       'game-page--snake': isFullscreenGame,
       'game-page--poker': isPoker,
+      'game-page--monopoly': isMonopoly,
       'game-page--roborally': isRoboRally,
     }"
   >
@@ -238,6 +246,7 @@ function backToLobby() {
       :class="{
         'game-header--snake': isFullscreenGame,
         'game-header--poker': isPoker,
+        'game-header--monopoly': isMonopoly,
         'game-header--roborally': isRoboRally,
       }"
     >
@@ -338,6 +347,14 @@ function backToLobby() {
       :reactions="pokerReactions"
       @action="sendAction"
       @reaction="sendReaction"
+    />
+
+    <MonopolyBoard
+      v-else-if="monopolyState && room"
+      :game-state="monopolyState"
+      :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
     />
 
     <ChessBoard
@@ -580,7 +597,19 @@ function backToLobby() {
   padding-bottom: 0;
 }
 
+.game-page--monopoly {
+  padding-bottom: 0;
+  max-width: none;
+}
+
 .game-header--poker {
+  max-width: 1440px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.game-header--monopoly {
   max-width: 1440px;
   margin-left: auto;
   margin-right: auto;

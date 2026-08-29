@@ -17,6 +17,7 @@ import DuelLobby from '@/games/duel/DuelLobby.vue'
 import TetrisLobby from '@/games/tetris/TetrisLobby.vue'
 import GravityMasterLobby from '@/games/gravity_master/GravityMasterLobby.vue'
 import PokerLobby from '@/games/poker/PokerLobby.vue'
+import MonopolyLobby from '@/games/monopoly/MonopolyLobby.vue'
 import ChessLobby from '@/games/chess/ChessLobby.vue'
 import GoLobby from '@/games/go/GoLobby.vue'
 import RoboRallyLobby from '@/games/roborally/RoboRallyLobby.vue'
@@ -33,6 +34,7 @@ import { validateLobby as validateDuelLobby } from '@/games/duel/lobbyValidation
 import { validateLobby as validateTetrisLobby } from '@/games/tetris/lobbyValidation'
 import { validateLobby as validateGravityMasterLobby } from '@/games/gravity_master/lobbyValidation'
 import { validateLobby as validatePokerLobby } from '@/games/poker/lobbyValidation'
+import { validateLobby as validateMonopolyLobby } from '@/games/monopoly/lobbyValidation'
 import { validateLobby as validateChessLobby } from '@/games/chess/lobbyValidation'
 import { validateLobby as validateGoLobby } from '@/games/go/lobbyValidation'
 import { validateLobby as validateRoboRallyLobby } from '@/games/roborally/lobbyValidation'
@@ -132,6 +134,7 @@ const isDuel = computed(() => room.value?.game_type === 'duel')
 const isTetris = computed(() => room.value?.game_type === 'tetris')
 const isGravityMaster = computed(() => room.value?.game_type === 'gravity_master')
 const isPoker = computed(() => room.value?.game_type === 'poker')
+const isMonopoly = computed(() => room.value?.game_type === 'monopoly')
 const isChess = computed(() => room.value?.game_type === 'chess')
 const isGo = computed(() => room.value?.game_type === 'go')
 const isRoboRally = computed(() => room.value?.game_type === 'roborally')
@@ -153,6 +156,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'tetris') return validateTetrisLobby(room.value)
   if (room.value.game_type === 'gravity_master') return validateGravityMasterLobby(room.value)
   if (room.value.game_type === 'poker') return validatePokerLobby(room.value)
+  if (room.value.game_type === 'monopoly') return validateMonopolyLobby(room.value)
   if (room.value.game_type === 'chess') return validateChessLobby(room.value)
   if (room.value.game_type === 'go') return validateGoLobby(room.value)
   if (room.value.game_type === 'roborally') return validateRoboRallyLobby(room.value)
@@ -268,6 +272,11 @@ const startingChips = computed({
   set: (val: number) => updateSettings({ starting_chips: val }),
 })
 
+const startingCash = computed({
+  get: () => Number(room.value?.settings?.starting_cash ?? 1500),
+  set: (val: number) => updateSettings({ starting_cash: val }),
+})
+
 const smallBlind = computed({
   get: () => Number(room.value?.settings?.small_blind ?? 5),
   set: (val: number) => updateSettings({ small_blind: val }),
@@ -307,9 +316,10 @@ const drawCount = computed({
 const soloAiDifficulties = computed({
   get: () => {
     const raw = room.value?.settings?.solo_ai_difficulties
-    const isPokerRoom = room.value?.game_type === 'poker'
-    const defaultLevel = isPokerRoom ? 'medium' : 'normal'
-    const maxAi = isPokerRoom
+    const isTwoBotSolo =
+      room.value?.game_type === 'poker' || room.value?.game_type === 'monopoly'
+    const defaultLevel = isTwoBotSolo ? 'medium' : 'normal'
+    const maxAi = isTwoBotSolo
       ? 2
       : Math.max(0, Number(room.value?.settings?.max_players ?? 4) - 1)
     if (Array.isArray(raw) && raw.length >= maxAi) {
@@ -318,8 +328,9 @@ const soloAiDifficulties = computed({
     return Array.from({ length: maxAi }, () => defaultLevel)
   },
   set: (val: string[]) => {
-    const isPokerRoom = room.value?.game_type === 'poker'
-    const maxAi = isPokerRoom
+    const isTwoBotSolo =
+      room.value?.game_type === 'poker' || room.value?.game_type === 'monopoly'
+    const maxAi = isTwoBotSolo
       ? 2
       : Math.max(0, Number(room.value?.settings?.max_players ?? 4) - 1)
     updateSettings({ solo_ai_difficulties: val.slice(0, maxAi) })
@@ -564,6 +575,24 @@ function startGame() {
         v-model:ai-difficulty="aiDifficulty"
         v-model:solo-ai-difficulties="soloAiDifficulties"
         v-model:show-cards-on-fold="showCardsOnFold"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+        @set-ai-difficulty="setAiDifficulty"
+      />
+
+      <MonopolyLobby
+        v-else-if="isMonopoly"
+        v-model:solo-practice="soloPractice"
+        v-model:starting-cash="startingCash"
+        v-model:ai-difficulty="aiDifficulty"
+        v-model:solo-ai-difficulties="soloAiDifficulties"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

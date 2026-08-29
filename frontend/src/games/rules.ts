@@ -5,6 +5,7 @@ import { roborallyRules } from './roborally/rules'
 import { duelRules } from './duel/rules'
 import { gravityMasterRules } from './gravity_master/rules'
 import { pokerRules } from './poker/rules'
+import { monopolyRules } from './monopoly/rules'
 import { snakeRules } from './snake/rules'
 import { bombermanRules } from './bomberman/rules'
 import { pacmanRules } from './pacman/rules'
@@ -25,6 +26,7 @@ const rulesByGameType: Record<string, GameRules> = {
   pacman: pacmanRules,
   gravity_master: gravityMasterRules,
   poker: pokerRules,
+  monopoly: monopolyRules,
   chess: chessRules,
   go: goRules,
   roborally: roborallyRules,

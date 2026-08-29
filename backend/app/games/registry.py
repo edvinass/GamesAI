@@ -6,6 +6,7 @@ from app.games.connect4.engine import Connect4Engine
 from app.games.duel.engine import DuelEngine
 from app.games.go.engine import GoEngine
 from app.games.gravity_master.engine import GravityMasterEngine
+from app.games.monopoly.engine import MonopolyEngine
 from app.games.pacman.engine import PacmanEngine
 from app.games.pinball.engine import PinballEngine
 from app.games.roborally.engine import RoboRallyEngine
@@ -27,6 +28,7 @@ _REGISTRY: dict[str, GamePlugin] = {
     "pacman": PacmanEngine(),
     "gravity_master": GravityMasterEngine(),
     "poker": PokerEngine(),
+    "monopoly": MonopolyEngine(),
     "chess": ChessEngine(),
     "go": GoEngine(),
     "roborally": RoboRallyEngine(),
@@ -54,6 +56,10 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "pacman": {"name": "Pac-Man", "description": "Race for pellets in a shared maze — dodge ghosts or eat your rivals"},
     "gravity_master": {"name": "Gravity Master", "description": "Draw shapes that fall and become walls — guide the ball to the target"},
     "poker": {"name": "Poker", "description": "Texas Hold'em — bluff, bet, and beat your friends (or AI)"},
+    "monopoly": {
+        "name": "Monopoly",
+        "description": "Buy properties, charge rent, auction and trade — last tycoon standing",
+    },
     "chess": {"name": "Chess", "description": "Classic chess — play a friend or challenge the AI"},
     "go": {"name": "Go", "description": "9×9 Go — surround territory and beat the AI"},
     "roborally": {"name": "RoboRally", "description": "Program your robot through checkpoints on a factory floor"},

@@ -5,6 +5,7 @@ Free online multiplayer games with AI players. Built with Vue 3, FastAPI, and Po
 ## Games
 
 - **Codenames** — Team word guessing with optional AI spymasters and operatives
+- **Monopoly** — Buy properties, auctions, trading, and AI opponents
 
 ## How to Play
 
@@ -141,3 +142,5 @@ Implement the `GamePlugin` interface in `backend/app/games/` and register in `ba
 ## Legal
 
 Codenames is a trademark of Czech Games Edition. This project implements Codenames-style gameplay with an original UI and open word lists.
+
+Monopoly is a trademark of Hasbro, Inc. This project implements Monopoly-style gameplay with an original UI for educational and entertainment purposes.

@@ -22,6 +22,8 @@ from app.games.go.ai import choose_go_move
 from app.games.go.engine import GoEngine
 from app.games.roborally.ai import choose_ai_actions
 from app.games.roborally.engine import RoboRallyEngine
+from app.games.monopoly.ai import choose_monopoly_action
+from app.games.monopoly.engine import MonopolyEngine
 from app.games.poker.ai import choose_poker_action
 from app.games.poker.engine import PokerEngine
 from app.services.poker_reactions import schedule_poker_reactions
@@ -68,6 +70,7 @@ _NO_TEAM_LOBBY_GAMES = frozenset(
         "bomberman",
         "pacman",
         "poker",
+        "monopoly",
         "gravity_master",
         "chess",
         "go",
@@ -313,7 +316,7 @@ class RoomService:
             )
             self.db.add(player)
             await self.db.flush()
-            if room.game_type in ("tetris", "poker", "duel"):
+            if room.game_type in ("tetris", "poker", "monopoly", "duel"):
                 settings = dict(room.settings or {})
                 difficulties = dict(settings.get("ai_difficulties") or {})
                 default = "normal" if room.game_type == "tetris" else str(
@@ -374,7 +377,7 @@ class RoomService:
             raise ValueError("Host cannot remove themselves")
 
         await self.db.delete(target)
-        if room.game_type in ("tetris", "poker", "duel"):
+        if room.game_type in ("tetris", "poker", "monopoly", "duel"):
             settings = dict(room.settings or {})
             difficulties = dict(settings.get("ai_difficulties") or {})
             difficulties.pop(str(target_id), None)
@@ -467,7 +470,7 @@ class RoomService:
             merged_settings.update(settings_override)
             room.settings = merged_settings
         settings = game.validate_settings(merged_settings)
-        if room.game_type in ("poker", "chess", "go", "roborally", "battleship") and room.host_player_id:
+        if room.game_type in ("poker", "monopoly", "chess", "go", "roborally", "battleship") and room.host_player_id:
             settings = {**settings, "host_id": str(room.host_player_id)}
         players_data = [self._player_data(p) for p in room.players]
 
@@ -492,6 +495,8 @@ class RoomService:
                 await self._setup_tetris_solo(room)
             elif room.game_type == "poker":
                 await self._setup_poker_solo(room)
+            elif room.game_type == "monopoly":
+                await self._setup_monopoly_solo(room)
             elif room.game_type == "chess":
                 await self._setup_chess_solo(room)
             elif room.game_type == "go":
@@ -794,6 +799,40 @@ class RoomService:
         room.settings = get_game("poker").validate_settings(settings)
         await self.db.flush()
 
+    async def _setup_monopoly_solo(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+        for _ in range(2):
+            token = generate_session_token()
+            self.db.add(
+                RoomPlayer(
+                    room_id=room.id,
+                    nickname=_generate_ai_nickname(),
+                    session_token_hash=hash_session_token(token),
+                    team=None,
+                    role=None,
+                    is_ai=True,
+                    is_connected=True,
+                )
+            )
+        await self.db.flush()
+
+        settings = dict(room.settings or {})
+        difficulties = dict(settings.get("ai_difficulties") or {})
+        solo_defaults = list(settings.get("solo_ai_difficulties") or ["medium", "medium"])
+        ai_index = 0
+        for p in room.players:
+            if p.is_ai:
+                default = solo_defaults[ai_index] if ai_index < len(solo_defaults) else "medium"
+                difficulties.setdefault(str(p.id), default)
+                ai_index += 1
+        settings["ai_difficulties"] = difficulties
+        room.settings = get_game("monopoly").validate_settings(settings)
+        await self.db.flush()
+
     async def _setup_chess_solo(self, room: Room) -> None:
         for p in list(room.players):
             if p.is_ai:
@@ -1073,6 +1112,8 @@ AI_TURN_PAUSE_SEC = 0.8
 AI_SPYFALL_THINK_PAUSE_SEC = 2.0
 AI_POKER_THINK_PAUSE_SEC = 3.0
 AI_POKER_TURN_PAUSE_SEC = 1.5
+AI_MONOPOLY_THINK_PAUSE_SEC = 1.2
+AI_MONOPOLY_TURN_PAUSE_SEC = 0.6
 AI_CHESS_THINK_PAUSE_SEC = 1.2
 AI_CHESS_TURN_PAUSE_SEC = 0.6
 AI_CONNECT4_THINK_PAUSE_SEC = 0.7
@@ -1293,6 +1334,57 @@ async def _process_poker_ai_turn(
     await broadcast_fn(room, events)
     schedule_poker_reactions(room_id, room, state, events, str(actor.id), action)
     await asyncio.sleep(AI_POKER_TURN_PAUSE_SEC)
+    return True
+
+
+async def _process_monopoly_ai_turn(
+    service: RoomService,
+    room_id: uuid.UUID,
+    room: Room,
+    broadcast_fn,
+) -> bool:
+    """Run one Monopoly AI action. Returns True if an action was taken."""
+    engine: MonopolyEngine = get_game("monopoly")  # type: ignore
+    state = room.game_state.state
+    if state.get("winner") or state.get("phase") == "finished":
+        return False
+
+    actor_data = engine.get_current_actor(state)
+    if not actor_data or not actor_data.get("is_ai"):
+        return False
+
+    actor = next((p for p in room.players if str(p.id) == actor_data["id"]), None)
+    if not actor:
+        return False
+
+    await asyncio.sleep(AI_MONOPOLY_THINK_PAUSE_SEC)
+    action = choose_monopoly_action(state, str(actor_data["id"]))
+    try:
+        room, state, events = await service.apply_game_action(
+            room_id, actor.id, action, allow_ai=True
+        )
+    except ValueError:
+        phase = state.get("phase")
+        if phase == "auction":
+            fallback = {"type": "pass_auction"}
+        elif phase == "awaiting_buy":
+            fallback = {"type": "decline"}
+        elif phase == "awaiting_payment":
+            fallback = {"type": "declare_bankruptcy"}
+        elif phase == "trade_pending":
+            fallback = {"type": "reject_trade"}
+        elif phase == "awaiting_end":
+            fallback = {"type": "end_turn"}
+        else:
+            fallback = {"type": "roll"}
+        try:
+            room, state, events = await service.apply_game_action(
+                room_id, actor.id, fallback, allow_ai=True
+            )
+        except ValueError:
+            return False
+    await broadcast_fn(room, events)
+    await asyncio.sleep(AI_MONOPOLY_TURN_PAUSE_SEC)
     return True
 
 
@@ -1531,6 +1623,8 @@ async def process_ai_turns(room_id: uuid.UUID, broadcast_fn) -> None:
                         acted = await _process_spyfall_ai_turn(service, room_id, room, broadcast_fn)
                     elif room.game_type == "poker":
                         acted = await _process_poker_ai_turn(service, room_id, room, broadcast_fn)
+                    elif room.game_type == "monopoly":
+                        acted = await _process_monopoly_ai_turn(service, room_id, room, broadcast_fn)
                     elif room.game_type == "chess":
                         acted = await _process_chess_ai_turn(service, room_id, room, broadcast_fn)
                     elif room.game_type == "connect4":

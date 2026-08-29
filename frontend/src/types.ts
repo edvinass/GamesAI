@@ -579,6 +579,86 @@ export interface PokerGameState {
   win_by_fold: boolean
 }
 
+export interface MonopolySpaceInfo {
+  id: number
+  name: string
+  kind: string
+  color?: string | null
+  price?: number | null
+}
+
+export interface MonopolyPropertyState {
+  owner_id: string | null
+  mortgaged: boolean
+  houses: number
+}
+
+export interface MonopolyPlayerState {
+  id: string
+  nickname: string
+  is_ai: boolean
+  ai_difficulty?: string | null
+  cash: number
+  position: number
+  in_jail: boolean
+  jail_turns: number
+  get_out_cards: number
+  bankrupt: boolean
+  token_color: string
+}
+
+export interface MonopolyAuctionState {
+  space_id: number
+  high_bid: number
+  high_bidder_id: string | null
+  bidder_index: number
+  bidders: string[]
+  passes_in_row: number
+}
+
+export interface MonopolyDebtState {
+  debtor_id: string
+  amount: number
+  creditor_id: string | null
+  reason: string
+}
+
+export interface MonopolyTradeState {
+  from_id: string
+  to_id: string
+  offer_cash: number
+  request_cash: number
+  offer_props: number[]
+  request_props: number[]
+}
+
+export interface MonopolyGameState {
+  phase: string
+  turn_phase: string
+  spaces: MonopolySpaceInfo[]
+  properties: Record<string, MonopolyPropertyState>
+  players: Record<string, MonopolyPlayerState>
+  seat_order: string[]
+  current_player_index: number
+  current_actor_id: string | null
+  doubles_count: number
+  last_dice: [number, number] | null
+  can_roll_again: boolean
+  auction: MonopolyAuctionState | null
+  debt: MonopolyDebtState | null
+  pending_trade: MonopolyTradeState | null
+  last_card: { id: string; text: string; effect: string } | null
+  log: Array<{ type: string; message: string }>
+  winner: string | null
+  win_reason: string | null
+  settings: Record<string, unknown>
+  host_id: string | null
+  houses_remaining: number
+  hotels_remaining: number
+  chance_remaining?: number
+  community_remaining?: number
+}
+
 export interface ChessPlayerState {
   id: string
   nickname: string
@@ -978,7 +1058,7 @@ export interface PacmanGameState {
   viewer_id: string | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | PacmanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState | PinballGameState
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | PacmanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | MonopolyGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState | PinballGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -1045,6 +1125,15 @@ export function isGravityMasterState(state: GameState): state is GravityMasterGa
 
 export function isPokerState(state: GameState): state is PokerGameState {
   return 'seat_order' in state && 'community_cards' in state && 'pot_total' in state
+}
+
+export function isMonopolyState(state: GameState): state is MonopolyGameState {
+  return (
+    'properties' in state &&
+    'spaces' in state &&
+    'turn_phase' in state &&
+    'houses_remaining' in state
+  )
 }
 
 export function isChessState(state: GameState): state is ChessGameState {

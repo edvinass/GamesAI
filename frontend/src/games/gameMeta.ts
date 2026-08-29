@@ -100,6 +100,15 @@ const metaByGameType: Record<string, GameMeta> = {
     players: '2–6',
     accent: '#d4b06a',
   },
+  monopoly: {
+    name: 'Monopoly',
+    description: 'Buy properties, charge rent, auction and trade — last tycoon standing.',
+    emoji: '🏠',
+    lobbyHint: 'Need 2–6 players. Share the link or add AI to fill seats.',
+    category: 'classic',
+    players: '2–6',
+    accent: '#1a3d2e',
+  },
   chess: {
     name: 'Chess',
     description: 'Classic chess — play a friend or challenge the AI.',
