@@ -112,12 +112,10 @@ function resolvePath(
   if (from === to) return { path: [], teleport: false }
   if (wentToJail && to === 10) {
     const fwd = (to - from + 40) % 40
-    // Direct jail send (Go To Jail / 3 doubles / card) — not a normal short move onto 10
     if (fwd === 0 || fwd > 6) return { path: [10], teleport: true }
   }
   const fwd = (to - from + 40) % 40
   const back = (from - to + 40) % 40
-  // Chance "go back 3"
   if (back > 0 && back <= 3 && fwd > back) {
     return { path: backwardPath(from, to), teleport: false }
   }
@@ -167,9 +165,9 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
       tone: opts.tone ?? 'default',
     }
     banner.value = event
-    await sleep(opts.ms ?? 1700)
+    await sleep(opts.ms ?? 1100)
     if (banner.value?.id === event.id) banner.value = null
-    await sleep(180)
+    await sleep(120)
   }
 
   function addCashFx(event: FxEvent) {
@@ -180,7 +178,7 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
       ...cashFxByPlayer.value,
       [pid]: [...current, event],
     }
-    later(1600, () => {
+    later(1400, () => {
       cashFxByPlayer.value = {
         ...cashFxByPlayer.value,
         [pid]: (cashFxByPlayer.value[pid] || []).filter((e) => e.id !== event.id),
@@ -217,13 +215,13 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
     void unlockAudio()
     diceRolling.value = true
     displayDice.value = [1, 1]
-    for (let i = 0; i < 14; i += 1) {
+    for (let i = 0; i < 10; i += 1) {
       displayDice.value = [
         1 + Math.floor(Math.random() * 6),
         1 + Math.floor(Math.random() * 6),
       ]
       playDiceTick()
-      await sleep(95)
+      await sleep(70)
     }
     displayDice.value = dice
     diceRolling.value = false
@@ -234,14 +232,11 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
       await announce('DOUBLES!', {
         subtitle: `${dice[0]} + ${dice[1]}`,
         tone: 'doubles',
-        ms: 1600,
+        ms: 1200,
       })
     } else {
-      await announce(String(dice[0] + dice[1]), {
-        subtitle: `${dice[0]} + ${dice[1]}`,
-        tone: 'dice',
-        ms: 1300,
-      })
+      // Center dice already tell the story — brief hold, no banner spam
+      await sleep(550)
     }
     displayDice.value = null
   }
@@ -252,32 +247,31 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
     to: number,
     wentToJail: boolean,
     nickname: string,
-    landName?: string,
-  ) {
+  ): Promise<{ passedGo: boolean }> {
     const { path, teleport } = resolvePath(from, to, wentToJail)
     movingPlayerId.value = playerId
 
     if (teleport) {
       playJail()
-      await announce('GO TO JAIL', { subtitle: nickname, tone: 'jail', ms: 2000 })
+      await announce('GO TO JAIL', { subtitle: nickname, tone: 'jail', ms: 1600 })
       setDisplayPos(playerId, 10)
       landPulseId.value = 10
       hopSpaceId.value = 10
-      await sleep(700)
+      await sleep(550)
       hopSpaceId.value = null
-      await sleep(400)
+      await sleep(280)
       landPulseId.value = null
       movingPlayerId.value = null
-      return
+      return { passedGo: false }
     }
 
     if (!path.length) {
       movingPlayerId.value = null
-      return
+      return { passedGo: false }
     }
 
     const passedGo = path.includes(0) && from !== 0
-    const hopMs = path.length > 14 ? 160 : path.length > 9 ? 220 : 300
+    const hopMs = path.length > 14 ? 120 : path.length > 9 ? 160 : 210
     for (const spaceId of path) {
       setDisplayPos(playerId, spaceId)
       hopSpaceId.value = spaceId
@@ -290,16 +284,14 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
     landPulseId.value = to
     playLand()
     if (passedGo) {
-      await announce('PASSED GO', { subtitle: 'Collect $200', tone: 'gain', ms: 1400 })
-    }
-    if (landName && landName !== 'Chance' && landName !== 'Community Chest') {
-      await announce(landName, { subtitle: nickname, tone: 'land', ms: 1400 })
+      await announce('PASSED GO', { subtitle: 'Collect $200', tone: 'gain', ms: 1100 })
     } else {
-      await sleep(500)
+      await sleep(380)
     }
     landPulseId.value = null
     movingPlayerId.value = null
-    await sleep(200)
+    await sleep(120)
+    return { passedGo }
   }
 
   function snapshotPlayers(state: MonopolyGameState) {
@@ -362,7 +354,6 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
       const capturedPrevPhase = prevPhase
       const capturedPrevProps = { ...prevProps }
 
-      // Snapshot advanced immediately so rapid updates don't double-fire same delta
       prevPlayers = nextPlayers
       prevProps = nextProps
       prevDice = state.last_dice ? ([...state.last_dice] as [number, number]) : null
@@ -371,6 +362,8 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
       prevPhase = state.phase
 
       void enqueue(async () => {
+        let passedGoThisTick = false
+
         const dice = state.last_dice
         if (
           dice &&
@@ -383,7 +376,6 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
 
         const playerIds = Object.keys(nextPlayers)
 
-        // 1) Bankruptcies first (no movement yet)
         for (const id of playerIds) {
           const before = capturedPrevPlayers[id]
           const after = nextPlayers[id]
@@ -392,11 +384,10 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
           const player = state.players[id]
           push({ kind: 'bankrupt', playerId: id, text: `${player.nickname} went bankrupt` })
           playBankrupt()
-          await announce('BANKRUPT!', { subtitle: player.nickname, tone: 'bankrupt', ms: 2400 })
+          await announce('BANKRUPT!', { subtitle: player.nickname, tone: 'bankrupt', ms: 2000 })
           setDisplayPos(id, after.position)
         }
 
-        // 2) Finish every token move before any other event banners
         for (const id of playerIds) {
           const before = capturedPrevPlayers[id]
           const after = nextPlayers[id]
@@ -405,55 +396,108 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
 
           if (before.position !== after.position) {
             const wentToJail = !before.in_jail && after.in_jail
-            const landName = state.spaces.find((s) => s.id === after.position)?.name
-            await animateMove(
+            const result = await animateMove(
               id,
               before.position,
               after.position,
               wentToJail,
               player.nickname,
-              landName,
             )
+            if (result.passedGo) passedGoThisTick = true
           } else if (!before.in_jail && after.in_jail) {
             playJail()
-            await announce('GO TO JAIL', { subtitle: player.nickname, tone: 'jail', ms: 2000 })
+            await announce('GO TO JAIL', { subtitle: player.nickname, tone: 'jail', ms: 1600 })
             landPulseId.value = 10
-            await sleep(600)
+            await sleep(500)
             landPulseId.value = null
           }
         }
 
-        // Keep display positions synced for anyone who didn't animate
         for (const [id, p] of Object.entries(nextPlayers)) {
           if (displayPositions.value[id] !== p.position && movingPlayerId.value !== id) {
             setDisplayPos(id, p.position)
           }
         }
 
-        // 3) Cash / rent banners only after all figures have stopped
+        // Cash: pair transfers into one “A → B” banner; skip GO $200 if we already announced it
+        const cashDeltas: { id: string; delta: number; nick: string; color: string }[] = []
         for (const id of playerIds) {
           const before = capturedPrevPlayers[id]
           const after = nextPlayers[id]
           if (!after || !before || before.cash === after.cash) continue
           const player = state.players[id]
-          const delta = after.cash - before.cash
-          const event = push({
-            kind: 'cash',
-            playerId: id,
-            amount: delta,
+          cashDeltas.push({
+            id,
+            delta: after.cash - before.cash,
+            nick: player.nickname,
             color: player.token_color,
           })
+        }
+
+        const used = new Set<string>()
+        for (let i = 0; i < cashDeltas.length; i += 1) {
+          const a = cashDeltas[i]!
+          if (used.has(a.id)) continue
+          let paired = false
+          for (let j = i + 1; j < cashDeltas.length; j += 1) {
+            const b = cashDeltas[j]!
+            if (used.has(b.id)) continue
+            if (a.delta === -b.delta && a.delta !== 0) {
+              const amount = Math.abs(a.delta)
+              const payer = a.delta < 0 ? a : b
+              const payee = a.delta < 0 ? b : a
+              for (const side of [a, b]) {
+                const event = push({
+                  kind: 'cash',
+                  playerId: side.id,
+                  amount: side.delta,
+                  color: side.color,
+                })
+                addCashFx(event)
+              }
+              playCashLoss()
+              playCashGain()
+              if (amount >= 10) {
+                await announce(`$${amount}`, {
+                  subtitle: `${payer.nick} → ${payee.nick}`,
+                  tone: 'rent',
+                  ms: 1200,
+                })
+              } else {
+                await sleep(280)
+              }
+              used.add(a.id)
+              used.add(b.id)
+              paired = true
+              break
+            }
+          }
+          if (paired) continue
+
+          used.add(a.id)
+          const event = push({
+            kind: 'cash',
+            playerId: a.id,
+            amount: a.delta,
+            color: a.color,
+          })
           addCashFx(event)
-          if (delta > 0) playCashGain()
+          if (a.delta > 0) playCashGain()
           else playCashLoss()
-          if (Math.abs(delta) >= 10) {
-            await announce(delta > 0 ? `+$${delta}` : `-$${Math.abs(delta)}`, {
-              subtitle: player.nickname,
-              tone: delta > 0 ? 'gain' : 'rent',
-              ms: 1300,
+
+          // Already told via PASSED GO
+          if (passedGoThisTick && a.delta === 200) {
+            await sleep(200)
+            continue
+          }
+          if (Math.abs(a.delta) >= 25) {
+            await announce(a.delta > 0 ? `+$${a.delta}` : `-$${Math.abs(a.delta)}`, {
+              subtitle: a.nick,
+              tone: a.delta > 0 ? 'gain' : 'rent',
+              ms: 1000,
             })
           } else {
-            await sleep(350)
+            await sleep(220)
           }
         }
 
@@ -468,7 +512,7 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
             const name = state.spaces.find((s) => s.id === spaceId)?.name ?? 'Property'
             const nick = state.players[after.owner_id]?.nickname ?? 'Player'
             playBuy()
-            await announce('SOLD!', { subtitle: `${nick} bought ${name}`, tone: 'buy', ms: 2000 })
+            await announce('SOLD!', { subtitle: `${nick} · ${name}`, tone: 'buy', ms: 1400 })
             buyFlashId.value = null
           }
           if (after.houses > before.houses) {
@@ -476,8 +520,8 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
             buyFlashId.value = spaceId
             playBuild()
             const name = state.spaces.find((s) => s.id === spaceId)?.name ?? 'Property'
-            const built = after.houses === 5 ? 'Hotel built!' : `House ×${after.houses}`
-            await announce(built, { subtitle: name, tone: 'build', ms: 1600 })
+            const built = after.houses === 5 ? 'HOTEL' : `HOUSE ×${after.houses}`
+            await announce(built, { subtitle: name, tone: 'build', ms: 1100 })
             buyFlashId.value = null
           }
         }
@@ -490,26 +534,26 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
           cardLeaving.value = false
           await announce(cardKind === 'chance' ? 'CHANCE!' : 'COMMUNITY CHEST', {
             tone: 'card',
-            ms: 1100,
+            ms: 900,
           })
           cardOverlay.value = event
           playCardDraw(cardKind === 'chance')
-          await sleep(620)
+          await sleep(480)
           if (cardOverlay.value?.id === event.id) {
             cardFlipped.value = true
             playCardFlip()
-            await sleep(3000)
+            await sleep(2400)
           }
           if (cardOverlay.value?.id === event.id) {
             cardLeaving.value = true
-            await sleep(420)
+            await sleep(320)
           }
           if (cardOverlay.value?.id === event.id) {
             cardOverlay.value = null
             cardFlipped.value = false
             cardLeaving.value = false
           }
-          await sleep(200)
+          await sleep(120)
         }
 
         const bid = state.auction?.high_bid ?? null
@@ -517,7 +561,7 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
           playAuctionStart()
           const name =
             state.spaces.find((s) => s.id === state.auction!.space_id)?.name ?? 'Property'
-          await announce('AUCTION!', { subtitle: name, tone: 'auction', ms: 1600 })
+          await announce('AUCTION!', { subtitle: name, tone: 'auction', ms: 1200 })
         }
         if (
           state.auction &&
@@ -538,46 +582,34 @@ export function useMonopolyFx(gameState: Ref<MonopolyGameState>) {
           await announce(`$${bid}`, {
             subtitle: bidder ? `${bidder} bids` : 'New high bid',
             tone: 'auction',
-            ms: 1200,
+            ms: 750,
           })
         }
 
         if (state.phase !== capturedPrevPhase) {
-          if (state.phase === 'awaiting_buy') {
-            const pos = state.current_actor_id
-              ? state.players[state.current_actor_id]?.position
-              : null
-            const name =
-              pos != null ? state.spaces.find((s) => s.id === pos)?.name : null
-            await announce('BUY OR AUCTION?', {
-              subtitle: name ?? undefined,
-              tone: 'buy',
-              ms: 1600,
-            })
-          }
+          // Buy/auction & your-turn are clear from the action bar / status — no banner
           if (state.phase === 'awaiting_payment') {
             const debt = state.debt
             await announce('DEBT DUE', {
-              subtitle: debt ? `$${debt.amount} — ${debt.reason}` : 'Raise cash',
+              subtitle: debt ? `$${debt.amount}` : 'Raise cash',
               tone: 'rent',
-              ms: 2000,
+              ms: 1400,
             })
           }
           if (state.phase === 'trade_pending') {
-            await announce('TRADE OFFER', { tone: 'default', ms: 1500 })
+            await announce('TRADE OFFER', { tone: 'default', ms: 1100 })
           }
           if (state.phase === 'awaiting_roll') {
             const actorId = state.current_actor_id
             const actor = actorId ? state.players[actorId] : null
             if (actor && !actor.is_ai && !actor.bankrupt) {
               playYourTurn()
-              await announce('YOUR TURN', { subtitle: actor.nickname, tone: 'turn', ms: 1400 })
             }
           }
           if (state.phase === 'finished' && state.winner) {
             const nick = state.players[state.winner]?.nickname ?? 'Winner'
             playWin()
-            await announce(`${nick} WINS!`, { subtitle: 'Game over', tone: 'win', ms: 4200 })
+            await announce(`${nick} WINS!`, { subtitle: 'Game over', tone: 'win', ms: 3600 })
           }
         }
       })

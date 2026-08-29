@@ -407,8 +407,25 @@ const partnerProps = computed(() => {
 })
 
 const logLines = computed(() => (gs.value.log || []).slice(-10).reverse())
-
 const pendingTrade = computed(() => gs.value.pending_trade)
+
+watch(
+  () => gs.value.auction?.high_bid,
+  (high) => {
+    if (high == null) return
+    bidAmount.value = Math.max(high + 10, bidAmount.value)
+  },
+)
+
+const minAuctionBid = computed(() => (gs.value.auction?.high_bid ?? 0) + 10)
+const canAffordBid = computed(() => (me.value?.cash ?? 0) >= bidAmount.value)
+
+function placeBid() {
+  const amount = Math.max(minAuctionBid.value, Math.floor(bidAmount.value || 0))
+  bidAmount.value = amount
+  if ((me.value?.cash ?? 0) < amount) return
+  send({ type: 'bid', amount })
+}
 
 function selectSpace(id: number) {
   selectedSpaceId.value = selectedSpaceId.value === id ? null : id
@@ -418,25 +435,20 @@ function selectSpace(id: number) {
 <template>
   <div class="mono-play">
     <aside class="sidebar">
-      <div class="status-card" :class="{ 'status-pulse': isActor }">
+      <div class="status-card" :class="{ 'status-pulse': isActor && !boardBusy }">
         <p class="status-label">Status</p>
         <h2 class="status">{{ statusText }}</h2>
         <div
-          v-if="displayDice || gs.last_dice"
+          v-if="!diceRolling && gs.last_dice"
           class="dice-row"
-          :class="{ rolling: diceRolling }"
           aria-label="Last dice roll"
         >
-          <span class="die">{{ (displayDice ?? gs.last_dice)![0] }}</span>
+          <span class="die">{{ gs.last_dice[0] }}</span>
           <span class="die-plus">+</span>
-          <span class="die">{{ (displayDice ?? gs.last_dice)![1] }}</span>
-          <span class="die-total">
-            =
-            {{
-              (displayDice ?? gs.last_dice)![0] + (displayDice ?? gs.last_dice)![1]
-            }}
-          </span>
+          <span class="die">{{ gs.last_dice[1] }}</span>
+          <span class="die-total">= {{ gs.last_dice[0] + gs.last_dice[1] }}</span>
         </div>
+        <p v-else-if="diceRolling" class="dice-rolling-hint">Rolling…</p>
       </div>
 
       <Transition name="fx-fade">
@@ -530,6 +542,9 @@ function selectSpace(id: number) {
       </section>
 
       <div v-if="selectedDeed" class="deed-card">
+        <button type="button" class="deed-close" title="Close" @click="selectedSpaceId = null">
+          ×
+        </button>
         <div
           class="deed-header"
           :style="{
@@ -592,10 +607,12 @@ function selectSpace(id: number) {
         </div>
       </div>
 
-      <div class="log">
-        <h3 class="side-title">Log</h3>
-        <div v-for="(line, i) in logLines" :key="i" class="log-line">{{ line.message }}</div>
-      </div>
+      <details class="log-panel" open>
+        <summary class="side-title">Log</summary>
+        <div class="log">
+          <div v-for="(line, i) in logLines" :key="i" class="log-line">{{ line.message }}</div>
+        </div>
+      </details>
     </aside>
 
     <div class="main">
@@ -900,13 +917,14 @@ function selectSpace(id: number) {
         </template>
 
         <template v-if="phase === 'awaiting_buy' && isActor">
+          <p v-if="landSpace" class="action-context">{{ landSpace.name }}</p>
           <button
             type="button"
             class="btn-primary"
             :disabled="boardBusy || (landPrice != null && (me?.cash ?? 0) < landPrice)"
             @click="send({ type: 'buy' })"
           >
-            Buy{{ landPrice != null ? ` for $${landPrice}` : '' }}
+            Buy{{ landPrice != null ? ` $${landPrice}` : '' }}
           </button>
           <button
             type="button"
@@ -914,20 +932,26 @@ function selectSpace(id: number) {
             :disabled="boardBusy"
             @click="send({ type: 'decline' })"
           >
-            Auction instead
+            Auction
           </button>
         </template>
 
         <template v-if="phase === 'auction' && isActor">
           <label class="bid-label">
-            Bid
-            <input v-model.number="bidAmount" type="number" min="1" step="10" :disabled="boardBusy" />
+            Bid (min ${{ minAuctionBid }})
+            <input
+              v-model.number="bidAmount"
+              type="number"
+              :min="minAuctionBid"
+              step="10"
+              :disabled="boardBusy"
+            />
           </label>
           <button
             type="button"
             class="btn-primary"
-            :disabled="boardBusy"
-            @click="send({ type: 'bid', amount: bidAmount })"
+            :disabled="boardBusy || !canAffordBid || bidAmount < minAuctionBid"
+            @click="placeBid"
           >
             Bid ${{ bidAmount }}
           </button>
@@ -1018,6 +1042,7 @@ function selectSpace(id: number) {
           v-if="me && !me.bankrupt && phase !== 'finished'"
           type="button"
           class="btn-danger resign"
+          title="Resign from the game"
           @click="send({ type: 'resign' })"
         >
           Resign
@@ -1138,8 +1163,8 @@ function selectSpace(id: number) {
   --wood-light: #8b5a2b;
   --accent: #c41e3a;
   display: grid;
-  grid-template-columns: minmax(200px, 260px) 1fr;
-  gap: 0.5rem;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 0.55rem;
   height: 100%;
   min-height: 0;
   padding: 0.35rem 0.5rem 0.5rem;
@@ -1402,12 +1427,32 @@ function selectSpace(id: number) {
 }
 
 .deed-card {
+  position: relative;
   background: var(--cream);
   color: var(--ink);
   border-radius: 6px;
   overflow: hidden;
   box-shadow: 0 4px 14px #0005;
   font-size: 0.78rem;
+  flex-shrink: 0;
+}
+.deed-close {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.25rem;
+  z-index: 2;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.deed-close:hover {
+  background: rgba(0, 0, 0, 0.55);
 }
 .deed-header {
   padding: 0.45rem 0.55rem;
@@ -1490,16 +1535,43 @@ function selectSpace(id: number) {
   font-weight: 700;
 }
 
-.log {
+.log-panel {
   margin-top: auto;
+  flex-shrink: 0;
+}
+.log-panel > summary {
+  cursor: pointer;
+  list-style: none;
+  margin-bottom: 0.25rem;
+}
+.log-panel > summary::-webkit-details-marker {
+  display: none;
+}
+.log {
   font-size: 0.72rem;
   color: #9a958c;
-  max-height: 8.5rem;
+  max-height: 7.5rem;
   overflow: auto;
 }
 .log-line {
   padding: 0.2rem 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.dice-rolling-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: #c8d5c0;
+  font-weight: 600;
+}
+
+.action-context {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--cream);
+  opacity: 0.9;
 }
 
 .main {
@@ -1876,24 +1948,21 @@ function selectSpace(id: number) {
   position: relative;
 }
 /*
- * Rotate the whole content stack on side cells so “icon above name” stays
- * correct in the text’s local orientation (not just screen-up).
+ * Side labels use vertical writing-mode so layout fits the tall cells.
+ * Icon + name stack on the block axis (= “above” the rotated text).
  */
+.side-left .cell-inner,
 .side-right .cell-inner {
-  writing-mode: horizontal-tb;
+  writing-mode: vertical-rl;
   text-orientation: mixed;
-  transform: rotate(90deg);
 }
 .side-left .cell-inner {
-  writing-mode: horizontal-tb;
-  text-orientation: mixed;
-  transform: rotate(-90deg);
+  transform: rotate(180deg);
 }
 .side-top .cell-inner {
   transform: rotate(180deg);
 }
 
-/* Icon sits directly above the name; the parent rotation carries both. */
 .label-stack {
   display: flex;
   flex-direction: column;
@@ -1916,6 +1985,8 @@ function selectSpace(id: number) {
   height: 1.15em;
   font-size: clamp(0.62rem, 1.55cqi, 1.05rem);
   line-height: 1;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
 }
 .name {
   font-size: clamp(0.42rem, 1.15cqi, 0.72rem);
@@ -2018,6 +2089,10 @@ function selectSpace(id: number) {
   background: rgba(18, 22, 26, 0.92);
   border: 1px solid rgba(243, 230, 200, 0.1);
   border-radius: 12px;
+  flex-shrink: 0;
+}
+.actions.busy {
+  opacity: 0.92;
 }
 .btn-primary,
 .btn-secondary,
@@ -2722,15 +2797,22 @@ function selectSpace(id: number) {
     height: 100%;
   }
   .sidebar {
-    max-height: 11rem;
+    max-height: min(38vh, 22rem);
     order: 2;
   }
   .main {
     order: 1;
-    min-height: 55vh;
+    min-height: 52vh;
   }
   .zoom-hint {
     display: none;
+  }
+  .deed-card {
+    max-height: 11rem;
+    overflow: auto;
+  }
+  .log {
+    max-height: 4.5rem;
   }
 }
 </style>
