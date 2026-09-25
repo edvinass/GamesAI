@@ -72,7 +72,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
 
 # Unfinished games stay registered so existing rooms still load, but they
 # are omitted from the home picker.
-_HIDDEN_FROM_MENU = {"duel", "battleship", "monopoly", "pinball"}
+_HIDDEN_FROM_MENU = {"duel", "battleship", "monopoly"}
 
 
 def list_games() -> list[dict]:

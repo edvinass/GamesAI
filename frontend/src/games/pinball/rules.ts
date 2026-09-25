@@ -2,40 +2,39 @@ import type { GameRules } from '../codenames/rules'
 
 export const pinballRules: GameRules = {
   title: 'Pinball',
-  subtitle: 'Classic arcade pinball — hit bumpers, score points, beat your high score',
+  subtitle: 'Classic arcade pinball — plunge, flip, and chase the high score',
   quickStart: [
-    'Press SPACE or tap the screen to launch the ball.',
-    'Use A/← for the left flipper and D/→ for the right flipper.',
-    'Keep the ball in play by timing your flipper hits.',
-    'Hit bumpers and targets to score points and build combos.',
+    'Hold SPACE (or the Plunger button) to pull the plunger, release to launch. Tapping the table launches at a fixed strength.',
+    'Left flipper: Z, A, ← or Left Shift. Right flipper: /, D, → or Right Shift. On touch, tap the left or right half of the table.',
+    'Keep the ball alive. Hold a flipper up to cradle the ball and line up your shot.',
+    'Light all three top lanes to raise the end-of-ball bonus multiplier.',
   ],
   sections: [
     {
-      heading: 'Flippers',
-      body: 'The two flippers at the bottom of the table are your main control. Press A or Left Arrow (or tap the left button) to activate the left flipper, and D or Right Arrow (or tap the right button) for the right flipper. Time your hits to send the ball where you want it.',
+      heading: 'Plunger & skill shot',
+      body: 'While the ball waits in the shooter lane, one top lane lamp blinks. Use the flippers to move it, then plunge. If the ball\'s first switch is that lane, you get a 5,000-point skill shot. A soft plunge drops back into the lane so you can try again.',
     },
     {
-      heading: 'Bumpers',
-      body: 'Round bumpers bounce the ball away with force. Each hit scores 75-150 points depending on the bumper. Try to hit multiple bumpers in quick succession for combo multipliers.',
+      heading: 'Top lanes & bonus multiplier',
+      body: 'Rolling through an unlit top lane lights it (500). Light all three to advance the bonus multiplier to 2X, 3X and 5X. After that, each completed set scores 25,000. Flipper buttons shift the lit lanes (lane change) so you can steer toward the unlit one.',
     },
     {
       heading: 'Targets',
-      body: 'Rectangular targets award bonus points (250-1000) when hit. Each target can only be scored once per ball. Hit all targets for maximum points.',
+      body: 'Knock down all four yellow drop targets on the left for 5,000. Hit all three blue standup targets on the right to light and collect an Extra Ball (once per game, then 10,000). The centre saucer captures the ball for 2,500 × your bonus multiplier and kicks it back out.',
     },
     {
-      heading: 'Combos',
-      body: 'Hit objects in quick succession to build a combo multiplier (up to 5x). The combo resets after 2 seconds without a hit. Chain together bumper and target hits for massive scores.',
+      heading: 'Bumpers, slings & lanes',
+      body: 'Pop bumpers (100) and slingshots (10) kick the ball hard. Inlanes feed the flippers (500). Outlanes pay 2,000 but usually drain the ball.',
     },
     {
-      heading: 'Balls & Game Over',
-      body: 'You start with 3 balls. If the ball drains past the flippers, you lose a ball. The game ends when all balls are lost. Your high score is saved locally.',
+      heading: 'Bonus & balls',
+      body: 'Most switches add 1,000 to the bonus. When a ball drains, the bonus is paid out times the multiplier and then resets. A short ball save protects each new ball right after launch. You get 3 balls, and your best score is saved.',
     },
   ],
   tips: [
-    'Watch the ball trajectory and anticipate where it will go.',
-    'Use gentle flipper taps to control the ball speed and direction.',
-    'Try to hit the high-value center target for 1000 points.',
-    'Keep combos going by aiming for clusters of bumpers.',
-    'Let the ball rest on a raised flipper to plan your next shot.',
+    'Cradle the ball on a raised flipper, then let it roll down to aim before flipping.',
+    'Shots from the flipper tip travel wider; shots near the base go up the middle.',
+    'Use lane change to line up the last unlit top lane before the ball gets there.',
+    'Don\'t flail. Flipping both flippers at once often sends the ball straight down the middle.',
   ],
 }

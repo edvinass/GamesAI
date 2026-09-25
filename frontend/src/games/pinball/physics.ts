@@ -1,658 +1,717 @@
-import planck from 'planck'
+import { buildTable, type FlipperSpec, type Segment, type TableLayout, type Vec } from './table'
 
-type PlanckWorld = planck.World
-type PlanckBody = planck.Body
+/** Physics substep — small enough that a max-speed ball moves < half its radius per step. */
+const SUBSTEP = 1 / 720
+const MAX_FRAME_DT = 1 / 20
+const GRAVITY = 1500
+const MAX_SPEED = 3200
+const LINEAR_DAMPING = 0.12
+/** Below this approach speed contacts don't bounce (kills resting jitter). */
+const REST_SPEED = 30
 
-const FIXED_TIMESTEP = 1 / 60
-const PHYSICS_TIME_SCALE = 1.5
-/** Arcade gravity — scaled for PHYSICS_TIME_SCALE (≈2 substeps/frame). */
-const GRAVITY = 9
-/** Sustained plunger speed (at Planck's velocity cap). */
-const PLUNGER_SPEED = 110
-/** Stop forcing plunger thrust once the ball reaches the top curve. */
-const PLUNGER_RELEASE_Y = 160
+const FLIPPER_UP_SPEED = 30
+const FLIPPER_DOWN_SPEED = 16
+const FLIPPER_E = 0.35
 
-/** Flipper rest / raised angles (absolute body angles). */
-const LEFT_REST_ANGLE = 0.55
-const LEFT_ACTIVE_ANGLE = -0.4
-const RIGHT_REST_ANGLE = -0.55
-const RIGHT_ACTIVE_ANGLE = 0.4
-/** Visible swing — too fast and the bat teleports before it can hit. */
-const FLIPPER_SPEED = 14
-/** Impulse speed (Planck clamps ~120 — aim for strong up-table shots). */
-const FLIPPER_KICK_MIN = 105
-const FLIPPER_KICK_MAX = 120
-/** Mild bounce when the ball hits a resting / held flipper. */
-const FLIPPER_DEAD_BOUNCE = 0.8
+const BUMPER_KICK = 760
+const SLING_KICK = 680
+const KICK_COOLDOWN = 0.08
 
-export interface BumperSpec {
-  x: number
-  y: number
-  radius: number
-  points: number
-  color: string
-}
+const PLUNGER_PULL_TIME = 0.85
+const PLUNGER_MIN_LAUNCH = 900
+const PLUNGER_MAX_LAUNCH = 2650
 
-export interface TargetSpec {
-  x: number
-  y: number
-  width: number
-  height: number
-  points: number
-  color: string
-  id: string
-}
+const SAUCER_HOLD = 1.1
+const SAUCER_CAPTURE_SPEED = 950
+const BALL_SAVE_TIME = 5
+const BONUS_UNIT = 1000
+const BONUS_PHASE_TIME = 1.9
+const MULTIPLIER_STEPS = [1, 2, 3, 5]
 
-export interface PinballLevel {
-  worldWidth: number
-  worldHeight: number
-  ballRadius: number
-  launchX: number
-  launchY: number
-  bumpers: BumperSpec[]
-  targets: TargetSpec[]
-  flipperLength: number
-  flipperWidth: number
-}
+export type PinballEventType =
+  | 'bumper'
+  | 'sling'
+  | 'rollover'
+  | 'laneComplete'
+  | 'drop'
+  | 'dropBank'
+  | 'standup'
+  | 'standupSet'
+  | 'extraBall'
+  | 'saucer'
+  | 'saucerEject'
+  | 'inlane'
+  | 'outlane'
+  | 'flipperHit'
+  | 'wall'
+  | 'launch'
+  | 'skillShot'
+  | 'ballSaved'
+  | 'drain'
+  | 'shootAgain'
+  | 'newBall'
+  | 'gameOver'
 
-export interface CollisionEvent {
-  type: 'bumper' | 'target' | 'flipper' | 'wall'
+export interface PinballEvent {
+  type: PinballEventType
   x: number
   y: number
   points: number
-  targetId?: string
+  label?: string
   intensity: number
 }
 
-export interface PinballWorld {
-  world: PlanckWorld
-  level: PinballLevel
-  ballBody: PlanckBody | null
-  leftFlipperBody: PlanckBody
-  rightFlipperBody: PlanckBody
-  bumperBodies: Map<PlanckBody, BumperSpec>
-  targetBodies: Map<PlanckBody, TargetSpec>
-  hitTargets: Set<string>
-  simTime: number
-  score: number
-  ballsRemaining: number
-  ballInPlay: boolean
-  ballLaunched: boolean
-  leftFlipperActive: boolean
-  rightFlipperActive: boolean
-  /** True once the ball has left the shooter lane and the one-way gate has closed. */
-  laneGateClosed: boolean
-  onCollision: (event: CollisionEvent) => void
-  onBallLost: () => void
-  step: () => void
-  launchBall: () => void
-  activateLeftFlipper: (active: boolean) => void
-  activateRightFlipper: (active: boolean) => void
-  resetBall: () => void
-  cleanup: () => void
+export interface Ball {
+  x: number
+  y: number
+  vx: number
+  vy: number
 }
 
-const DEFAULT_LEVEL: PinballLevel = {
-  worldWidth: 400,
-  worldHeight: 700,
-  ballRadius: 10,
-  launchX: 372,
-  launchY: 600,
-  flipperLength: 80,
-  flipperWidth: 16,
-  bumpers: [
-    // Top triangle of Space Cadet–style pop bumpers
-    { x: 200, y: 105, radius: 26, points: 150, color: '#ff3b4a' },
-    { x: 155, y: 160, radius: 24, points: 100, color: '#2ecc71' },
-    { x: 245, y: 160, radius: 24, points: 100, color: '#ff3b4a' },
-    // Mid-left bumper cluster
-    { x: 95, y: 290, radius: 16, points: 75, color: '#f0f4f8' },
-    { x: 130, y: 320, radius: 14, points: 75, color: '#2ecc71' },
-    { x: 80, y: 335, radius: 14, points: 75, color: '#ff3b4a' },
-  ],
-  targets: [
-    { id: 't1', x: 55, y: 95, width: 36, height: 12, points: 500, color: '#f5c542' },
-    { id: 't2', x: 320, y: 95, width: 36, height: 12, points: 500, color: '#f5c542' },
-    { id: 't3', x: 70, y: 230, width: 12, height: 44, points: 250, color: '#ff5a6a' },
-    { id: 't4', x: 310, y: 230, width: 12, height: 44, points: 250, color: '#ff5a6a' },
-    { id: 't5', x: 200, y: 48, width: 70, height: 10, points: 1000, color: '#7ec8ff' },
-  ],
+export interface FlipperState {
+  spec: FlipperSpec
+  angle: number
+  omega: number
+  pressed: boolean
 }
 
-function createWalls(world: PlanckWorld, level: PinballLevel): void {
-  const { worldWidth, worldHeight } = level
-  const wallThickness = 20
+export type GamePhase = 'play' | 'bonus' | 'over'
 
-  const leftWallBody = world.createBody({ type: 'static', position: planck.Vec2(0, worldHeight / 2) })
-  leftWallBody.createFixture(planck.Box(wallThickness / 2, worldHeight / 2), { friction: 0.3, restitution: 0.4 })
-
-  const rightWallBody = world.createBody({ type: 'static', position: planck.Vec2(worldWidth, worldHeight / 2) })
-  rightWallBody.createFixture(planck.Box(wallThickness / 2, worldHeight / 2), { friction: 0.3, restitution: 0.4 })
-
-  const topWallBody = world.createBody({ type: 'static', position: planck.Vec2(worldWidth / 2, 0) })
-  topWallBody.createFixture(planck.Box(worldWidth / 2, wallThickness / 2), { friction: 0.3, restitution: 0.6 })
-
-  // Shooter lane wall — opens near the top so the ball can curve into play.
-  // Guide spans y≈200..700 (center 450, half-height 250).
-  const launchGuide = world.createBody({ type: 'static', position: planck.Vec2(350, 450) })
-  launchGuide.createFixture(planck.Box(3, 250), { friction: 0.05, restitution: 0.1 })
-
-  // Top-right curve: sends a launched ball left into the playfield (no teleport).
-  const laneCurveA = world.createBody({ type: 'static', position: planck.Vec2(378, 120), angle: 0.95 })
-  laneCurveA.createFixture(planck.Box(55, 5), { friction: 0.05, restitution: 0.45 })
-
-  const laneCurveB = world.createBody({ type: 'static', position: planck.Vec2(355, 55), angle: 0.4 })
-  laneCurveB.createFixture(planck.Box(35, 5), { friction: 0.05, restitution: 0.4 })
-
-  // Inlanes / outlanes: dead (near-zero restitution) so they guide the ball
-  // toward the flippers instead of slingshotting it around weirdly.
-  const leftRamp = world.createBody({ type: 'static', position: planck.Vec2(50, 540), angle: 0.6 })
-  leftRamp.createFixture(planck.Box(48, 4), { friction: 0.55, restitution: 0.02 })
-
-  const rightRamp = world.createBody({ type: 'static', position: planck.Vec2(300, 540), angle: -0.6 })
-  rightRamp.createFixture(planck.Box(40, 4), { friction: 0.55, restitution: 0.02 })
-
-  const leftOutlane = world.createBody({ type: 'static', position: planck.Vec2(22, 625), angle: 0.35 })
-  leftOutlane.createFixture(planck.Box(32, 4), { friction: 0.5, restitution: 0.02 })
-
-  const rightOutlane = world.createBody({ type: 'static', position: planck.Vec2(300, 625), angle: -0.35 })
-  rightOutlane.createFixture(planck.Box(28, 4), { friction: 0.5, restitution: 0.02 })
+export interface DisplayMessage {
+  text: string
+  sub?: string
+  until: number
 }
 
-function createBumpers(world: PlanckWorld, level: PinballLevel): Map<PlanckBody, BumperSpec> {
-  const bumperMap = new Map<PlanckBody, BumperSpec>()
+export class PinballGame {
+  readonly table: TableLayout
+  readonly totalBalls: number
 
-  for (const bumper of level.bumpers) {
-    const body = world.createBody({ type: 'static', position: planck.Vec2(bumper.x, bumper.y) })
-    body.createFixture(planck.Circle(bumper.radius), { friction: 0.1, restitution: 1.5 })
-    bumperMap.set(body, bumper)
+  time = 0
+  phase: GamePhase = 'play'
+  ball: Ball | null = null
+  flippers: FlipperState[]
+
+  score = 0
+  ballNumber = 1
+  extraBalls = 0
+  extraBallAwarded = false
+  bonus = 0
+  multiplierIndex = 0
+
+  lanesLit = [false, false, false]
+  skillLane = 1
+  skillShotLive = false
+  dropsDown: boolean[]
+  standupsLit: boolean[]
+
+  plungerPull = 0
+  plungerHeld = false
+  ballInLane = true
+  ballSaveUntil = 0
+
+  saucerHolding = false
+  saucerReleaseAt = 0
+  saucerCooldownUntil = 0
+
+  /** Sim-time until which each element glows (render hints). */
+  litUntil = new Map<string, number>()
+  display: DisplayMessage | null = null
+
+  private events: PinballEvent[] = []
+  private accumulator = 0
+  private kickCooldown = new Map<string, number>()
+  private sensorsInside = new Set<string>()
+  private dropResetAt = 0
+  private bonusEndsAt = 0
+  private stillSince = 0
+  private flipperContact = false
+
+  constructor(totalBalls = 3) {
+    this.table = buildTable()
+    this.totalBalls = Math.max(1, Math.min(5, totalBalls))
+    this.flippers = this.table.flippers.map((spec) => ({
+      spec,
+      angle: spec.restAngle,
+      omega: 0,
+      pressed: false,
+    }))
+    this.dropsDown = this.table.dropTargets.map(() => false)
+    this.standupsLit = this.table.standups.map(() => false)
+    this.newBall()
   }
 
-  return bumperMap
-}
-
-function createTargets(world: PlanckWorld, level: PinballLevel): Map<PlanckBody, TargetSpec> {
-  const targetMap = new Map<PlanckBody, TargetSpec>()
-
-  for (const target of level.targets) {
-    const body = world.createBody({ type: 'static', position: planck.Vec2(target.x, target.y) })
-    body.createFixture(planck.Box(target.width / 2, target.height / 2), { friction: 0.2, restitution: 0.8 })
-    targetMap.set(body, target)
+  get multiplier(): number {
+    return MULTIPLIER_STEPS[this.multiplierIndex]
   }
 
-  return targetMap
-}
+  get plungerY(): number {
+    return this.table.plunger.restY + this.plungerPull * this.table.plunger.maxPull
+  }
 
-function createFlippers(world: PlanckWorld, level: PinballLevel): {
-  leftBody: PlanckBody
-  rightBody: PlanckBody
-} {
-  const flipperY = 650
-  const leftPivotX = 95
-  const rightPivotX = 255
+  get ballSaveActive(): boolean {
+    return this.phase === 'play' && (this.ballInLane || this.time < this.ballSaveUntil)
+  }
 
-  // Kinematic flippers: infinite effective mass so the ball bounces instead of
-  // shoving them. We drive angle via setAngularVelocity each step.
-  const leftFlipper = world.createBody({
-    type: 'kinematic',
-    position: planck.Vec2(leftPivotX, flipperY),
-    angle: LEFT_REST_ANGLE,
-  })
-  leftFlipper.createFixture(
-    planck.Polygon([
-      planck.Vec2(0, -level.flipperWidth / 2),
-      planck.Vec2(level.flipperLength, -level.flipperWidth / 3),
-      planck.Vec2(level.flipperLength, level.flipperWidth / 3),
-      planck.Vec2(0, level.flipperWidth / 2),
-    ]),
-    { friction: 0.35, restitution: 0.85 }
-  )
+  drainEvents(): PinballEvent[] {
+    const out = this.events
+    this.events = []
+    return out
+  }
 
-  const rightFlipper = world.createBody({
-    type: 'kinematic',
-    position: planck.Vec2(rightPivotX, flipperY),
-    angle: RIGHT_REST_ANGLE,
-  })
-  rightFlipper.createFixture(
-    planck.Polygon([
-      planck.Vec2(0, -level.flipperWidth / 2),
-      planck.Vec2(-level.flipperLength, -level.flipperWidth / 3),
-      planck.Vec2(-level.flipperLength, level.flipperWidth / 3),
-      planck.Vec2(0, level.flipperWidth / 2),
-    ]),
-    { friction: 0.35, restitution: 0.85 }
-  )
+  isLit(id: string): boolean {
+    return (this.litUntil.get(id) ?? 0) > this.time
+  }
 
-  return { leftBody: leftFlipper, rightBody: rightFlipper }
-}
+  // —— Input ————————————————————————————————————————————————
 
-export function createPinballWorld(
-  onCollision: (event: CollisionEvent) => void,
-  onBallLost: () => void,
-  customLevel?: Partial<PinballLevel>
-): PinballWorld {
-  const level: PinballLevel = { ...DEFAULT_LEVEL, ...customLevel }
-  const world = planck.World({ gravity: planck.Vec2(0, GRAVITY) })
+  setFlipper(side: 'left' | 'right', pressed: boolean): void {
+    if (this.phase === 'over') return
+    const flipper = this.flippers.find((f) => f.spec.side === side)
+    if (!flipper || flipper.pressed === pressed) return
+    flipper.pressed = pressed
+    if (pressed) this.rotateLanes(side === 'left' ? -1 : 1)
+  }
 
-  createWalls(world, level)
-  const bumperBodies = createBumpers(world, level)
-  const targetBodies = createTargets(world, level)
-  const { leftBody, rightBody } = createFlippers(world, level)
-
-  // Classic one-way shooter-lane gate: when closed, extends the lane wall up to
-  // the top curves so the ball cannot fall back in from the playfield.
-  // Starts open so the plunge can exit left through the curve.
-  const laneGate = world.createBody({ type: 'static', position: planck.Vec2(350, 115) })
-  laneGate.createFixture(planck.Box(3, 95), { friction: 0.2, restitution: 0.15 })
-  laneGate.setActive(false)
-
-  /** True while the plunger is driving the ball up the shooter lane. */
-  let plungerActive = false
-  /** Queued flipper kick applied after the physics step (solver would overwrite it otherwise). */
-  let pendingFlipperKick: { vx: number; vy: number } | null = null
-  /** Re-assert launch velocity for a few frames so collisions can't eat the shot. */
-  let flipperKickHold: { vx: number; vy: number; frames: number } | null = null
-  /** Ball currently touching each flipper (begin/end-contact). */
-  let ballOnLeftFlipper = false
-  let ballOnRightFlipper = false
-  /** One solid kick per flipper press (covers catch-then-flip). */
-  let leftSwingKicked = false
-  let rightSwingKicked = false
-
-  const computeFlipperKick = (isLeft: boolean, flipperBody: PlanckBody, ballPos: { x: number; y: number }) => {
-    const fp = flipperBody.getPosition()
-    const ang = flipperBody.getAngle()
-    const dx = ballPos.x - fp.x
-    const dy = ballPos.y - fp.y
-    // Distance along flipper axis from pivot (0 at base → 1 at tip).
-    const tipDirX = isLeft ? Math.cos(ang) : -Math.cos(ang)
-    const tipDirY = isLeft ? Math.sin(ang) : -Math.sin(ang)
-    const alongDist = dx * tipDirX + dy * tipDirY
-    const along = Math.min(1, Math.max(0.45, alongDist / level.flipperLength))
-    const power = FLIPPER_KICK_MIN + along * (FLIPPER_KICK_MAX - FLIPPER_KICK_MIN)
-
-    // Tip velocity direction while raising (ω < 0 left, ω > 0 right).
-    const wRaise = isLeft ? -1 : 1
-    let vx = wRaise * -tipDirY * power
-    let vy = wRaise * tipDirX * power
-
-    // Guarantee a strong up-table component even near vertical angles.
-    if (vy > -power * 0.9) {
-      vy = -power
+  setPlunger(held: boolean): void {
+    if (this.phase === 'over') return
+    if (held) {
+      this.plungerHeld = true
+      return
     }
-    // Bias slightly toward table center so shots stay in play.
-    vx += (isLeft ? 1 : -1) * (12 + along * 35)
-
-    return { vx, vy, along }
+    if (!this.plungerHeld) return
+    this.plungerHeld = false
+    this.releasePlunger()
   }
 
-  /** True if ball is close enough to the flipper bat to be struck. */
-  const ballNearFlipper = (
-    isLeft: boolean,
-    flipperBody: PlanckBody,
-    ballPos: { x: number; y: number }
-  ) => {
-    const fp = flipperBody.getPosition()
-    const ang = flipperBody.getAngle()
-    const tipDirX = isLeft ? Math.cos(ang) : -Math.cos(ang)
-    const tipDirY = isLeft ? Math.sin(ang) : -Math.sin(ang)
-    const dx = ballPos.x - fp.x
-    const dy = ballPos.y - fp.y
-    const along = dx * tipDirX + dy * tipDirY
-    const perp = dx * -tipDirY + dy * tipDirX
-    return (
-      along > -10 &&
-      along < level.flipperLength + 16 &&
-      Math.abs(perp) < level.flipperWidth * 0.5 + level.ballRadius + 18
-    )
+  /** One-shot launch for tap / click (fixed strong pull). */
+  autoLaunch(): void {
+    if (this.phase !== 'play' || !this.ballInLane || this.plungerHeld) return
+    this.plungerPull = 0.82
+    this.releasePlunger()
   }
 
-  const openLaneGate = () => {
-    laneGate.setActive(false)
-    state.laneGateClosed = false
-  }
-  const closeLaneGate = () => {
-    if (state.laneGateClosed) return
-    laneGate.setActive(true)
-    state.laneGateClosed = true
+  // —— Simulation ———————————————————————————————————————————
+
+  update(frameDt: number): void {
+    if (this.phase === 'over') return
+    this.accumulator += Math.min(frameDt, MAX_FRAME_DT)
+    while (this.accumulator >= SUBSTEP) {
+      this.step(SUBSTEP)
+      this.accumulator -= SUBSTEP
+    }
   }
 
-  const state: PinballWorld = {
-    world,
-    level,
-    ballBody: null,
-    leftFlipperBody: leftBody,
-    rightFlipperBody: rightBody,
-    bumperBodies,
-    targetBodies,
-    hitTargets: new Set(),
-    simTime: 0,
-    score: 0,
-    ballsRemaining: 3,
-    ballInPlay: false,
-    ballLaunched: false,
-    leftFlipperActive: false,
-    rightFlipperActive: false,
-    laneGateClosed: false,
-    onCollision,
-    onBallLost,
-    step: () => {
-      // Drive kinematic flippers toward rest / active angles each substep so they
-      // don't overshoot when PHYSICS_TIME_SCALE > 1.
-      const driveFlipper = (body: PlanckBody, active: boolean, rest: number, raised: number) => {
-        const target = active ? raised : rest
-        const current = body.getAngle()
-        const diff = target - current
-        const maxDelta = FLIPPER_SPEED * FIXED_TIMESTEP
-        if (Math.abs(diff) <= maxDelta) {
-          body.setAngle(target)
-          body.setAngularVelocity(0)
+  private step(h: number): void {
+    this.time += h
+
+    if (this.plungerHeld) {
+      this.plungerPull = Math.min(1, this.plungerPull + h / PLUNGER_PULL_TIME)
+    }
+
+    for (const f of this.flippers) this.updateFlipper(f, h)
+
+    if (this.dropResetAt && this.time >= this.dropResetAt) {
+      this.dropResetAt = 0
+      this.dropsDown = this.dropsDown.map(() => false)
+    }
+
+    if (this.phase === 'bonus') {
+      if (this.time >= this.bonusEndsAt) this.finishBonus()
+      return
+    }
+
+    const ball = this.ball
+    if (!ball) return
+
+    if (this.saucerHolding) {
+      if (this.time >= this.saucerReleaseAt) this.ejectSaucer(ball)
+      return
+    }
+
+    ball.vy += GRAVITY * h
+    const damp = 1 - LINEAR_DAMPING * h
+    ball.vx *= damp
+    ball.vy *= damp
+    const speed = Math.hypot(ball.vx, ball.vy)
+    if (speed > MAX_SPEED) {
+      ball.vx *= MAX_SPEED / speed
+      ball.vy *= MAX_SPEED / speed
+    }
+    ball.x += ball.vx * h
+    ball.y += ball.vy * h
+
+    this.flipperContact = false
+    this.collideSegments(ball)
+    this.collideCircles(ball)
+    this.collideTargets(ball)
+    for (const f of this.flippers) this.collideFlipper(ball, f)
+    this.collidePlunger(ball)
+    this.checkSensors(ball)
+    this.checkSaucer(ball)
+    this.checkLaneExit(ball)
+    this.checkStuck(ball)
+
+    if (ball.y > this.table.drainY) this.handleDrain()
+  }
+
+  private updateFlipper(f: FlipperState, h: number): void {
+    const target = f.pressed ? f.spec.activeAngle : f.spec.restAngle
+    const diff = target - f.angle
+    const maxStep = (f.pressed ? FLIPPER_UP_SPEED : FLIPPER_DOWN_SPEED) * h
+    const next = Math.abs(diff) <= maxStep ? target : f.angle + Math.sign(diff) * maxStep
+    f.omega = (next - f.angle) / h
+    f.angle = next
+  }
+
+  // —— Collision ————————————————————————————————————————————
+
+  /** Resolve ball vs. a static segment; returns impact speed (0 if no contact). */
+  private resolveSegment(ball: Ball, seg: { a: Vec; b: Vec; oneWay?: boolean }, e: number): number {
+    const r = this.table.ballRadius
+    const abx = seg.b.x - seg.a.x
+    const aby = seg.b.y - seg.a.y
+    const len2 = abx * abx + aby * aby
+    let t = ((ball.x - seg.a.x) * abx + (ball.y - seg.a.y) * aby) / len2
+    t = Math.max(0, Math.min(1, t))
+    const qx = seg.a.x + abx * t
+    const qy = seg.a.y + aby * t
+    let dx = ball.x - qx
+    let dy = ball.y - qy
+    const d2 = dx * dx + dy * dy
+    if (d2 >= r * r) return 0
+
+    if (seg.oneWay) {
+      const len = Math.sqrt(len2)
+      const nx = aby / len
+      const ny = -abx / len
+      if ((ball.x - seg.a.x) * nx + (ball.y - seg.a.y) * ny <= 0) return 0
+    }
+
+    const d = Math.sqrt(d2)
+    if (d < 1e-6) {
+      const len = Math.sqrt(len2)
+      dx = aby / len
+      dy = -abx / len
+    } else {
+      dx /= d
+      dy /= d
+    }
+    const pen = r - d
+    ball.x += dx * pen
+    ball.y += dy * pen
+    return this.bounce(ball, dx, dy, e)
+  }
+
+  /** Reflect the normal component; returns approach speed. */
+  private bounce(ball: Ball, nx: number, ny: number, e: number): number {
+    const vn = ball.vx * nx + ball.vy * ny
+    if (vn >= 0) return 0
+    const restitution = -vn < REST_SPEED ? 0 : e
+    ball.vx -= (1 + restitution) * vn * nx
+    ball.vy -= (1 + restitution) * vn * ny
+    return -vn
+  }
+
+  /** Guarantee at least `kick` outward speed along the normal (active kickers). */
+  private applyKick(ball: Ball, nx: number, ny: number, kick: number): void {
+    const vn = ball.vx * nx + ball.vy * ny
+    if (vn < kick) {
+      ball.vx += (kick - vn) * nx
+      ball.vy += (kick - vn) * ny
+    }
+  }
+
+  private kickReady(id: string): boolean {
+    if ((this.kickCooldown.get(id) ?? 0) > this.time) return false
+    this.kickCooldown.set(id, this.time + KICK_COOLDOWN)
+    return true
+  }
+
+  private collideSegments(ball: Ball): void {
+    for (const seg of this.table.segments) {
+      const impact = this.resolveSegment(ball, seg, seg.restitution)
+      if (!impact) continue
+      if (seg.kind === 'sling' && seg.id && impact > 60 && this.kickReady(seg.id)) {
+        const n = segmentNormalToward(seg, ball)
+        // Real slings are never perfectly consistent; jitter breaks sling-to-sling loops.
+        const jitter = (Math.random() - 0.5) * 0.4
+        const kx = n.x * Math.cos(jitter) - n.y * Math.sin(jitter)
+        const ky = n.x * Math.sin(jitter) + n.y * Math.cos(jitter)
+        this.applyKick(ball, kx, ky, SLING_KICK * (0.85 + Math.random() * 0.25))
+        this.litUntil.set(seg.id, this.time + 0.12)
+        this.addScore(10)
+        this.cancelSkillShot()
+        this.emit('sling', ball.x, ball.y, 10, 1)
+      } else if (impact > 140) {
+        this.emit('wall', ball.x, ball.y, 0, Math.min(1, impact / 1400))
+      }
+    }
+  }
+
+  private collideCircles(ball: Ball): void {
+    const r = this.table.ballRadius
+    for (const c of this.table.circles) {
+      const dx = ball.x - c.c.x
+      const dy = ball.y - c.c.y
+      const minD = c.r + r
+      const d2 = dx * dx + dy * dy
+      if (d2 >= minD * minD) continue
+      const d = Math.sqrt(d2) || 1e-6
+      const nx = dx / d
+      const ny = dy / d
+      ball.x = c.c.x + nx * minD
+      ball.y = c.c.y + ny * minD
+      const impact = this.bounce(ball, nx, ny, c.restitution)
+      if (c.kind === 'bumper') {
+        if (this.kickReady(c.id)) {
+          this.applyKick(ball, nx, ny, BUMPER_KICK)
+          this.litUntil.set(c.id, this.time + 0.15)
+          this.addScore(100)
+          this.cancelSkillShot()
+          this.emit('bumper', c.c.x, c.c.y, 100, 1)
+        }
+      } else if (impact > 140) {
+        this.emit('wall', ball.x, ball.y, 0, Math.min(1, impact / 1400))
+      }
+    }
+  }
+
+  private collideTargets(ball: Ball): void {
+    this.table.dropTargets.forEach((t, i) => {
+      if (this.dropsDown[i]) return
+      const impact = this.resolveSegment(ball, t, 0.45)
+      if (!impact || impact < 40) return
+      this.dropsDown[i] = true
+      this.addScore(500)
+      this.bonus++
+      this.cancelSkillShot()
+      const mx = (t.a.x + t.b.x) / 2
+      const my = (t.a.y + t.b.y) / 2
+      this.emit('drop', mx, my, 500, 1)
+      if (this.dropsDown.every(Boolean)) {
+        this.addScore(5000)
+        this.bonus += 3
+        this.dropResetAt = this.time + 1.2
+        this.showMessage('DROP TARGETS', '5,000')
+        this.emit('dropBank', mx, my, 5000, 1, 'TARGETS 5,000')
+      }
+    })
+
+    this.table.standups.forEach((t, i) => {
+      const impact = this.resolveSegment(ball, t, 0.5)
+      if (!impact || impact < 60 || !this.kickReady(t.id)) return
+      const mx = (t.a.x + t.b.x) / 2
+      const my = (t.a.y + t.b.y) / 2
+      this.litUntil.set(t.id, this.time + 0.2)
+      this.cancelSkillShot()
+      if (this.standupsLit[i]) {
+        this.addScore(200)
+        this.emit('standup', mx, my, 200, 0.5)
+        return
+      }
+      this.standupsLit[i] = true
+      this.addScore(1000)
+      this.bonus++
+      this.emit('standup', mx, my, 1000, 1)
+      if (this.standupsLit.every(Boolean)) {
+        this.standupsLit = this.standupsLit.map(() => false)
+        if (!this.extraBallAwarded) {
+          this.extraBallAwarded = true
+          this.extraBalls++
+          this.showMessage('EXTRA BALL', 'SHOOT AGAIN LIT')
+          this.emit('extraBall', mx, my, 0, 1, 'EXTRA BALL')
         } else {
-          const step = Math.sign(diff) * maxDelta
-          body.setAngle(current + step)
-          // Angular velocity feeds tip speed into ball collisions.
-          body.setAngularVelocity(step / FIXED_TIMESTEP)
+          this.addScore(10000)
+          this.showMessage('TARGETS COMPLETE', '10,000')
+          this.emit('standupSet', mx, my, 10000, 1, '10,000')
         }
       }
-
-      for (let i = 0; i < PHYSICS_TIME_SCALE; i++) {
-        state.simTime += FIXED_TIMESTEP
-
-        // Strike before driving the angle so a press still connects while the
-        // bat is at rest under a caught ball.
-        if (state.ballBody) {
-          const pos = state.ballBody.getPosition()
-          const trySwingKick = (isLeft: boolean) => {
-            const active = isLeft ? state.leftFlipperActive : state.rightFlipperActive
-            const kicked = isLeft ? leftSwingKicked : rightSwingKicked
-            if (!active || kicked) return
-            const body = isLeft ? leftBody : rightBody
-            const onBat =
-              (isLeft ? ballOnLeftFlipper : ballOnRightFlipper) ||
-              ballNearFlipper(isLeft, body, pos)
-            if (!onBat) return
-            const kick = computeFlipperKick(isLeft, body, pos)
-            pendingFlipperKick = { vx: kick.vx, vy: kick.vy }
-            if (isLeft) leftSwingKicked = true
-            else rightSwingKicked = true
-            onCollision({
-              type: 'flipper',
-              x: pos.x,
-              y: pos.y,
-              points: 0,
-              intensity: 1,
-            })
-          }
-          trySwingKick(true)
-          if (!pendingFlipperKick) trySwingKick(false)
-        }
-
-        driveFlipper(leftBody, state.leftFlipperActive, LEFT_REST_ANGLE, LEFT_ACTIVE_ANGLE)
-        driveFlipper(rightBody, state.rightFlipperActive, RIGHT_REST_ANGLE, RIGHT_ACTIVE_ANGLE)
-
-        // Planck clamps speed (~120). Re-apply plunger thrust while climbing the
-        // shooter lane; release near the top curve so the ball rolls into play visibly.
-        if (state.ballBody && plungerActive) {
-          const pos = state.ballBody.getPosition()
-          if (pos.y > PLUNGER_RELEASE_Y && pos.x > 345) {
-            state.ballBody.setLinearVelocity(planck.Vec2(0, -PLUNGER_SPEED))
-          } else {
-            plungerActive = false
-          }
-        }
-
-        world.step(FIXED_TIMESTEP)
-
-        // Close the one-way gate only after the ball has crossed left into the
-        // playfield (classic pinball: can't fall back in after exiting the lane).
-        if (state.ballBody && state.ballLaunched && !plungerActive && !state.laneGateClosed) {
-          const pos = state.ballBody.getPosition()
-          if (pos.x < 340) closeLaneGate()
-        }
-      }
-
-      // Apply flipper shot after all substeps so the solver can't immediately eat it.
-      if (state.ballBody && pendingFlipperKick) {
-        const k = pendingFlipperKick
-        state.ballBody.setLinearVelocity(planck.Vec2(k.vx, k.vy))
-        state.ballBody.setAwake(true)
-        // Nudge clear of the bat so the next step doesn't cancel the launch.
-        const p = state.ballBody.getPosition()
-        const speed = Math.hypot(k.vx, k.vy) || 1
-        state.ballBody.setTransform(
-          planck.Vec2(p.x + (k.vx / speed) * 22, p.y + (k.vy / speed) * 22),
-          state.ballBody.getAngle()
-        )
-        flipperKickHold = { vx: k.vx, vy: k.vy, frames: 8 }
-        pendingFlipperKick = null
-        ballOnLeftFlipper = false
-        ballOnRightFlipper = false
-      } else if (state.ballBody && flipperKickHold && flipperKickHold.frames > 0) {
-        // Hold launch speed briefly — kinematic flipper contacts otherwise kill vy.
-        const cur = state.ballBody.getLinearVelocity()
-        if (cur.y > flipperKickHold.vy * 0.55) {
-          state.ballBody.setLinearVelocity(
-            planck.Vec2(flipperKickHold.vx, flipperKickHold.vy)
-          )
-        }
-        flipperKickHold.frames--
-        if (flipperKickHold.frames <= 0) flipperKickHold = null
-      }
-
-      if (state.ballBody && state.ballInPlay) {
-        const pos = state.ballBody.getPosition()
-        if (pos.y > level.worldHeight + 50) {
-          state.ballInPlay = false
-          state.ballLaunched = false
-          plungerActive = false
-          pendingFlipperKick = null
-          flipperKickHold = null
-          ballOnLeftFlipper = false
-          ballOnRightFlipper = false
-          leftSwingKicked = false
-          rightSwingKicked = false
-          openLaneGate()
-          world.destroyBody(state.ballBody)
-          state.ballBody = null
-          state.ballsRemaining--
-          onBallLost()
-        }
-      }
-    },
-    launchBall: () => {
-      if (state.ballInPlay || state.ballsRemaining <= 0) return
-
-      openLaneGate()
-
-      state.ballBody = world.createBody({
-        type: 'dynamic',
-        position: planck.Vec2(level.launchX, level.launchY),
-        bullet: true,
-        linearDamping: 0.015,
-        angularDamping: 0.1,
-      })
-      state.ballBody.createFixture(planck.Circle(level.ballRadius), {
-        density: 0.45,
-        friction: 0.08,
-        restitution: 0.3,
-      })
-
-      state.ballBody.setLinearVelocity(planck.Vec2(0, -PLUNGER_SPEED))
-      plungerActive = true
-      state.ballInPlay = true
-      state.ballLaunched = true
-    },
-    activateLeftFlipper: (active: boolean) => {
-      state.leftFlipperActive = active
-      if (!active) leftSwingKicked = false
-    },
-    activateRightFlipper: (active: boolean) => {
-      state.rightFlipperActive = active
-      if (!active) rightSwingKicked = false
-    },
-    resetBall: () => {
-      if (state.ballBody) {
-        world.destroyBody(state.ballBody)
-        state.ballBody = null
-      }
-      plungerActive = false
-      pendingFlipperKick = null
-      flipperKickHold = null
-      ballOnLeftFlipper = false
-      ballOnRightFlipper = false
-      leftSwingKicked = false
-      rightSwingKicked = false
-      state.ballInPlay = false
-      state.ballLaunched = false
-      openLaneGate()
-    },
-    cleanup: () => {
-      plungerActive = false
-      openLaneGate()
-      if (state.ballBody) {
-        world.destroyBody(state.ballBody)
-      }
-    },
+    })
   }
 
-  world.on('begin-contact', (contact) => {
-    const fixtureA = contact.getFixtureA()
-    const fixtureB = contact.getFixtureB()
-    const bodyA = fixtureA.getBody()
-    const bodyB = fixtureB.getBody()
+  private collideFlipper(ball: Ball, f: FlipperState): void {
+    const { pivot, length, r0, r1 } = f.spec
+    const R = this.table.ballRadius
+    const dirX = Math.cos(f.angle)
+    const dirY = Math.sin(f.angle)
+    const px = ball.x - pivot.x
+    const py = ball.y - pivot.y
+    const t = Math.max(0, Math.min(1, (px * dirX + py * dirY) / length))
+    const cx = pivot.x + dirX * length * t
+    const cy = pivot.y + dirY * length * t
+    const rad = r0 + (r1 - r0) * t
+    let dx = ball.x - cx
+    let dy = ball.y - cy
+    const d = Math.hypot(dx, dy)
+    if (d >= rad + R) return
 
-    if (!state.ballBody) return
-
-    const ballInvolved = bodyA === state.ballBody || bodyB === state.ballBody
-    if (!ballInvolved) return
-
-    const otherBody = bodyA === state.ballBody ? bodyB : bodyA
-
-    const bumperSpec = bumperBodies.get(otherBody)
-    if (bumperSpec) {
-      const vel = state.ballBody.getLinearVelocity()
-      const speed = Math.hypot(vel.x, vel.y)
-
-      const pos = otherBody.getPosition()
-      const ballPos = state.ballBody.getPosition()
-      const dx = ballPos.x - pos.x
-      const dy = ballPos.y - pos.y
-      const dist = Math.hypot(dx, dy) || 1
-      const bounceStrength = 25
-      state.ballBody.setLinearVelocity(
-        planck.Vec2(
-          (dx / dist) * bounceStrength + vel.x * 0.3,
-          (dy / dist) * bounceStrength + vel.y * 0.3
-        )
-      )
-
-      state.score += bumperSpec.points
-      onCollision({
-        type: 'bumper',
-        x: pos.x,
-        y: pos.y,
-        points: bumperSpec.points,
-        intensity: Math.min(1, speed / 30),
-      })
-      return
+    if (d < 1e-6) {
+      dx = 0
+      dy = -1
+    } else {
+      dx /= d
+      dy /= d
     }
+    const pen = rad + R - d
+    ball.x += dx * pen
+    ball.y += dy * pen
+    this.flipperContact = true
 
-    const targetSpec = targetBodies.get(otherBody)
-    if (targetSpec && !state.hitTargets.has(targetSpec.id)) {
-      state.hitTargets.add(targetSpec.id)
-      state.score += targetSpec.points
-
-      const pos = otherBody.getPosition()
-      onCollision({
-        type: 'target',
-        x: pos.x,
-        y: pos.y,
-        points: targetSpec.points,
-        targetId: targetSpec.id,
-        intensity: 1,
-      })
-      return
+    // Surface velocity at the contact point from the flipper's rotation.
+    const rx = cx + dx * rad - pivot.x
+    const ry = cy + dy * rad - pivot.y
+    const vs = -f.omega * ry * dx + f.omega * rx * dy
+    const vb = ball.vx * dx + ball.vy * dy
+    const vrel = vb - vs
+    if (vrel >= 0) return
+    const e = -vrel < REST_SPEED ? 0 : FLIPPER_E
+    const newVb = vs - e * vrel
+    ball.vx += (newVb - vb) * dx
+    ball.vy += (newVb - vb) * dy
+    if (f.omega !== 0 && -vrel > 300) {
+      this.emit('flipperHit', ball.x, ball.y, 0, Math.min(1, -vrel / 2000))
     }
-
-    if (otherBody === leftBody || otherBody === rightBody) {
-      const pos = state.ballBody.getPosition()
-      const isLeft = otherBody === leftBody
-      if (isLeft) ballOnLeftFlipper = true
-      else ballOnRightFlipper = true
-
-      const flipperActive = isLeft ? state.leftFlipperActive : state.rightFlipperActive
-      const alreadyKicked = isLeft ? leftSwingKicked : rightSwingKicked
-
-      if (flipperActive && !alreadyKicked) {
-        const flipperBody = isLeft ? leftBody : rightBody
-        const kick = computeFlipperKick(isLeft, flipperBody, pos)
-        pendingFlipperKick = { vx: kick.vx, vy: kick.vy }
-        if (isLeft) leftSwingKicked = true
-        else rightSwingKicked = true
-      } else if (!flipperActive) {
-        // Dead bounce off a resting bat — reflect upward with energy.
-        const vel = state.ballBody.getLinearVelocity()
-        const bounce = Math.max(36, Math.abs(vel.y) * FLIPPER_DEAD_BOUNCE + 16)
-        pendingFlipperKick = {
-          vx: vel.x * 0.65 + (isLeft ? 14 : -14),
-          vy: -bounce,
-        }
-      }
-
-      onCollision({
-        type: 'flipper',
-        x: pos.x,
-        y: pos.y,
-        points: 0,
-        intensity: flipperActive ? 1 : 0.45,
-      })
-      return
-    }
-
-    // Rail / wall / lane contacts (for SFX).
-    {
-      const pos = state.ballBody.getPosition()
-      const vel = state.ballBody.getLinearVelocity()
-      const speed = Math.hypot(vel.x, vel.y)
-      if (speed > 8) {
-        onCollision({
-          type: 'wall',
-          x: pos.x,
-          y: pos.y,
-          points: 0,
-          intensity: Math.min(1, speed / 40),
-        })
-      }
-    }
-  })
-
-  world.on('end-contact', (contact) => {
-    const bodyA = contact.getFixtureA().getBody()
-    const bodyB = contact.getFixtureB().getBody()
-    if (!state.ballBody) return
-    const other = bodyA === state.ballBody ? bodyB : bodyB === state.ballBody ? bodyA : null
-    if (other === leftBody) ballOnLeftFlipper = false
-    if (other === rightBody) ballOnRightFlipper = false
-  })
-
-  return state
-}
-
-
-export function getBallPosition(world: PinballWorld): { x: number; y: number } | null {
-  if (!world.ballBody) return null
-  const pos = world.ballBody.getPosition()
-  return { x: pos.x, y: pos.y }
-}
-
-export function getFlipperTransforms(world: PinballWorld): {
-  left: { x: number; y: number; angle: number }
-  right: { x: number; y: number; angle: number }
-} {
-  const leftPos = world.leftFlipperBody.getPosition()
-  const rightPos = world.rightFlipperBody.getPosition()
-  return {
-    left: { x: leftPos.x, y: leftPos.y, angle: world.leftFlipperBody.getAngle() },
-    right: { x: rightPos.x, y: rightPos.y, angle: world.rightFlipperBody.getAngle() },
   }
+
+  private collidePlunger(ball: Ball): void {
+    const { x0, x1 } = this.table.plunger
+    if (ball.x < x0 || ball.x > x1) return
+    const y = this.plungerY
+    const hit = this.resolveSegment(ball, { a: { x: x0, y }, b: { x: x1, y }, oneWay: true }, 0.25)
+    if (hit) this.flipperContact = true
+  }
+
+  // —— Switches & features ——————————————————————————————————
+
+  private checkSensors(ball: Ball): void {
+    for (const s of this.table.sensors) {
+      const inside = Math.hypot(ball.x - s.c.x, ball.y - s.c.y) < s.r
+      const was = this.sensorsInside.has(s.id)
+      if (inside === was) continue
+      if (!inside) {
+        this.sensorsInside.delete(s.id)
+        continue
+      }
+      this.sensorsInside.add(s.id)
+      this.litUntil.set(s.id, this.time + 0.3)
+      if (s.kind === 'rollover') this.hitRollover(Number(s.id.slice(4)), s.c)
+      else if (s.kind === 'inlane') {
+        this.addScore(500)
+        this.bonus++
+        this.cancelSkillShot()
+        this.emit('inlane', s.c.x, s.c.y, 500, 0.6)
+      } else {
+        this.addScore(2000)
+        this.bonus++
+        this.cancelSkillShot()
+        this.emit('outlane', s.c.x, s.c.y, 2000, 0.6)
+      }
+    }
+  }
+
+  private hitRollover(i: number, at: Vec): void {
+    if (this.skillShotLive) {
+      this.skillShotLive = false
+      if (i === this.skillLane) {
+        this.addScore(5000)
+        this.showMessage('SKILL SHOT', '5,000')
+        this.emit('skillShot', at.x, at.y, 5000, 1, 'SKILL SHOT')
+      }
+    }
+    if (this.lanesLit[i]) {
+      this.addScore(100)
+      this.emit('rollover', at.x, at.y, 100, 0.4)
+      return
+    }
+    this.lanesLit[i] = true
+    this.addScore(500)
+    this.bonus++
+    this.emit('rollover', at.x, at.y, 500, 1)
+    if (this.lanesLit.every(Boolean)) {
+      this.lanesLit = [false, false, false]
+      if (this.multiplierIndex < MULTIPLIER_STEPS.length - 1) {
+        this.multiplierIndex++
+        this.showMessage(`BONUS ${this.multiplier}X`, 'LANES COMPLETE')
+        this.emit('laneComplete', at.x, at.y, 0, 1, `${this.multiplier}X BONUS`)
+      } else {
+        this.addScore(25000)
+        this.showMessage('LANES COMPLETE', '25,000')
+        this.emit('laneComplete', at.x, at.y, 25000, 1, '25,000')
+      }
+    }
+  }
+
+  /** Classic lane change: flipper buttons shift lit top-lane lamps. */
+  private rotateLanes(dir: -1 | 1): void {
+    if (this.phase !== 'play') return
+    if (this.ballInLane) {
+      this.skillLane = (this.skillLane + dir + 3) % 3
+      return
+    }
+    const l = this.lanesLit
+    this.lanesLit = dir < 0 ? [l[1], l[2], l[0]] : [l[2], l[0], l[1]]
+  }
+
+  private checkSaucer(ball: Ball): void {
+    if (this.time < this.saucerCooldownUntil) return
+    const { c } = this.table.saucer
+    const d = Math.hypot(ball.x - c.x, ball.y - c.y)
+    if (d > 9 || Math.hypot(ball.vx, ball.vy) > SAUCER_CAPTURE_SPEED) return
+    this.saucerHolding = true
+    this.saucerReleaseAt = this.time + SAUCER_HOLD
+    ball.x = c.x
+    ball.y = c.y
+    ball.vx = 0
+    ball.vy = 0
+    const points = 2500 * this.multiplier
+    this.addScore(points)
+    this.bonus += 2
+    this.cancelSkillShot()
+    this.litUntil.set('saucer', this.time + SAUCER_HOLD)
+    this.emit('saucer', c.x, c.y, points, 1)
+  }
+
+  private ejectSaucer(ball: Ball): void {
+    this.saucerHolding = false
+    this.saucerCooldownUntil = this.time + 0.6
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.1
+    const speed = 1150 + Math.random() * 250
+    ball.vx = Math.cos(angle) * speed
+    ball.vy = Math.sin(angle) * speed
+    this.emit('saucerEject', ball.x, ball.y, 0, 1)
+  }
+
+  private checkLaneExit(ball: Ball): void {
+    if (!this.ballInLane) return
+    if (ball.x < this.table.playRight - this.table.ballRadius) {
+      this.ballInLane = false
+      this.ballSaveUntil = this.time + BALL_SAVE_TIME
+    }
+  }
+
+  /** Free a ball stranded on a flat spot (never while cradled or on the plunger). */
+  private checkStuck(ball: Ball): void {
+    if (this.flipperContact || Math.hypot(ball.vx, ball.vy) > 12) {
+      this.stillSince = this.time
+      return
+    }
+    if (this.time - this.stillSince > 3) {
+      ball.vx = (Math.random() - 0.5) * 300
+      ball.vy = -400
+      this.stillSince = this.time
+    }
+  }
+
+  private releasePlunger(): void {
+    const pull = this.plungerPull
+    this.plungerPull = 0
+    const ball = this.ball
+    if (!ball || this.phase !== 'play') return
+    const { x0, x1 } = this.table.plunger
+    const onPlunger = ball.x > x0 && ball.x < x1 && ball.y + this.table.ballRadius >= this.plungerY - 4
+    if (!onPlunger || pull < 0.03) return
+    ball.vy = -(PLUNGER_MIN_LAUNCH + pull * (PLUNGER_MAX_LAUNCH - PLUNGER_MIN_LAUNCH))
+    ball.vx = 0
+    this.skillShotLive = this.ballInLane
+    this.emit('launch', ball.x, ball.y, 0, pull)
+  }
+
+  // —— Ball lifecycle ———————————————————————————————————————
+
+  private newBall(): void {
+    const { plunger, ballRadius } = this.table
+    this.ball = {
+      x: (plunger.x0 + plunger.x1) / 2,
+      y: plunger.restY - ballRadius - 0.5,
+      vx: 0,
+      vy: 0,
+    }
+    this.phase = 'play'
+    this.ballInLane = true
+    this.ballSaveUntil = 0
+    this.skillShotLive = false
+    this.skillLane = Math.floor(Math.random() * 3)
+    this.saucerHolding = false
+    this.sensorsInside.clear()
+    this.stillSince = this.time
+    this.emit('newBall', this.ball.x, this.ball.y, 0, 1)
+  }
+
+  private handleDrain(): void {
+    const ball = this.ball
+    if (!ball) return
+    this.ball = null
+    if (this.time < this.ballSaveUntil) {
+      this.showMessage('BALL SAVED', 'SHOOT AGAIN')
+      this.emit('ballSaved', ball.x, this.table.height - 40, 0, 1, 'BALL SAVED')
+      this.newBall()
+      return
+    }
+    const award = this.bonus * BONUS_UNIT * this.multiplier
+    this.addScore(award)
+    this.showMessage(
+      `BONUS ${award.toLocaleString()}`,
+      `${this.bonus} × 1,000 × ${this.multiplier}X`,
+      BONUS_PHASE_TIME,
+    )
+    this.emit('drain', ball.x, this.table.height - 40, award, 1)
+    this.phase = 'bonus'
+    this.bonusEndsAt = this.time + BONUS_PHASE_TIME
+  }
+
+  private finishBonus(): void {
+    this.bonus = 0
+    this.multiplierIndex = 0
+    this.lanesLit = [false, false, false]
+    this.dropsDown = this.dropsDown.map(() => false)
+    this.standupsLit = this.standupsLit.map(() => false)
+    if (this.extraBalls > 0) {
+      this.extraBalls--
+      this.showMessage('SHOOT AGAIN', `BALL ${this.ballNumber}`)
+      this.emit('shootAgain', 0, 0, 0, 1)
+      this.newBall()
+      return
+    }
+    if (this.ballNumber < this.totalBalls) {
+      this.ballNumber++
+      this.showMessage(`BALL ${this.ballNumber}`, '')
+      this.newBall()
+      return
+    }
+    this.phase = 'over'
+    this.display = null
+    this.emit('gameOver', 0, 0, 0, 1)
+  }
+
+  // —— Helpers ——————————————————————————————————————————————
+
+  private addScore(points: number): void {
+    this.score += points
+  }
+
+  private cancelSkillShot(): void {
+    this.skillShotLive = false
+  }
+
+  private showMessage(text: string, sub = '', duration = 1.6): void {
+    this.display = { text, sub, until: this.time + duration }
+  }
+
+  private emit(type: PinballEventType, x: number, y: number, points: number, intensity: number, label?: string) {
+    this.events.push({ type, x, y, points, intensity, label })
+  }
+}
+
+function segmentNormalToward(seg: Segment, p: Vec): Vec {
+  const dx = seg.b.x - seg.a.x
+  const dy = seg.b.y - seg.a.y
+  const len = Math.hypot(dx, dy)
+  let nx = dy / len
+  let ny = -dx / len
+  if ((p.x - seg.a.x) * nx + (p.y - seg.a.y) * ny < 0) {
+    nx = -nx
+    ny = -ny
+  }
+  return { x: nx, y: ny }
 }

@@ -9,6 +9,7 @@ import {
   setMoveHintsEnabled,
   type BoardView,
 } from './prefs'
+import { formatEngineScore, isCheatModeEnabled, useCheatEngine } from './cheatMode'
 
 const props = defineProps<{
   gameState: ChessGameState
@@ -123,6 +124,58 @@ const targetSquares = computed(() =>
 
 function isHintTarget(sq: string): boolean {
   return showMoveHints.value && selectedTargets.value.has(sq)
+}
+
+const cheatMode = isCheatModeEnabled()
+const {
+  status: engineStatus,
+  engineLabel,
+  suggestion: engineSuggestion,
+} = useCheatEngine({
+  enabled: cheatMode,
+  fen: computed(() => props.gameState.fen),
+  active: computed(() => isMyTurn.value && !isSpectator.value),
+})
+
+const engineHint = computed(() => {
+  const s = engineSuggestion.value
+  return s ? { from: s.from, to: s.to } : null
+})
+
+const engineArrow = computed(() => {
+  const hint = engineHint.value
+  if (!hint || is3d.value) return null
+  const point = (sq: string) => ({
+    x: files.value.indexOf(sq[0] as (typeof FILES)[number]) + 0.5,
+    y: ranks.value.indexOf(Number(sq[1]) - 1) + 0.5,
+  })
+  const from = point(hint.from)
+  const to = point(hint.to)
+  const len = Math.hypot(to.x - from.x, to.y - from.y)
+  const trim = 0.3 / len
+  return { x1: from.x, y1: from.y, x2: to.x - (to.x - from.x) * trim, y2: to.y - (to.y - from.y) * trim }
+})
+
+const engineStatusText = computed(() => {
+  if (engineStatus.value === 'loading') return 'Loading engine…'
+  if (engineStatus.value === 'error') return 'Engine failed to load'
+  if (props.gameState.phase !== 'playing') return 'Game over'
+  if (!isMyTurn.value) return 'Waiting for your turn'
+  const s = engineSuggestion.value
+  if (!s) return 'Thinking…'
+  return `${s.final ? 'Best' : 'Searching'} · depth ${s.depth}`
+})
+
+function playEngineMove() {
+  const s = engineSuggestion.value
+  if (!s || !isMyTurn.value || pendingPromotion.value) return
+  emit('action', {
+    type: 'move',
+    from: s.from,
+    to: s.to,
+    ...(s.promotion ? { promotion: s.promotion } : {}),
+  })
+  selected.value = null
 }
 
 const checkedKingSquare = computed(() => {
@@ -335,6 +388,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
             :targets="targetSquares"
             :last-move="gameState.last_move"
             :check-square="checkedKingSquare"
+            :hint="engineHint"
             @square-click="onSquareClick"
           />
           <div
@@ -345,38 +399,70 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
               check: gameState.in_check && gameState.phase === 'playing',
             }"
           >
-            <div v-for="rankIndex in ranks" :key="rankIndex" class="rank-row">
-              <button
-                v-for="file in files"
-                :key="`${file}${rankIndex}`"
-                type="button"
-                class="square"
-                :class="{
-                  light: isLightSquare(file, rankIndex),
-                  dark: !isLightSquare(file, rankIndex),
-                  selected: selected === squareOf(file, rankIndex),
-                  target: isHintTarget(squareOf(file, rankIndex)),
-                  last: lastMoveSquares.has(squareOf(file, rankIndex)),
-                  capture: isHintTarget(squareOf(file, rankIndex)) && !!pieceAt(file, rankIndex),
-                  check: checkedKingSquare === squareOf(file, rankIndex),
-                  movable: isMyTurn && !pendingPromotion && ownPiece(pieceAt(file, rankIndex)),
-                }"
-                @click="onSquareClick(file, rankIndex)"
+            <div class="board-grid">
+              <div v-for="rankIndex in ranks" :key="rankIndex" class="rank-row">
+                <button
+                  v-for="file in files"
+                  :key="`${file}${rankIndex}`"
+                  type="button"
+                  class="square"
+                  :class="{
+                    light: isLightSquare(file, rankIndex),
+                    dark: !isLightSquare(file, rankIndex),
+                    selected: selected === squareOf(file, rankIndex),
+                    target: isHintTarget(squareOf(file, rankIndex)),
+                    last: lastMoveSquares.has(squareOf(file, rankIndex)),
+                    capture: isHintTarget(squareOf(file, rankIndex)) && !!pieceAt(file, rankIndex),
+                    check: checkedKingSquare === squareOf(file, rankIndex),
+                    'engine-hint':
+                      engineHint?.from === squareOf(file, rankIndex) ||
+                      engineHint?.to === squareOf(file, rankIndex),
+                    movable: isMyTurn && !pendingPromotion && ownPiece(pieceAt(file, rankIndex)),
+                  }"
+                  @click="onSquareClick(file, rankIndex)"
+                >
+                  <span v-if="file === files[0]" class="coord rank">{{ rankIndex + 1 }}</span>
+                  <img
+                    v-if="pieceAt(file, rankIndex)"
+                    class="piece"
+                    :src="pieceSrc(pieceAt(file, rankIndex)!)"
+                    :alt="pieceAlt(pieceAt(file, rankIndex)!)"
+                    draggable="false"
+                  />
+                  <span
+                    v-if="isHintTarget(squareOf(file, rankIndex)) && !pieceAt(file, rankIndex)"
+                    class="target-dot"
+                  />
+                  <span v-if="rankIndex === ranks[ranks.length - 1]" class="coord file">{{ file }}</span>
+                </button>
+              </div>
+              <svg
+                v-if="engineArrow"
+                class="engine-arrow"
+                viewBox="0 0 8 8"
+                aria-hidden="true"
               >
-                <span v-if="file === files[0]" class="coord rank">{{ rankIndex + 1 }}</span>
-                <img
-                  v-if="pieceAt(file, rankIndex)"
-                  class="piece"
-                  :src="pieceSrc(pieceAt(file, rankIndex)!)"
-                  :alt="pieceAlt(pieceAt(file, rankIndex)!)"
-                  draggable="false"
+                <defs>
+                  <marker
+                    id="engine-arrow-head"
+                    viewBox="0 0 4 4"
+                    refX="1.2"
+                    refY="2"
+                    markerWidth="3"
+                    markerHeight="3"
+                    orient="auto"
+                  >
+                    <path d="M0,0 L4,2 L0,4 Z" />
+                  </marker>
+                </defs>
+                <line
+                  :x1="engineArrow.x1"
+                  :y1="engineArrow.y1"
+                  :x2="engineArrow.x2"
+                  :y2="engineArrow.y2"
+                  marker-end="url(#engine-arrow-head)"
                 />
-                <span
-                  v-if="isHintTarget(squareOf(file, rankIndex)) && !pieceAt(file, rankIndex)"
-                  class="target-dot"
-                />
-                <span v-if="rankIndex === ranks[ranks.length - 1]" class="coord file">{{ file }}</span>
-              </button>
+              </svg>
             </div>
           </div>
 
@@ -455,6 +541,30 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
           </div>
         </div>
 
+        <div v-if="cheatMode && !isSpectator" class="engine-panel" :class="engineStatus">
+          <div class="engine-header">
+            <h3>Engine</h3>
+            <span v-if="engineLabel" class="engine-name">{{ engineLabel }}</span>
+          </div>
+          <div v-if="engineSuggestion" class="engine-line">
+            <span class="engine-move">
+              {{ engineSuggestion.from }}→{{ engineSuggestion.to
+              }}{{ engineSuggestion.promotion ? `=${engineSuggestion.promotion.toUpperCase()}` : '' }}
+            </span>
+            <span class="engine-score">{{ formatEngineScore(engineSuggestion) }}</span>
+          </div>
+          <p class="engine-status">{{ engineStatusText }}</p>
+          <button
+            v-if="engineSuggestion && isMyTurn"
+            type="button"
+            class="btn-secondary engine-play"
+            :disabled="!!pendingPromotion"
+            @click="playEngineMove"
+          >
+            Play suggested move
+          </button>
+        </div>
+
         <div v-if="!isSpectator && gameState.phase === 'playing'" class="action-row">
           <button type="button" class="btn-secondary" @click="offerDraw">Offer draw</button>
           <button type="button" class="btn-secondary danger" @click="resign">Resign</button>
@@ -512,6 +622,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   --last-move: rgba(214, 222, 80, 0.5);
   --target: rgba(40, 70, 40, 0.32);
   --check-glow: rgba(255, 60, 70, 0.85);
+  --engine: rgba(64, 156, 255, 0.82);
   flex: 1;
   min-height: 0;
   width: 100%;
@@ -691,6 +802,33 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   cursor: default;
 }
 
+.board-grid {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.engine-arrow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.engine-arrow line {
+  stroke: var(--engine);
+  stroke-width: 0.18;
+  stroke-linecap: round;
+}
+
+.engine-arrow path {
+  fill: var(--engine);
+}
+
 .rank-row {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
@@ -731,6 +869,10 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 
 .square.selected {
   background-image: linear-gradient(var(--select), var(--select));
+}
+
+.square.engine-hint {
+  box-shadow: inset 0 0 0 0.45cqw var(--engine);
 }
 
 .square.check {
@@ -972,6 +1114,71 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   gap: 0.45rem;
   justify-content: center;
   margin-top: 0.5rem;
+}
+
+.engine-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 10px;
+  border: 1px solid rgba(64, 156, 255, 0.4);
+  background: rgba(64, 156, 255, 0.08);
+}
+
+.engine-panel.error {
+  border-color: rgba(255, 92, 108, 0.45);
+  background: rgba(255, 92, 108, 0.08);
+}
+
+.engine-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.engine-header h3 {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.engine-name {
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.engine-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.engine-move {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--engine);
+}
+
+.engine-score {
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.engine-status {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.engine-play {
+  font-size: 0.78rem;
+  padding: 0.4rem 0.5rem;
 }
 
 .action-row {

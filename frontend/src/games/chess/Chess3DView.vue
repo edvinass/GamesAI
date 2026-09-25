@@ -20,6 +20,7 @@ const props = defineProps<{
   targets: string[]
   lastMove: { from: string; to: string } | null
   checkSquare: string | null
+  hint?: { from: string; to: string } | null
 }>()
 
 const emit = defineEmits<{
@@ -76,6 +77,7 @@ const selectedMat = overlayMaterial(0xf0c14b, 0.6)
 const lastMoveMat = overlayMaterial(0xf6e05e, 0.38)
 const checkMat = overlayMaterial(0xff5c6c, 0.6)
 const targetMat = overlayMaterial(0x141414, 0.32)
+const hintMat = overlayMaterial(0x409cff, 0.55)
 
 const squareOverlayGeo = track(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2))
 const targetDotGeo = track(new THREE.CircleGeometry(0.14, 32).rotateX(-Math.PI / 2))
@@ -244,6 +246,10 @@ function rebuildHighlights() {
     addOverlay(props.lastMove.from, squareOverlayGeo, lastMoveMat, 0.002)
     addOverlay(props.lastMove.to, squareOverlayGeo, lastMoveMat, 0.002)
   }
+  if (props.hint) {
+    addOverlay(props.hint.from, squareOverlayGeo, hintMat, 0.0025)
+    addOverlay(props.hint.to, squareOverlayGeo, hintMat, 0.0025)
+  }
   if (props.checkSquare) addOverlay(props.checkSquare, squareOverlayGeo, checkMat, 0.003)
   if (props.selected) addOverlay(props.selected, squareOverlayGeo, selectedMat, 0.004)
   for (const target of props.targets) {
@@ -408,7 +414,7 @@ watch(
 )
 
 watch(
-  () => [props.selected, props.targets, props.lastMove, props.checkSquare],
+  () => [props.selected, props.targets, props.lastMove, props.checkSquare, props.hint],
   rebuildHighlights,
 )
 

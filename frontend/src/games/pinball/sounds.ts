@@ -215,6 +215,45 @@ export function playHighScore() {
   })
 }
 
+/** Slingshot kicker thwack. */
+export function playSling() {
+  noiseBurst(0.05, 0.08, 900)
+  tone(260, 0.05, 'square', 0.06, 140)
+}
+
+/** Rollover switch chime (lit = brighter). */
+export function playRollover(lit: boolean) {
+  tone(lit ? 1046 : 784, 0.08, 'triangle', 0.06)
+  if (lit) setTimeout(() => tone(1318, 0.08, 'triangle', 0.05), 50)
+}
+
+/** Ball drops into the saucer. */
+export function playSaucer() {
+  noiseBurst(0.08, 0.07, 500)
+  ;[330, 440, 554, 659].forEach((f, i) => {
+    setTimeout(() => tone(f, 0.12, 'square', 0.05), 120 + i * 90)
+  })
+}
+
+/** Saucer kick-out. */
+export function playKickout() {
+  noiseBurst(0.06, 0.09, 700)
+  tone(150, 0.08, 'sawtooth', 0.07, 400)
+}
+
+/** Feature completed (lanes, targets, skill shot). */
+export function playAward() {
+  ;[523, 784, 1046, 1568].forEach((f, i) => {
+    setTimeout(() => tone(f, 0.1, i % 2 ? 'triangle' : 'square', 0.06), i * 70)
+  })
+}
+
+/** Knocker for extra ball. */
+export function playKnocker() {
+  noiseBurst(0.12, 0.14, 200)
+  tone(70, 0.2, 'square', 0.12, 40)
+}
+
 /** Soft UI click (mute toggle etc.). */
 export function playUiClick() {
   tone(800, 0.04, 'square', 0.03)

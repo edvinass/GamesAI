@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '@/views/HomeView.vue'
 import RoomView from '@/views/RoomView.vue'
 import GameView from '@/views/GameView.vue'
+import { captureCheatParam } from '@/games/chess/cheatMode'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -11,6 +12,10 @@ const router = createRouter({
     { path: '/room/:id', name: 'room', component: RoomView },
     { path: '/room/:id/play', name: 'game', component: GameView },
   ],
+})
+
+router.beforeEach((to) => {
+  captureCheatParam(to.query)
 })
 
 export default router

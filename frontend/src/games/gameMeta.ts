@@ -181,7 +181,7 @@ export interface GameListItem {
 }
 
 /** Unfinished games stay reachable by direct link, but are omitted from the picker. */
-const HIDDEN_FROM_MENU = new Set(['duel', 'battleship', 'monopoly', 'pinball'])
+const HIDDEN_FROM_MENU = new Set(['duel', 'battleship', 'monopoly'])
 
 export function isMenuGame(id: string): boolean {
   return !HIDDEN_FROM_MENU.has(id)

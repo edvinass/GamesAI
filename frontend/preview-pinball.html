@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      html, body, #app { margin: 0; height: 100%; background: #000; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h } from 'vue'
+      import PinballBoard from '/src/games/pinball/PinballBoard.vue'
+      const state = {
+        phase: 'playing', score: 0, balls_remaining: 3, high_score: 0, players: [],
+        settings: { starting_balls: 3 }, winner: null, win_reason: null, last_action: null, viewer_id: 'p',
+      }
+      createApp({ render: () => h(PinballBoard, { gameState: state, room: {}, playerId: 'p' }) }).mount('#app')
+      const params = new URLSearchParams(location.search)
+      if (params.has('launch')) {
+        setTimeout(() => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' })), 300)
+        setTimeout(() => window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space' })), 300 + Number(params.get('launch')))
+      }
+    </script>
+  </body>
+</html>

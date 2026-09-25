@@ -15,11 +15,11 @@ def make_players(count: int = 1) -> list[dict]:
     ]
 
 
-def test_hidden_from_menu_but_still_registered() -> None:
+def test_listed_in_menu() -> None:
     from app.games.registry import get_game, list_games
 
     ids = {g["id"] for g in list_games()}
-    assert "pinball" not in ids
+    assert "pinball" in ids
     assert get_game("pinball").game_type == "pinball"
 
 
