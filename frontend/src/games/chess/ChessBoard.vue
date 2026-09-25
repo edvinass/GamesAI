@@ -2,6 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import type { ChessGameState, Room } from '@/types'
 import Chess3DView from './Chess3DView.vue'
+import {
+  getBoardViewPref,
+  isMoveHintsEnabled,
+  setBoardViewPref,
+  setMoveHintsEnabled,
+  type BoardView,
+} from './prefs'
 
 const props = defineProps<{
   gameState: ChessGameState
@@ -14,28 +21,40 @@ const emit = defineEmits<{
 }>()
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const
-/** Use filled chess glyphs for both sides so styles match; color via CSS. */
-const PIECE_GLYPH: Record<string, string> = {
-  K: '♚',
-  Q: '♛',
-  R: '♜',
-  B: '♝',
-  N: '♞',
-  P: '♟',
-  k: '♚',
-  q: '♛',
-  r: '♜',
-  b: '♝',
-  n: '♞',
-  p: '♟',
-}
 
-function pieceGlyph(piece: string): string {
-  return PIECE_GLYPH[piece] ?? piece
+/** cburnett piece set (Colin M.L. Burnett, CC BY-SA 3.0). */
+const PIECE_SVG_MODULES = import.meta.glob('../../assets/chess/pieces/*.svg', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>
+
+const PIECE_SRC: Record<string, string> = Object.fromEntries(
+  Object.entries(PIECE_SVG_MODULES).map(([path, url]) => [
+    path.split('/').pop()!.replace('.svg', ''),
+    url,
+  ]),
+)
+
+const PIECE_NAME: Record<string, string> = {
+  k: 'king',
+  q: 'queen',
+  r: 'rook',
+  b: 'bishop',
+  n: 'knight',
+  p: 'pawn',
 }
 
 function isWhitePiece(piece: string): boolean {
   return piece === piece.toUpperCase()
+}
+
+function pieceSrc(piece: string): string {
+  return PIECE_SRC[`${isWhitePiece(piece) ? 'w' : 'b'}${piece.toUpperCase()}`] ?? ''
+}
+
+function pieceAlt(piece: string): string {
+  return `${isWhitePiece(piece) ? 'White' : 'Black'} ${PIECE_NAME[piece.toLowerCase()] ?? piece}`
 }
 
 const selected = ref<string | null>(null)
@@ -43,7 +62,11 @@ const pendingPromotion = ref<{ from: string; to: string } | null>(null)
 
 const viewerColor = computed(() => props.gameState.viewer_color)
 const flipBoard = computed(() => viewerColor.value === 'b')
-const is3d = computed(() => props.gameState.settings?.board_view === '3d')
+const boardView = ref<BoardView>(
+  getBoardViewPref(props.room.id) ?? (props.gameState.settings?.board_view === '3d' ? '3d' : '2d'),
+)
+watch(boardView, (view) => setBoardViewPref(props.room.id, view))
+const is3d = computed(() => boardView.value === '3d')
 
 const isMyTurn = computed(() => {
   if (props.gameState.phase !== 'playing') return false
@@ -91,7 +114,16 @@ const selectedTargets = computed(() => {
   return map
 })
 
-const targetSquares = computed(() => [...selectedTargets.value.keys()])
+const showMoveHints = ref(isMoveHintsEnabled())
+watch(showMoveHints, setMoveHintsEnabled)
+
+const targetSquares = computed(() =>
+  showMoveHints.value ? [...selectedTargets.value.keys()] : [],
+)
+
+function isHintTarget(sq: string): boolean {
+  return showMoveHints.value && selectedTargets.value.has(sq)
+}
 
 const checkedKingSquare = computed(() => {
   if (!props.gameState.in_check) return null
@@ -277,7 +309,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
           }"
         >
           <span class="king-badge" :class="topPlayer?.color ?? 'b'" aria-hidden="true">
-            {{ topPlayer?.color === 'w' ? '♔' : '♚' }}
+            <img :src="pieceSrc(topPlayer?.color === 'w' ? 'K' : 'k')" alt="" draggable="false" />
           </span>
           <div class="player-meta">
             <p class="player-name">
@@ -323,24 +355,24 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
                   light: isLightSquare(file, rankIndex),
                   dark: !isLightSquare(file, rankIndex),
                   selected: selected === squareOf(file, rankIndex),
-                  target: selectedTargets.has(squareOf(file, rankIndex)),
+                  target: isHintTarget(squareOf(file, rankIndex)),
                   last: lastMoveSquares.has(squareOf(file, rankIndex)),
-                  capture:
-                    selectedTargets.has(squareOf(file, rankIndex)) && !!pieceAt(file, rankIndex),
+                  capture: isHintTarget(squareOf(file, rankIndex)) && !!pieceAt(file, rankIndex),
                   check: checkedKingSquare === squareOf(file, rankIndex),
+                  movable: isMyTurn && !pendingPromotion && ownPiece(pieceAt(file, rankIndex)),
                 }"
                 @click="onSquareClick(file, rankIndex)"
               >
                 <span v-if="file === files[0]" class="coord rank">{{ rankIndex + 1 }}</span>
-                <span
+                <img
                   v-if="pieceAt(file, rankIndex)"
                   class="piece"
-                  :class="{ white: isWhitePiece(pieceAt(file, rankIndex)!) }"
-                >
-                  {{ pieceGlyph(pieceAt(file, rankIndex)!) }}
-                </span>
+                  :src="pieceSrc(pieceAt(file, rankIndex)!)"
+                  :alt="pieceAlt(pieceAt(file, rankIndex)!)"
+                  draggable="false"
+                />
                 <span
-                  v-if="selectedTargets.has(squareOf(file, rankIndex)) && !pieceAt(file, rankIndex)"
+                  v-if="isHintTarget(squareOf(file, rankIndex)) && !pieceAt(file, rankIndex)"
                   class="target-dot"
                 />
                 <span v-if="rankIndex === ranks[ranks.length - 1]" class="coord file">{{ file }}</span>
@@ -357,10 +389,13 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
                   :key="p"
                   type="button"
                   class="promo-btn"
-                  :class="{ white: viewerColor !== 'b' }"
                   @click="choosePromotion(p)"
                 >
-                  {{ pieceGlyph(viewerColor === 'b' ? p : p.toUpperCase()) }}
+                  <img
+                    :src="pieceSrc(viewerColor === 'b' ? p : p.toUpperCase())"
+                    :alt="pieceAlt(viewerColor === 'b' ? p : p.toUpperCase())"
+                    draggable="false"
+                  />
                 </button>
               </div>
               <button
@@ -392,7 +427,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
           }"
         >
           <span class="king-badge" :class="bottomPlayer?.color ?? 'w'" aria-hidden="true">
-            {{ bottomPlayer?.color === 'b' ? '♚' : '♔' }}
+            <img :src="pieceSrc(bottomPlayer?.color === 'b' ? 'k' : 'K')" alt="" draggable="false" />
           </span>
           <div class="player-meta">
             <p class="player-name">
@@ -425,6 +460,28 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
           <button type="button" class="btn-secondary danger" @click="resign">Resign</button>
         </div>
 
+        <div class="view-switch" role="radiogroup" aria-label="Board view">
+          <span class="view-switch-label">Board</span>
+          <button
+            v-for="view in (['2d', '3d'] as const)"
+            :key="view"
+            type="button"
+            class="view-option"
+            :class="{ active: boardView === view }"
+            role="radio"
+            :aria-checked="boardView === view"
+            @click="boardView = view"
+          >
+            {{ view.toUpperCase() }}
+          </button>
+        </div>
+
+        <label class="pref-toggle">
+          <input v-model="showMoveHints" type="checkbox" />
+          <span class="pref-switch" aria-hidden="true" />
+          <span>Show move hints</span>
+        </label>
+
         <div class="history-panel">
           <div class="history-header">
             <h3>Moves</h3>
@@ -446,13 +503,15 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 
 <style scoped>
 .chess-board {
-  --wood-light: #e8d5b5;
-  --wood-dark: #b58863;
+  --wood-light: #f0dcb8;
+  --wood-dark: #b3804f;
   --wood-frame: #3d2c1e;
+  --wood-frame-hi: #6b4a2e;
   --wood-accent: #c99a62;
-  --select: #f0c14b;
-  --last-move: rgba(246, 224, 94, 0.42);
-  --check-glow: rgba(255, 92, 108, 0.55);
+  --select: rgba(92, 170, 110, 0.55);
+  --last-move: rgba(214, 222, 80, 0.5);
+  --target: rgba(40, 70, 40, 0.32);
+  --check-glow: rgba(255, 60, 70, 0.85);
   flex: 1;
   min-height: 0;
   width: 100%;
@@ -510,9 +569,14 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   border-radius: 8px;
   display: grid;
   place-items: center;
-  font-size: 1.15rem;
   flex-shrink: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.king-badge img {
+  width: 85%;
+  height: 85%;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
 }
 
 .king-badge.w {
@@ -521,8 +585,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 }
 
 .king-badge.b {
-  background: linear-gradient(145deg, #3a3230, #1a1614);
-  color: #f0e6d8;
+  background: linear-gradient(145deg, #c08d5c, #8a5e37);
 }
 
 .player-meta {
@@ -596,15 +659,17 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   height: min(100cqw, 100cqh);
   aspect-ratio: 1;
   container-type: size;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
+  padding: 1.4cqw;
+  border-radius: 14px;
   overflow: hidden;
-  border: 3px solid var(--wood-frame);
+  background: linear-gradient(145deg, var(--wood-frame-hi), var(--wood-frame) 55%, #2a1e14);
   box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.45),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  background: var(--wood-frame);
+    0 20px 56px rgba(0, 0, 0, 0.5),
+    0 2px 0 rgba(255, 255, 255, 0.06) inset,
+    0 -2px 0 rgba(0, 0, 0, 0.35) inset;
 }
 
 @supports not (width: 1cqw) {
@@ -617,9 +682,9 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 
 .board.check {
   box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.45),
-    0 0 0 2px rgba(255, 92, 108, 0.35),
-    0 0 28px rgba(255, 92, 108, 0.2);
+    0 20px 56px rgba(0, 0, 0, 0.5),
+    0 0 0 2px rgba(255, 92, 108, 0.4),
+    0 0 32px rgba(255, 92, 108, 0.25);
 }
 
 .board.disabled {
@@ -641,78 +706,97 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  /* ~72% of one square: board cqw / 8 * 0.72 ≈ 9cqw */
-  font-size: min(9cqw, 9cqh);
+  cursor: default;
   line-height: 1;
-  transition: filter 0.12s ease;
-}
-
-.square:hover:not(:disabled) {
-  filter: brightness(1.05);
 }
 
 .square.light {
-  background: var(--wood-light);
+  background-color: var(--wood-light);
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.03));
 }
 
 .square.dark {
-  background: var(--wood-dark);
+  background-color: var(--wood-dark);
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.08));
 }
 
-.square.selected {
-  box-shadow: inset 0 0 0 3px var(--select);
+.square.movable,
+.square.target {
+  cursor: pointer;
 }
 
 .square.last {
   background-image: linear-gradient(var(--last-move), var(--last-move));
 }
 
+.square.selected {
+  background-image: linear-gradient(var(--select), var(--select));
+}
+
 .square.check {
-  background-image: radial-gradient(circle at center, var(--check-glow), transparent 72%);
+  background-image: radial-gradient(
+    circle at center,
+    var(--check-glow) 0%,
+    rgba(255, 60, 70, 0.45) 45%,
+    transparent 78%
+  );
+}
+
+.square.target:not(.capture):hover {
+  background-image: linear-gradient(var(--target), var(--target));
 }
 
 .square.target.capture::after {
   content: '';
   position: absolute;
-  inset: 10%;
-  border: 3px solid rgba(20, 20, 20, 0.28);
-  border-radius: 50%;
+  inset: 0;
+  background: radial-gradient(circle, transparent 66%, var(--target) 67%);
   pointer-events: none;
 }
 
+.square.target.capture:hover::after {
+  background: var(--target);
+}
+
 .piece {
+  position: relative;
   z-index: 1;
+  width: 94%;
+  height: 94%;
+  object-fit: contain;
   user-select: none;
-  color: #1a1410;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
-  transition: transform 0.12s var(--ease-smooth);
+  -webkit-user-drag: none;
+  pointer-events: none;
+  filter: drop-shadow(0 0.35cqw 0.35cqw rgba(0, 0, 0, 0.4));
+  transition:
+    transform 0.14s var(--ease-smooth),
+    filter 0.14s var(--ease-smooth);
+}
+
+.square.movable:hover .piece {
+  transform: translateY(-3%) scale(1.04);
+  filter: drop-shadow(0 0.7cqw 0.6cqw rgba(0, 0, 0, 0.45));
 }
 
 .square.selected .piece {
-  transform: translateY(-2px) scale(1.04);
-}
-
-.piece.white {
-  color: #f4efe6;
-  filter:
-    drop-shadow(0 0 0.6px #1a1410)
-    drop-shadow(0 0 0.6px #1a1410)
-    drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+  transform: translateY(-4%) scale(1.07);
+  filter: drop-shadow(0 0.9cqw 0.7cqw rgba(0, 0, 0, 0.5));
 }
 
 .target-dot {
-  width: 24%;
-  height: 24%;
+  width: 30%;
+  height: 30%;
   border-radius: 50%;
-  background: rgba(20, 20, 20, 0.24);
+  background: var(--target);
+  pointer-events: none;
 }
 
 .coord {
   position: absolute;
-  font-size: max(0.55rem, min(0.8rem, 1.8cqw));
-  font-weight: 700;
-  opacity: 0.62;
+  z-index: 2;
+  font-size: max(0.6rem, min(0.9rem, 1.9cqw));
+  font-weight: 800;
+  opacity: 0.8;
   pointer-events: none;
   font-family: 'Outfit', 'DM Sans', system-ui, sans-serif;
 }
@@ -728,11 +812,11 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 }
 
 .square.light .coord {
-  color: #6b4f35;
+  color: var(--wood-dark);
 }
 
 .square.dark .coord {
-  color: #f3e5c8;
+  color: var(--wood-light);
 }
 
 .promotion-overlay,
@@ -773,22 +857,30 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 }
 
 .promo-btn {
-  width: clamp(48px, 8vw, 64px);
-  height: clamp(48px, 8vw, 64px);
-  font-size: clamp(1.6rem, 4vw, 2.2rem);
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: #b58863;
+  width: clamp(56px, 10vw, 84px);
+  height: clamp(56px, 10vw, 84px);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid rgba(201, 154, 98, 0.35);
+  background: linear-gradient(145deg, var(--wood-light), #dcc195);
   cursor: pointer;
-  color: #1a1410;
+  transition:
+    transform 0.12s var(--ease-smooth),
+    box-shadow 0.12s var(--ease-smooth);
 }
 
-.promo-btn.white {
-  background: #c99a62;
-  color: #f4efe6;
-  filter:
-    drop-shadow(0 0 0.55px #1a1410)
-    drop-shadow(0 0 0.55px #1a1410);
+.promo-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.promo-btn img {
+  width: 88%;
+  height: 88%;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35));
 }
 
 .promo-cancel {
@@ -896,6 +988,107 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 .action-row .danger {
   border-color: rgba(255, 92, 108, 0.4);
   color: #ff8a96;
+}
+
+.view-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.3rem 0.3rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(10, 14, 23, 0.35);
+}
+
+.view-switch-label {
+  flex: 1;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.view-option {
+  min-width: 2.6rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.view-option:hover:not(.active) {
+  color: var(--text);
+}
+
+.view-option.active {
+  background: rgba(201, 154, 98, 0.2);
+  border-color: rgba(201, 154, 98, 0.45);
+  color: var(--wood-accent);
+}
+
+.view-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pref-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(10, 14, 23, 0.35);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pref-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pref-switch {
+  position: relative;
+  width: 2rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background 0.15s ease;
+}
+
+.pref-switch::after {
+  content: '';
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: #f4efe6;
+  transition: transform 0.15s var(--ease-smooth);
+}
+
+.pref-toggle input:checked + .pref-switch {
+  background: var(--wood-accent);
+}
+
+.pref-toggle input:checked + .pref-switch::after {
+  transform: translateX(0.9rem);
+}
+
+.pref-toggle input:focus-visible + .pref-switch {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .history-panel {

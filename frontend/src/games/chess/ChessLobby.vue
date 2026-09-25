@@ -167,7 +167,10 @@ function seatInitial(nickname: string): string {
       </div>
 
       <div class="difficulty-section">
-        <h2 class="section-title">Board view</h2>
+        <div class="difficulty-header">
+          <h2 class="section-title">Board view</h2>
+          <span class="difficulty-hint">Players can switch in-game</span>
+        </div>
         <div class="difficulty-row view-row" role="radiogroup" aria-label="Board view">
           <button
             v-for="opt in boardViewOptions"

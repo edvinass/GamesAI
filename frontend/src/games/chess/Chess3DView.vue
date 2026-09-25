@@ -2,7 +2,14 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { createPieceMesh, disposePieceGeometries, type PieceKind } from './chessPieces3d'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import {
+  createPieceMaterials,
+  createPieceMesh,
+  disposePieceGeometries,
+  woodTexture,
+  type PieceKind,
+} from './chessPieces3d'
 
 const props = defineProps<{
   board: Array<Array<string | null>>
@@ -22,7 +29,8 @@ const emit = defineEmits<{
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const
 const FRAME_SIZE = 9.2
 const BOARD_TOP = 0.1
-const PIECE_SCALE = 0.85
+const PIECE_SCALE = 0.8
+const KNIGHT_TURN = Math.PI / 3
 const SELECT_LIFT = 0.18
 const MOVE_MS = 280
 const CLICK_SLOP_PX = 6
@@ -56,12 +64,7 @@ function track<T extends { dispose(): void }>(resource: T): T {
   return resource
 }
 
-const whitePieceMat = track(
-  new THREE.MeshStandardMaterial({ color: 0xf3ead8, roughness: 0.35, metalness: 0.05 }),
-)
-const blackPieceMat = track(
-  new THREE.MeshStandardMaterial({ color: 0x2b2420, roughness: 0.35, metalness: 0.1 }),
-)
+const pieceMaterials = track(createPieceMaterials())
 
 function overlayMaterial(color: number, opacity: number) {
   return track(
@@ -84,15 +87,17 @@ function squarePosition(square: string, y = BOARD_TOP): THREE.Vector3 {
   return new THREE.Vector3(fileIndex - 3.5, y, 3.5 - rankIndex)
 }
 
-function buildLabelTexture(): THREE.CanvasTexture {
+function buildLabelTexture(frameWood: THREE.CanvasTexture): THREE.CanvasTexture {
   const size = 1024
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
   const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#3d2c1e'
-  ctx.fillRect(0, 0, size, size)
-  ctx.fillStyle = '#e8d5b5'
+  ctx.drawImage(frameWood.image as HTMLCanvasElement, 0, 0, size, size)
+  ctx.fillStyle = '#ecd9b8'
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.55)'
+  ctx.shadowBlur = 4
+  ctx.shadowOffsetY = 2
   ctx.font = `700 ${Math.round(size * 0.036)}px Outfit, "DM Sans", system-ui, sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
@@ -123,28 +128,41 @@ function buildLabelTexture(): THREE.CanvasTexture {
 }
 
 function buildBoard() {
-  const frameMat = track(new THREE.MeshStandardMaterial({ color: 0x3d2c1e, roughness: 0.6 }))
-  const frame = new THREE.Mesh(track(new THREE.BoxGeometry(FRAME_SIZE, 0.4, FRAME_SIZE)), frameMat)
+  const lacquered = (map: THREE.Texture, clearcoat: number) =>
+    track(
+      new THREE.MeshPhysicalMaterial({ map, roughness: 0.45, clearcoat, clearcoatRoughness: 0.2 }),
+    )
+
+  const frameWood = track(woodTexture('#4a3020', '#1f130b', '#6b4a33', 37))
+  frameWood.repeat.set(3, 1)
+  const frame = new THREE.Mesh(
+    track(new THREE.BoxGeometry(FRAME_SIZE, 0.4, FRAME_SIZE)),
+    lacquered(frameWood, 0.6),
+  )
   frame.position.y = -0.2
   frame.receiveShadow = true
   scene.add(frame)
 
   const labels = new THREE.Mesh(
     track(new THREE.PlaneGeometry(FRAME_SIZE, FRAME_SIZE).rotateX(-Math.PI / 2)),
-    track(new THREE.MeshStandardMaterial({ map: buildLabelTexture(), roughness: 0.6 })),
+    lacquered(buildLabelTexture(frameWood), 0.6),
   )
   labels.position.y = 0.002
   labels.receiveShadow = true
   scene.add(labels)
 
+  const lightWood = track(woodTexture('#dcbd8e', '#b48d5e', '#f0dcb8', 21))
+  const darkWood = track(woodTexture('#8a5a36', '#5a3519', '#a8784e', 29))
+  for (const texture of [lightWood, darkWood]) texture.repeat.set(0.5, 0.5)
   const squareGeo = track(new THREE.BoxGeometry(1, BOARD_TOP, 1))
-  const lightMat = track(new THREE.MeshStandardMaterial({ color: 0xe8d5b5, roughness: 0.7 }))
-  const darkMat = track(new THREE.MeshStandardMaterial({ color: 0xb58863, roughness: 0.7 }))
+  const lightMat = lacquered(lightWood, 0.5)
+  const darkMat = lacquered(darkWood, 0.5)
   for (let rank = 0; rank < 8; rank++) {
     for (let file = 0; file < 8; file++) {
       const square = `${FILES[file]}${rank + 1}`
       const mesh = new THREE.Mesh(squareGeo, (file + rank) % 2 === 1 ? lightMat : darkMat)
       mesh.position.copy(squarePosition(square, BOARD_TOP / 2))
+      mesh.rotation.y = ((file * 3 + rank * 5) % 2) * Math.PI
       mesh.receiveShadow = true
       mesh.userData.square = square
       squareMeshes.push(mesh)
@@ -156,9 +174,9 @@ function buildBoard() {
 }
 
 function buildLights() {
-  scene.add(new THREE.HemisphereLight(0xfff6e8, 0x1a1410, 1.1))
+  scene.add(new THREE.HemisphereLight(0xfff6e8, 0x1a1410, 0.5))
 
-  const key = new THREE.DirectionalLight(0xffffff, 1.8)
+  const key = new THREE.DirectionalLight(0xfff4e0, 2.2)
   key.position.set(4, 10, 6)
   key.castShadow = true
   key.shadow.mapSize.set(2048, 2048)
@@ -186,10 +204,14 @@ function rebuildPieces(animate: boolean) {
       const isWhite = piece === piece.toUpperCase()
       const kind = piece.toLowerCase() as PieceKind
       const square = `${FILES[file]}${rank + 1}`
-      const mesh = createPieceMesh(kind, isWhite ? whitePieceMat : blackPieceMat)
+      const mesh = createPieceMesh(kind, pieceMaterials, isWhite)
       mesh.scale.setScalar(PIECE_SCALE)
       mesh.position.copy(squarePosition(square))
-      if (kind === 'n') mesh.rotation.y = isWhite ? Math.PI / 2 : -Math.PI / 2
+      if (kind === 'n') {
+        const towardCenter = file < 4 ? -1 : 1
+        const facing = isWhite ? Math.PI / 2 : -Math.PI / 2
+        mesh.rotation.y = facing + towardCenter * (isWhite ? 1 : -1) * KNIGHT_TURN
+      }
       mesh.userData.square = square
       pieceBySquare.set(square, mesh)
       piecesGroup.add(mesh)
@@ -237,7 +259,7 @@ function rebuildHighlights() {
 
 function fitDistance(): number {
   const aspect = camera?.aspect ?? 1
-  return 13 / Math.min(aspect, 1)
+  return 14 / Math.min(aspect, 1)
 }
 
 function resetCamera() {
@@ -325,8 +347,16 @@ onMounted(() => {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  renderer.toneMapping = THREE.NeutralToneMapping
   renderer.domElement.classList.add('chess-3d-canvas')
   host.appendChild(renderer.domElement)
+
+  const pmrem = new THREE.PMREMGenerator(renderer)
+  const roomEnvironment = new RoomEnvironment()
+  scene.environment = track(pmrem.fromScene(roomEnvironment, 0.04).texture)
+  scene.environmentIntensity = 0.55
+  roomEnvironment.dispose()
+  pmrem.dispose()
 
   camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100)
   controls = new OrbitControls(camera, renderer.domElement)
