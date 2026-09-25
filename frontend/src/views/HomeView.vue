@@ -6,6 +6,7 @@ import { useRoom } from '@/composables/useRoom'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import {
   getGameMeta,
+  isMenuGame,
   listKnownGames,
   GAME_CATEGORIES,
   type GameCategory,
@@ -49,9 +50,10 @@ onMounted(async () => {
   try {
     const fetched = await fetchGames()
     if (Array.isArray(fetched) && fetched.length > 0) {
-      games.value = fetched
-      if (!fetched.some((g) => g.id === gameType.value)) {
-        gameType.value = fetched[0].id
+      const visible = fetched.filter((g) => isMenuGame(g.id))
+      games.value = visible
+      if (!visible.some((g) => g.id === gameType.value)) {
+        gameType.value = visible[0]?.id ?? gameType.value
       }
     }
   } catch {

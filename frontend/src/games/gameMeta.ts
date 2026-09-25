@@ -180,12 +180,21 @@ export interface GameListItem {
   description: string
 }
 
+/** Unfinished games stay reachable by direct link, but are omitted from the picker. */
+const HIDDEN_FROM_MENU = new Set(['duel', 'battleship', 'monopoly', 'pinball'])
+
+export function isMenuGame(id: string): boolean {
+  return !HIDDEN_FROM_MENU.has(id)
+}
+
 export function listKnownGames(): GameListItem[] {
-  return Object.entries(metaByGameType).map(([id, meta]) => ({
-    id,
-    name: meta.name,
-    description: meta.description,
-  }))
+  return Object.entries(metaByGameType)
+    .filter(([id]) => isMenuGame(id))
+    .map(([id, meta]) => ({
+      id,
+      name: meta.name,
+      description: meta.description,
+    }))
 }
 
 export function getGameMeta(gameType: string): GameMeta {
