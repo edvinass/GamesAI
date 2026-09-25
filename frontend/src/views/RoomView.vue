@@ -292,6 +292,11 @@ const aiDifficulty = computed({
   set: (val: string) => updateSettings({ ai_difficulty: val }),
 })
 
+const chessBoardView = computed({
+  get: () => String(room.value?.settings?.board_view ?? '2d'),
+  set: (val: string) => updateSettings({ board_view: val }),
+})
+
 const mapId = computed({
   get: () =>
     String(
@@ -609,6 +614,7 @@ function startGame() {
         v-else-if="isChess"
         v-model:solo-practice="soloPractice"
         v-model:ai-difficulty="aiDifficulty"
+        v-model:board-view="chessBoardView"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

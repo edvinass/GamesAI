@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { ChessGameState, Room } from '@/types'
+import Chess3DView from './Chess3DView.vue'
 
 const props = defineProps<{
   gameState: ChessGameState
@@ -42,6 +43,7 @@ const pendingPromotion = ref<{ from: string; to: string } | null>(null)
 
 const viewerColor = computed(() => props.gameState.viewer_color)
 const flipBoard = computed(() => viewerColor.value === 'b')
+const is3d = computed(() => props.gameState.settings?.board_view === '3d')
 
 const isMyTurn = computed(() => {
   if (props.gameState.phase !== 'playing') return false
@@ -88,6 +90,8 @@ const selectedTargets = computed(() => {
   }
   return map
 })
+
+const targetSquares = computed(() => [...selectedTargets.value.keys()])
 
 const checkedKingSquare = computed(() => {
   if (!props.gameState.in_check) return null
@@ -288,8 +292,21 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
           </span>
         </div>
 
-        <div class="board-stage">
+        <div class="board-stage" :class="{ 'is-3d': is3d }">
+          <Chess3DView
+            v-if="is3d"
+            :board="gameState.board"
+            :fen="gameState.fen"
+            :flipped="flipBoard"
+            :interactive="isMyTurn && !pendingPromotion"
+            :selected="selected"
+            :targets="targetSquares"
+            :last-move="gameState.last_move"
+            :check-square="checkedKingSquare"
+            @square-click="onSquareClick"
+          />
           <div
+            v-else
             class="board"
             :class="{
               disabled: !isMyTurn || !!pendingPromotion,
@@ -566,6 +583,11 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   display: grid;
   place-items: center;
   container-type: size;
+}
+
+.board-stage.is-3d {
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: stretch;
 }
 
 .board {

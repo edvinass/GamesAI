@@ -14,6 +14,7 @@ const props = defineProps<{
 
 const soloPractice = defineModel<boolean>('soloPractice', { required: true })
 const aiDifficulty = defineModel<string>('aiDifficulty', { required: true })
+const boardView = defineModel<string>('boardView', { required: true })
 
 const emit = defineEmits<{
   addAi: []
@@ -57,6 +58,15 @@ const difficultyOptions = [
     depth: 'Depth 3',
   },
 ] as const
+
+const boardViewOptions = [
+  { value: '2d', label: '2D', detail: 'Classic flat board' },
+  { value: '3d', label: '3D', detail: 'Rotatable 3D board' },
+] as const
+
+const activeBoardView = computed(
+  () => boardViewOptions.find((opt) => opt.value === boardView.value) ?? boardViewOptions[0],
+)
 
 const gameMode = computed<GameMode>({
   get: () => (soloPractice.value ? 'solo_practice' : 'multiplayer'),
@@ -155,6 +165,25 @@ function seatInitial(nickname: string): string {
           </button>
         </div>
       </div>
+
+      <div class="difficulty-section">
+        <h2 class="section-title">Board view</h2>
+        <div class="difficulty-row view-row" role="radiogroup" aria-label="Board view">
+          <button
+            v-for="opt in boardViewOptions"
+            :key="opt.value"
+            type="button"
+            class="difficulty-chip"
+            :class="{ active: boardView === opt.value }"
+            role="radio"
+            :aria-checked="boardView === opt.value"
+            @click="boardView = opt.value"
+          >
+            <span class="diff-label">{{ opt.label }}</span>
+            <span class="diff-detail">{{ opt.detail }}</span>
+          </button>
+        </div>
+      </div>
     </section>
 
     <section v-else class="mode-summary card">
@@ -162,7 +191,9 @@ function seatInitial(nickname: string): string {
       <div>
         <p class="mode-summary-label">{{ activeMode.label }}</p>
         <p class="mode-summary-desc">{{ activeMode.description }}</p>
-        <p class="mode-summary-diff">AI · {{ activeDifficulty.label }}</p>
+        <p class="mode-summary-diff">
+          AI · {{ activeDifficulty.label }} · {{ activeBoardView.label }} board
+        </p>
       </div>
     </section>
 
@@ -396,6 +427,10 @@ function seatInitial(nickname: string): string {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.55rem;
+}
+
+.difficulty-row.view-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .difficulty-chip {
@@ -800,7 +835,8 @@ function seatInitial(nickname: string): string {
 
 @media (max-width: 560px) {
   .mode-selector,
-  .difficulty-row {
+  .difficulty-row,
+  .difficulty-row.view-row {
     grid-template-columns: 1fr;
   }
 

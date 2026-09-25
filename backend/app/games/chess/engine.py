@@ -18,6 +18,7 @@ class ChessEngine(GamePlugin):
             "max_players": 2,
             "solo_practice": False,
             "ai_difficulty": "medium",  # easy | medium | hard
+            "board_view": "2d",  # 2d | 3d
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -30,6 +31,8 @@ class ChessEngine(GamePlugin):
         if difficulty not in ("easy", "medium", "hard"):
             difficulty = "medium"
         merged["ai_difficulty"] = difficulty
+        board_view = str(merged.get("board_view", "2d")).lower()
+        merged["board_view"] = board_view if board_view in ("2d", "3d") else "2d"
         return merged
 
     def validate_lobby(self, players: list[dict], settings: dict) -> str | None:

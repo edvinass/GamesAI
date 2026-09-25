@@ -81,6 +81,15 @@ def test_ai_returns_legal_move():
     )
 
 
+def test_board_view_setting():
+    engine = ChessEngine()
+    assert engine.validate_settings({})["board_view"] == "2d"
+    assert engine.validate_settings({"board_view": "3D"})["board_view"] == "3d"
+    assert engine.validate_settings({"board_view": "vr"})["board_view"] == "2d"
+    state = engine.create_initial_state(_players(), {"board_view": "3d"})
+    assert engine.get_public_state(state, {"id": "p1"})["settings"]["board_view"] == "3d"
+
+
 def test_castling_rights_and_fen():
     position = chess.parse_fen(chess.START_FEN)
     assert position["castling"] == "KQkq"
