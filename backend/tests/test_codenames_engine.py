@@ -12,6 +12,15 @@ def _make_state() -> dict:
     )
 
 
+def test_ai_model_setting_accepts_openai_and_falls_back() -> None:
+    engine = CodenamesEngine()
+
+    assert engine.validate_settings({})["ai_model"] == "deepseek-v4-pro"
+    assert engine.validate_settings({"ai_model": "gpt-6-astra"})["ai_model"] == "gpt-6-astra"
+    assert engine.validate_settings({"ai_model": "gpt-6.1-sol"})["ai_model"] == "gpt-6.1-sol"
+    assert engine.validate_settings({"ai_model": "gpt-4o"})["ai_model"] == "deepseek-v4-pro"
+
+
 def test_spymaster_sees_all_card_colors() -> None:
     engine = CodenamesEngine()
     state = _make_state()

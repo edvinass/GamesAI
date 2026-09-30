@@ -254,7 +254,7 @@ async def test_fallback_clue_accepts_multi_target_before_singles(monkeypatch) ->
             }
         )
 
-    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+    monkeypatch.setattr(codenames_ai, "llm_chat", fake_chat)
     monkeypatch.setattr(
         codenames_ai,
         "_fallback_target_groups",
@@ -381,7 +381,7 @@ async def test_spymaster_retries_after_failed_self_check(monkeypatch) -> None:
             }
         )
 
-    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+    monkeypatch.setattr(codenames_ai, "llm_chat", fake_chat)
 
     clue, number, targets = await ai_spymaster_clue(state, "red")
 
@@ -414,7 +414,7 @@ async def test_spymaster_accepts_partial_self_check_as_smaller_clue(monkeypatch)
             }
         )
 
-    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+    monkeypatch.setattr(codenames_ai, "llm_chat", fake_chat)
 
     clue, number, targets = await ai_spymaster_clue(state, "red")
 
@@ -467,7 +467,7 @@ async def test_spymaster_shrinks_from_3_to_2_after_self_check_fails(monkeypatch)
             }
         )
 
-    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+    monkeypatch.setattr(codenames_ai, "llm_chat", fake_chat)
 
     clue, number, targets = await ai_spymaster_clue(state, "red")
 
@@ -522,7 +522,7 @@ async def test_fallback_skips_clue_that_fails_self_check(monkeypatch) -> None:
             }
         )
 
-    monkeypatch.setattr(codenames_ai, "deepseek_chat", fake_chat)
+    monkeypatch.setattr(codenames_ai, "llm_chat", fake_chat)
     monkeypatch.setattr(
         codenames_ai,
         "_fallback_target_groups",

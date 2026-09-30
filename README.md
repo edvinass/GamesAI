@@ -69,6 +69,9 @@ The Vite dev server proxies `/api` and `/ws` to `http://localhost:8000`. Update 
 | `DEEPSEEK_MODEL` | Model name (default: `deepseek-v4-pro`) |
 | `DEEPSEEK_THINKING` | Enable chain-of-thought reasoning (default: `true`) |
 | `DEEPSEEK_REASONING_EFFORT` | Reasoning depth: `high` or `max` (default: `max`) |
+| `OPENAI_API_KEY` | OpenAI API key, used when a Codenames lobby picks GPT-6 Astra or GPT-6.1 Sol |
+| `OPENAI_BASE_URL` | OpenAI API base URL (default: `https://api.openai.com/v1`) |
+| `OPENAI_REASONING_EFFORT` | Reasoning depth for those models: `low`, `medium`, `high`, `xhigh`, or `max` (default: `high`) |
 | `SECRET_KEY` | Session signing key |
 | `CORS_ORIGINS` | Comma-separated allowed origins |
 
@@ -94,6 +97,7 @@ Each service picks up its [`railway.toml`](backend/railway.toml) for health chec
 | `DATABASE_URL` | Reference from Postgres plugin |
 | `SECRET_KEY` | Strong random value |
 | `DEEPSEEK_API_KEY` | Your DeepSeek API key |
+| `OPENAI_API_KEY` | Optional. Set this if hosts will pick a GPT-6 model |
 | `CORS_ORIGINS` | Frontend public URL |
 
 **frontend service**
@@ -133,7 +137,7 @@ See [`.env.example`](.env.example) for the full variable reference.
 - **Backend:** FastAPI + SQLAlchemy + Alembic
 - **Database:** PostgreSQL
 - **Real-time:** WebSockets for lobby and game state
-- **AI:** DeepSeek API for Codenames spymaster/operative logic
+- **AI:** DeepSeek by default for Codenames spymaster and operative logic. The lobby can switch that room to GPT-6 Astra or GPT-6.1 Sol.
 
 ## Adding New Games
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.games.base import GamePlugin
+from app.games.codenames.ai_models import AI_MODELS, DEFAULT_AI_MODEL
 from app.games.codenames.clue_validation import validate_clue_word
 
 WORD_LIST_DIR = Path(__file__).parent / "word_lists"
@@ -20,6 +21,7 @@ class CodenamesEngine(GamePlugin):
         return {
             "language": "en",
             "solo_practice": False,
+            "ai_model": DEFAULT_AI_MODEL,
         }
 
     def validate_settings(self, settings: dict) -> dict:
@@ -28,6 +30,8 @@ class CodenamesEngine(GamePlugin):
         if merged["language"] not in ("en",):
             merged["language"] = "en"
         merged["solo_practice"] = bool(merged.get("solo_practice", False))
+        model = str(merged.get("ai_model") or DEFAULT_AI_MODEL).strip()
+        merged["ai_model"] = model if model in AI_MODELS else DEFAULT_AI_MODEL
         return merged
 
     def _load_words(self, language: str) -> list[str]:

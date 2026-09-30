@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-v4-pro"
     deepseek_thinking: bool = True
     deepseek_reasoning_effort: str = "max"
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_reasoning_effort: str = "high"
 
     @field_validator("database_url", mode="before")
     @classmethod

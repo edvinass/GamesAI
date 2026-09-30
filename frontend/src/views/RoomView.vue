@@ -167,6 +167,17 @@ const lobbyValidation = computed(() => {
   return validateCodenamesLobby(room.value)
 })
 
+const CODENAMES_AI_MODELS = [
+  { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+  { id: 'gpt-6-astra', label: 'GPT-6 Astra' },
+  { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
+] as const
+
+const aiModel = computed({
+  get: () => String(room.value?.settings?.ai_model ?? 'deepseek-v4-pro'),
+  set: (val: string) => updateSettings({ ai_model: val }),
+})
+
 const soloPractice = computed({
   get: () => Boolean(room.value?.settings?.solo_practice),
   set: (val: boolean) =>
@@ -455,6 +466,14 @@ function startGame() {
           <label class="checkbox-label">
             <input type="checkbox" v-model="soloPractice" />
             Solo practice (play against AI)
+          </label>
+          <label class="setting-field">
+            <span class="setting-label">AI model</span>
+            <select v-model="aiModel" class="setting-select">
+              <option v-for="model in CODENAMES_AI_MODELS" :key="model.id" :value="model.id">
+                {{ model.label }}
+              </option>
+            </select>
           </label>
         </div>
         <p v-else-if="!isHost" class="av-tip">
@@ -947,6 +966,27 @@ function startGame() {
   gap: 0.5rem;
   cursor: pointer;
   font-size: 0.9rem;
+}
+
+.setting-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+
+.setting-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.setting-select {
+  max-width: 100%;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
 }
 
 .solo-notice {

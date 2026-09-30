@@ -11,9 +11,26 @@ from app.games.codenames.clue_validation import (
     conflicting_board_word,
     validate_clue_word,
 )
-from app.services.deepseek import deepseek_chat
+from app.games.codenames.ai_models import DEFAULT_AI_MODEL
+from app.services.llm import llm_chat
 
 logger = logging.getLogger(__name__)
+
+
+def _ai_model(state: dict) -> str:
+    settings = state.get("settings") or {}
+    model = settings.get("ai_model")
+    return str(model) if model else DEFAULT_AI_MODEL
+
+
+async def _chat(state: dict, prompt: str, system: str, temperature: float) -> str:
+    return await llm_chat(
+        prompt,
+        system=system,
+        temperature=temperature,
+        json_mode=True,
+        model=_ai_model(state),
+    )
 
 SPYMASTER_TEMPERATURE = 0.3
 OPERATIVE_TEMPERATURE = 0.5
@@ -724,12 +741,7 @@ async def _simulate_operative_guesses(
     prompt = _build_operative_prompt(sim, team, number)
 
     try:
-        response = await deepseek_chat(
-            prompt,
-            system=OPERATIVE_SYSTEM,
-            temperature=OPERATIVE_TEMPERATURE,
-            json_mode=True,
-        )
+        response = await _chat(state, prompt, OPERATIVE_SYSTEM, OPERATIVE_TEMPERATURE)
         data = _parse_json(response)
     except Exception as e:
         logger.warning("Clue self-check operative simulation failed: %s", e)
@@ -808,12 +820,7 @@ async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
             continue
         prompt = _build_focused_fallback_prompt(group, avoid, other_board_words)
         try:
-            response = await deepseek_chat(
-                prompt,
-                system=SPYMASTER_SYSTEM,
-                temperature=SPYMASTER_TEMPERATURE,
-                json_mode=True,
-            )
+            response = await _chat(state, prompt, SPYMASTER_SYSTEM, SPYMASTER_TEMPERATURE)
             data = _parse_json(response)
             validated = _validate_spymaster_response(data, targets, board_words, avoid)
             if not validated or not _accept_focused_fallback(validated, group):
@@ -840,12 +847,7 @@ async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
                 continue
             prompt = _build_focused_fallback_prompt(group, avoid, other_board_words)
             try:
-                response = await deepseek_chat(
-                    prompt,
-                    system=SPYMASTER_SYSTEM,
-                    temperature=SPYMASTER_TEMPERATURE,
-                    json_mode=True,
-                )
+                response = await _chat(state, prompt, SPYMASTER_SYSTEM, SPYMASTER_TEMPERATURE)
                 data = _parse_json(response)
                 validated = _validate_spymaster_response(data, targets, board_words, avoid)
                 if not validated or not _accept_focused_fallback(validated, group):
@@ -882,12 +884,7 @@ async def ai_spymaster_clue(state: dict, team: str) -> tuple[str, int, list[str]
         for attempt in range(_size_attempts(preferred_n)):
             try:
                 full_prompt = f"{base_prompt}\n\n{feedback}"
-                response = await deepseek_chat(
-                    full_prompt,
-                    system=SPYMASTER_SYSTEM,
-                    temperature=SPYMASTER_TEMPERATURE,
-                    json_mode=True,
-                )
+                response = await _chat(state, full_prompt, SPYMASTER_SYSTEM, SPYMASTER_TEMPERATURE)
                 data = _parse_json(response)
                 validated = _validate_spymaster_response(data, targets, board_words, avoid)
                 if not validated:
@@ -996,12 +993,7 @@ async def ai_operative_guesses(state: dict, team: str, max_guesses: int) -> list
     for attempt in range(OPERATIVE_ATTEMPTS):
         try:
             full_prompt = prompt if not feedback else f"{prompt}\n\nPrevious invalid response:\n{feedback}"
-            response = await deepseek_chat(
-                full_prompt,
-                system=OPERATIVE_SYSTEM,
-                temperature=OPERATIVE_TEMPERATURE,
-                json_mode=True,
-            )
+            response = await _chat(state, full_prompt, OPERATIVE_SYSTEM, OPERATIVE_TEMPERATURE)
             data = _parse_json(response)
             guesses = _parse_operative_guesses(data, state, limit, clue_number, team)
             if guesses:
