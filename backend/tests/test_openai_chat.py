@@ -2,23 +2,41 @@ import pytest
 
 from app.games.codenames.ai_models import DEFAULT_AI_MODEL
 from app.services.llm import llm_chat
-from app.services.openai_chat import build_openai_payload
+from app.services.openai_chat import build_openai_payload, extract_response_text
 
 
-def test_openai_payload_omits_temperature_and_requests_json() -> None:
+def test_openai_payload_uses_responses_api_without_temperature() -> None:
     payload = build_openai_payload(
         "gpt-6-astra",
         "Give a clue.",
         "You are a spymaster.",
         json_mode=True,
         reasoning_effort="high",
+        json_schema={"type": "object"},
+        schema_name="spymaster_clue",
     )
 
     assert payload["model"] == "gpt-6-astra"
-    assert payload["reasoning_effort"] == "high"
-    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["reasoning"] == {"effort": "high"}
+    assert payload["text"]["format"]["type"] == "json_schema"
+    assert payload["text"]["format"]["name"] == "spymaster_clue"
     assert "temperature" not in payload
-    assert payload["max_completion_tokens"] >= 1024
+    assert "messages" not in payload
+    assert payload["max_output_tokens"] >= 1024
+
+
+def test_extract_response_text_skips_reasoning_items() -> None:
+    data = {
+        "output": [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "thinking"}]},
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": '{"current_guesses": []}'}],
+            },
+        ]
+    }
+
+    assert extract_response_text(data) == '{"current_guesses": []}'
 
 
 @pytest.mark.asyncio

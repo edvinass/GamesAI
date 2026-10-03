@@ -9,6 +9,7 @@ from app.games.codenames.ai import (
     _clue_self_check_passes,
     _fallback_target_groups,
     _min_acceptable_targets,
+    _parse_json,
     _parse_operative_guesses,
     _resolve_self_check_targets,
     ai_spymaster_clue,
@@ -154,6 +155,44 @@ def test_after_current_clue_filled_bonus_targets_prior_clues() -> None:
     result = _parse_operative_guesses(data, state, limit=2, clue_number=2, team="red")
 
     assert result == [3, 4]
+
+
+def test_word_guess_maps_to_unrevealed_card() -> None:
+    state = _base_state(clue_number=1)
+    state["cards"][7]["word"] = "APPLE"
+    data = {
+        "current_guesses": [{"word": "apple", "confidence": "80%"}],
+        "bonus_guess": None,
+    }
+
+    result = _parse_operative_guesses(data, state, limit=2, clue_number=1, team="red")
+
+    assert result[0] == 7
+
+
+def test_cautious_first_guess_is_kept() -> None:
+    state = _base_state(clue_number=2)
+    state["red_remaining"] = 8
+    state["blue_remaining"] = 4
+    data = {
+        "current_guesses": [{"index": 5, "confidence": 0.4}],
+        "bonus_guess": None,
+    }
+
+    result = _parse_operative_guesses(data, state, limit=2, clue_number=2, team="red")
+
+    assert result[0] == 5
+
+
+def test_parse_json_prefers_guesses_over_number_preamble() -> None:
+    text = (
+        '{"number": 1}\n'
+        '{"current_guesses": [{"index": 4, "confidence": 0.8}], "bonus_guess": null}'
+    )
+
+    data = _parse_json(text)
+
+    assert data["current_guesses"][0]["index"] == 4
 
 
 def test_legacy_guesses_array_still_parses_current_only() -> None:

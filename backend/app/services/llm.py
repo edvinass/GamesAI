@@ -11,6 +11,8 @@ async def llm_chat(
     temperature: float = 0.7,
     json_mode: bool = False,
     model: str | None = None,
+    json_schema: dict | None = None,
+    schema_name: str = "response",
 ) -> str:
     chosen = (model or "").strip() or settings.deepseek_model
     if is_openai_model(chosen):
@@ -20,6 +22,8 @@ async def llm_chat(
             temperature=temperature,
             json_mode=json_mode,
             model=chosen,
+            json_schema=json_schema,
+            schema_name=schema_name,
         )
     return await deepseek_chat(
         prompt,

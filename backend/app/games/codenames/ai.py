@@ -23,13 +23,65 @@ def _ai_model(state: dict) -> str:
     return str(model) if model else DEFAULT_AI_MODEL
 
 
-async def _chat(state: dict, prompt: str, system: str, temperature: float) -> str:
+_GUESS_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "index": {"type": "integer"},
+        "confidence": {"type": "number"},
+    },
+    "required": ["index", "confidence"],
+    "additionalProperties": False,
+}
+
+OPERATIVE_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "current_guesses": {"type": "array", "items": _GUESS_ITEM_SCHEMA},
+        "bonus_guess": {
+            "anyOf": [
+                {"type": "null"},
+                _GUESS_ITEM_SCHEMA,
+            ]
+        },
+    },
+    "required": ["current_guesses", "bonus_guess"],
+    "additionalProperties": False,
+}
+
+SPYMASTER_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "clue": {"type": "string"},
+        "number": {"type": "integer"},
+        "targets": {"type": "array", "items": {"type": "string"}},
+        "risky_words": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["clue", "number", "targets", "risky_words"],
+    "additionalProperties": False,
+}
+
+JSON_SCHEMAS = {
+    "operative_guesses": OPERATIVE_JSON_SCHEMA,
+    "spymaster_clue": SPYMASTER_JSON_SCHEMA,
+}
+
+
+async def _chat(
+    state: dict,
+    prompt: str,
+    system: str,
+    temperature: float,
+    *,
+    schema_name: str,
+) -> str:
     return await llm_chat(
         prompt,
         system=system,
         temperature=temperature,
         json_mode=True,
         model=_ai_model(state),
+        json_schema=JSON_SCHEMAS[schema_name],
+        schema_name=schema_name,
     )
 
 SPYMASTER_TEMPERATURE = 0.3
@@ -376,22 +428,71 @@ def _used_clue_words(state: dict, team: str) -> str:
     return ", ".join(words) if words else "None"
 
 
+def _confidence(value: Any) -> float:
+    if value is None or value == "":
+        return 0.75
+    if isinstance(value, str):
+        value = value.strip().rstrip("%")
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.75
+    if number > 1:
+        number = number / 100
+    return max(0.0, min(1.0, number))
+
+
+def _index_for_word(state: dict, word: str) -> int | None:
+    key = word.strip().upper()
+    if not key:
+        return None
+    for card in state["cards"]:
+        if str(card["word"]).upper() == key and not card["revealed"]:
+            return int(card["index"])
+    return None
+
+
+def _unrevealed_index(state: dict, idx: int) -> bool:
+    return 0 <= idx < len(state["cards"]) and not state["cards"][idx]["revealed"]
+
+
 def _parse_guess_item(item: Any, state: dict) -> tuple[int, float] | None:
+    conf = 0.75
+    idx: int | None = None
     if isinstance(item, dict):
+        conf = _confidence(item.get("confidence"))
+        raw_index = item.get("index", item.get("card_index", item.get("card")))
+        if raw_index is not None and raw_index != "":
+            try:
+                candidate = int(raw_index)
+            except (TypeError, ValueError):
+                candidate = _index_for_word(state, str(raw_index))
+            if candidate is not None and _unrevealed_index(state, candidate):
+                idx = candidate
+        if idx is None:
+            for key in ("word", "guess", "target"):
+                raw_word = item.get(key)
+                if isinstance(raw_word, str):
+                    idx = _index_for_word(state, raw_word)
+                    if idx is not None:
+                        break
+    elif isinstance(item, str):
         try:
-            idx = int(item.get("index", -1))
-            conf = float(item.get("confidence", 0.75))
-        except (TypeError, ValueError):
-            return None
+            candidate = int(item)
+        except ValueError:
+            candidate = _index_for_word(state, item)
+        if candidate is not None and _unrevealed_index(state, candidate):
+            idx = candidate
     else:
         try:
-            idx = int(item)
-            conf = 0.75
+            candidate = int(item)
         except (TypeError, ValueError):
             return None
-    if 0 <= idx < 25 and not state["cards"][idx]["revealed"]:
-        return idx, max(0.0, min(1.0, conf))
-    return None
+        if _unrevealed_index(state, candidate):
+            idx = candidate
+    if idx is None:
+        return None
+    return idx, conf
 
 
 def _parse_guess_list(raw: Any, state: dict) -> list[tuple[int, float]]:
@@ -526,7 +627,7 @@ def _parse_operative_guesses(
         if not has_unresolved:
             return []
         bonus = _parse_guess_item(data.get("bonus_guess"), state)
-        if bonus and bonus[1] >= threshold:
+        if bonus and bonus[1] >= SELF_CHECK_CONFIDENCE:
             return [bonus[0]][:limit]
         return []
 
@@ -538,7 +639,10 @@ def _parse_operative_guesses(
     for idx, conf in current_candidates:
         if len(result) >= regular_slots_left or len(result) >= limit:
             break
-        if conf >= threshold:
+        # The first real pick can sit a bit under the chain threshold.
+        # Dropping it made cautious models pass the whole turn.
+        floor = SELF_CHECK_CONFIDENCE if not result else threshold
+        if conf >= floor:
             result.append(idx)
         else:
             break
@@ -741,7 +845,9 @@ async def _simulate_operative_guesses(
     prompt = _build_operative_prompt(sim, team, number)
 
     try:
-        response = await _chat(state, prompt, OPERATIVE_SYSTEM, OPERATIVE_TEMPERATURE)
+        response = await _chat(
+            state, prompt, OPERATIVE_SYSTEM, OPERATIVE_TEMPERATURE, schema_name="operative_guesses"
+        )
         data = _parse_json(response)
     except Exception as e:
         logger.warning("Clue self-check operative simulation failed: %s", e)
@@ -820,7 +926,9 @@ async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
             continue
         prompt = _build_focused_fallback_prompt(group, avoid, other_board_words)
         try:
-            response = await _chat(state, prompt, SPYMASTER_SYSTEM, SPYMASTER_TEMPERATURE)
+            response = await _chat(
+                state, prompt, SPYMASTER_SYSTEM, SPYMASTER_TEMPERATURE, schema_name="spymaster_clue"
+            )
             data = _parse_json(response)
             validated = _validate_spymaster_response(data, targets, board_words, avoid)
             if not validated or not _accept_focused_fallback(validated, group):
@@ -847,7 +955,9 @@ async def fallback_clue(state: dict, team: str) -> tuple[str, int, list[str]]:
                 continue
             prompt = _build_focused_fallback_prompt(group, avoid, other_board_words)
             try:
-                response = await _chat(state, prompt, SPYMASTER_SYSTEM, SPYMASTER_TEMPERATURE)
+                response = await _chat(
+                state, prompt, SPYMASTER_SYSTEM, SPYMASTER_TEMPERATURE, schema_name="spymaster_clue"
+            )
                 data = _parse_json(response)
                 validated = _validate_spymaster_response(data, targets, board_words, avoid)
                 if not validated or not _accept_focused_fallback(validated, group):
@@ -884,7 +994,13 @@ async def ai_spymaster_clue(state: dict, team: str) -> tuple[str, int, list[str]
         for attempt in range(_size_attempts(preferred_n)):
             try:
                 full_prompt = f"{base_prompt}\n\n{feedback}"
-                response = await _chat(state, full_prompt, SPYMASTER_SYSTEM, SPYMASTER_TEMPERATURE)
+                response = await _chat(
+                    state,
+                    full_prompt,
+                    SPYMASTER_SYSTEM,
+                    SPYMASTER_TEMPERATURE,
+                    schema_name="spymaster_clue",
+                )
                 data = _parse_json(response)
                 validated = _validate_spymaster_response(data, targets, board_words, avoid)
                 if not validated:
@@ -993,7 +1109,13 @@ async def ai_operative_guesses(state: dict, team: str, max_guesses: int) -> list
     for attempt in range(OPERATIVE_ATTEMPTS):
         try:
             full_prompt = prompt if not feedback else f"{prompt}\n\nPrevious invalid response:\n{feedback}"
-            response = await _chat(state, full_prompt, OPERATIVE_SYSTEM, OPERATIVE_TEMPERATURE)
+            response = await _chat(
+                state,
+                full_prompt,
+                OPERATIVE_SYSTEM,
+                OPERATIVE_TEMPERATURE,
+                schema_name="operative_guesses",
+            )
             data = _parse_json(response)
             guesses = _parse_operative_guesses(data, state, limit, clue_number, team)
             if guesses:
@@ -1045,7 +1167,8 @@ def _parse_json(text: str) -> dict[str, Any]:
         raise json.JSONDecodeError("No JSON object found", text, 0)
 
     # Models sometimes emit a short preamble object then the real payload.
-    preferred_keys = ("clue", "guesses", "targets", "number")
+    # "number" is too generic and was selecting that preamble over the guesses.
+    preferred_keys = ("current_guesses", "bonus_guess", "guesses", "clue", "targets")
     for key in preferred_keys:
         for obj in reversed(objects):
             if key in obj:

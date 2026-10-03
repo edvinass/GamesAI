@@ -71,7 +71,7 @@ The Vite dev server proxies `/api` and `/ws` to `http://localhost:8000`. Update 
 | `DEEPSEEK_REASONING_EFFORT` | Reasoning depth: `high` or `max` (default: `max`) |
 | `OPENAI_API_KEY` | OpenAI API key, used when a Codenames lobby picks GPT-6 Astra or GPT-6.1 Sol |
 | `OPENAI_BASE_URL` | OpenAI API base URL (default: `https://api.openai.com/v1`) |
-| `OPENAI_REASONING_EFFORT` | Reasoning depth for those models: `low`, `medium`, `high`, `xhigh`, or `max` (default: `high`) |
+| `OPENAI_REASONING_EFFORT` | Reasoning depth for those models: `low`, `medium`, `high`, `xhigh`, or `max` (default: `high`). `low` or `medium` is plenty for Codenames and answers faster |
 | `SECRET_KEY` | Session signing key |
 | `CORS_ORIGINS` | Comma-separated allowed origins |
 
