@@ -6,6 +6,7 @@ from app.games.codenames import ai as codenames_ai
 from app.games.codenames.ai import (
     _accept_focused_fallback,
     _build_focused_fallback_prompt,
+    _build_operative_prompt,
     _clue_self_check_passes,
     _fallback_target_groups,
     _min_acceptable_targets,
@@ -323,6 +324,15 @@ def _board_state() -> dict:
         "blue_remaining": 5,
         "clue_history": {"red": [], "blue": []},
     }
+
+
+def test_linkage_check_asks_for_every_target() -> None:
+    state = _base_state(clue_number=2)
+    prompt = _build_operative_prompt(state, "red", 2, linkage_check=True)
+
+    assert "Return exactly 2 current_guesses" in prompt
+    assert "Do not stop early" in prompt
+    assert prompt.count('"index":') >= 2
 
 
 def test_clue_self_check_passes_all_targets_safe() -> None:

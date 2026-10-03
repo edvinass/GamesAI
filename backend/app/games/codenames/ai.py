@@ -509,7 +509,25 @@ def _parse_guess_list(raw: Any, state: dict) -> list[tuple[int, float]]:
     return parsed
 
 
-def _build_operative_prompt(state: dict, team: str, max_guesses: int) -> str:
+def _guess_example(count: int) -> str:
+    """Format sample only. Indexes are placeholders, not suggested cards."""
+    items = ", ".join(
+        f'{{"index": {i}, "confidence": 0.9}}' for i in range(max(1, count))
+    )
+    return (
+        f'{{"current_guesses": [{items}], "bonus_guess": null}}\n'
+        "Replace every index with a real unrevealed card index. "
+        "Do not copy the placeholder indexes."
+    )
+
+
+def _build_operative_prompt(
+    state: dict,
+    team: str,
+    max_guesses: int,
+    *,
+    linkage_check: bool = False,
+) -> str:
     clue = state.get("current_clue") or {}
     clue_word = clue.get("word", "")
     clue_number = clue.get("number", 0)
@@ -559,11 +577,20 @@ Respond ONLY with compact JSON (no extra keys):
                 "\nDo not include bonus_guess — there are no unresolved prior clues to revisit."
             )
 
-        guess_section = f"""Pick up to {min(regular_slots_left, limit)} unrevealed card indices for the CURRENT clue only,
-ordered by confidence. Stop early if unsure — wrong guesses end your turn.{bonus_lines}
+        wanted = max(1, min(regular_slots_left, limit)) if clue_number > 0 else 1
+        if linkage_check and clue_number > 0:
+            guess_section = f"""Linkage check, not live play. Return exactly {clue_number} current_guesses for "{clue_word}".
+List the {clue_number} unrevealed words this clue most strongly connects, best match first.
+Do not stop early. Do not return fewer than {clue_number} guesses. Set bonus_guess to null.
+
+Respond ONLY with compact JSON:
+{_guess_example(clue_number)}"""
+        else:
+            guess_section = f"""Pick up to {wanted} unrevealed card indices for the CURRENT clue only,
+ordered by confidence. Stop early if unsure. Wrong guesses end your turn.{bonus_lines}
 
 Respond ONLY with compact JSON (no extra keys):
-{{"current_guesses": [{{"index": 0, "confidence": 0.9}}], "bonus_guess": null}}"""
+{_guess_example(wanted)}"""
 
     return f"""You are a {team.upper()} operative in Codenames.
 
@@ -842,7 +869,7 @@ async def _simulate_operative_guesses(
         return []
 
     sim = _state_for_clue_self_check(state, team, clue, number)
-    prompt = _build_operative_prompt(sim, team, number)
+    prompt = _build_operative_prompt(sim, team, number, linkage_check=True)
 
     try:
         response = await _chat(
