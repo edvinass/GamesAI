@@ -1421,6 +1421,22 @@ async def _process_chess_ai_turn(
         return False
 
     await asyncio.sleep(AI_CHESS_THINK_PAUSE_SEC)
+    # A human may have undone during the pause. Reload so the reply is not
+    # applied on top of a position that is no longer the AI's turn.
+    service.db.expire_all()
+    room = await service._load_room(room_id)
+    if not room or room.status != RoomStatus.PLAYING or not room.game_state:
+        return False
+    state = room.game_state.state
+    if state.get("winner") or state.get("phase") != "playing":
+        return False
+    actor_data = engine.get_current_actor(state)
+    if not actor_data:
+        return False
+    actor = next((p for p in room.players if str(p.id) == str(actor_data["id"])), None)
+    if not actor:
+        return False
+
     action = await asyncio.to_thread(choose_chess_move, state, str(actor_data["id"]))
     try:
         room, state, events = await service.apply_game_action(

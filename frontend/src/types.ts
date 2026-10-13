@@ -696,6 +696,7 @@ export interface ChessGameState {
   winner_color: 'w' | 'b' | null
   win_reason: string | null
   draw_offer_from?: string | null
+  can_undo?: boolean
   settings: Record<string, unknown>
   host_id: string | null
   viewer_id: string | null

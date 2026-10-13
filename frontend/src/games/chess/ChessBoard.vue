@@ -260,6 +260,15 @@ function choosePromotion(piece: string) {
   selected.value = null
 }
 
+const canUndo = computed(() => Boolean(props.gameState.can_undo) && !isSpectator.value)
+
+function undoMove() {
+  if (!canUndo.value) return
+  selected.value = null
+  pendingPromotion.value = null
+  emit('action', { type: 'undo' })
+}
+
 function resign() {
   if (props.gameState.phase !== 'playing' || isSpectator.value) return
   if (window.confirm('Resign this game?')) {
@@ -566,6 +575,15 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
         </div>
 
         <div v-if="!isSpectator && gameState.phase === 'playing'" class="action-row">
+          <button
+            type="button"
+            class="btn-secondary undo"
+            :disabled="!canUndo"
+            :title="canUndo ? 'Take back your last move' : 'Nothing to take back'"
+            @click="undoMove"
+          >
+            Undo
+          </button>
           <button type="button" class="btn-secondary" @click="offerDraw">Offer draw</button>
           <button type="button" class="btn-secondary danger" @click="resign">Resign</button>
         </div>
@@ -1185,6 +1203,10 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.45rem;
+}
+
+.action-row .undo {
+  grid-column: 1 / -1;
 }
 
 .action-row .btn-secondary {

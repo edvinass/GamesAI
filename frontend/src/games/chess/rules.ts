@@ -16,7 +16,7 @@ export const chessRules: GameRules = {
     },
     {
       heading: 'Special moves',
-      body: 'Castling, en passant, and pawn promotion are fully supported. You cannot castle out of check or through attacked squares.',
+      body: 'Castling, en passant, and pawn promotion are fully supported. You cannot castle out of check or through attacked squares. Undo takes back your last move. Against the AI it also removes the computer reply.',
     },
     {
       heading: 'Winning',

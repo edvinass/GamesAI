@@ -90,6 +90,95 @@ def test_board_view_setting():
     assert engine.get_public_state(state, {"id": "p1"})["settings"]["board_view"] == "3d"
 
 
+def test_undo_own_move_before_reply():
+    engine = ChessEngine()
+    state = engine.create_initial_state(_players(), {})
+    state, _ = engine.apply_action(
+        state, {"type": "move", "from": "e2", "to": "e4"}, {"id": "p1"}
+    )
+    state["draw_offer_from"] = "p2"
+    assert engine.get_public_state(state, {"id": "p1"})["can_undo"] is True
+
+    state, events = engine.apply_action(state, {"type": "undo"}, {"id": "p1"})
+    assert state["move_history"] == []
+    assert state["last_move"] is None
+    assert state["current_actor_id"] == "p1"
+    assert state["current_color"] == "w"
+    assert state["draw_offer_from"] is None
+    assert state["fen"].startswith("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w")
+    assert any(e["type"] == "move_undone" and e["plies"] == 1 for e in events)
+
+
+def test_undo_restores_capture():
+    engine = ChessEngine()
+    humans = [
+        {"id": "p1", "nickname": "Alice", "is_ai": False},
+        {"id": "p2", "nickname": "Bob", "is_ai": False},
+    ]
+    state = engine.create_initial_state(humans, {})
+    for pid, frm, to in (("p1", "e2", "e4"), ("p2", "d7", "d5"), ("p1", "e4", "d5")):
+        state, _ = engine.apply_action(state, {"type": "move", "from": frm, "to": to}, {"id": pid})
+    assert state["board"][4][3] == "P"
+
+    state, _ = engine.apply_action(state, {"type": "undo"}, {"id": "p1"})
+    assert state["board"][4][3] == "p"
+    assert state["board"][3][4] == "P"
+    assert state["current_actor_id"] == "p1"
+    assert len(state["move_history"]) == 2
+
+
+def test_undo_against_ai_removes_reply():
+    engine = ChessEngine()
+    state = engine.create_initial_state(_players(), {"solo_practice": True})
+    state, _ = engine.apply_action(
+        state, {"type": "move", "from": "e2", "to": "e4"}, {"id": "p1"}
+    )
+    state, _ = engine.apply_action(
+        state, {"type": "move", "from": "e7", "to": "e5"}, {"id": "p2"}
+    )
+    assert engine.get_public_state(state, {"id": "p1"})["can_undo"] is True
+    assert engine.get_public_state(state, {"id": "p2"})["can_undo"] is False
+
+    state, events = engine.apply_action(state, {"type": "undo"}, {"id": "p1"})
+    assert state["move_history"] == []
+    assert state["current_actor_id"] == "p1"
+    assert any(e["plies"] == 2 for e in events)
+
+
+def test_undo_blocked_after_human_reply():
+    engine = ChessEngine()
+    humans = [
+        {"id": "p1", "nickname": "Alice", "is_ai": False},
+        {"id": "p2", "nickname": "Bob", "is_ai": False},
+    ]
+    state = engine.create_initial_state(humans, {})
+    state, _ = engine.apply_action(
+        state, {"type": "move", "from": "e2", "to": "e4"}, {"id": "p1"}
+    )
+    state, _ = engine.apply_action(
+        state, {"type": "move", "from": "e7", "to": "e5"}, {"id": "p2"}
+    )
+    public = engine.get_public_state(state, {"id": "p1"})
+    assert public["can_undo"] is False
+    assert engine.get_public_state(state, {"id": "p2"})["can_undo"] is True
+    try:
+        engine.apply_action(state, {"type": "undo"}, {"id": "p1"})
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_undo_with_no_moves():
+    engine = ChessEngine()
+    state = engine.create_initial_state(_players(), {})
+    assert engine.get_public_state(state, {"id": "p1"})["can_undo"] is False
+    try:
+        engine.apply_action(state, {"type": "undo"}, {"id": "p1"})
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
 def test_castling_rights_and_fen():
     position = chess.parse_fen(chess.START_FEN)
     assert position["castling"] == "KQkq"

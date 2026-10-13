@@ -165,6 +165,9 @@ class ChessEngine(GamePlugin):
                 events.append({"type": "draw_declined", "player_id": player_id})
             return state, events
 
+        if action_type == "undo":
+            return self._undo(state, player_id, events)
+
         if action_type != "move":
             raise ValueError(f"Unknown action type: {action_type}")
 
@@ -255,6 +258,79 @@ class ChessEngine(GamePlugin):
 
         return state, events
 
+    def _undo_plies(self, state: dict, player_id: str) -> int:
+        """How many plies this player may take back.
+
+        A human can undo their own move until a human opponent replies.
+        Against an AI, the computer's reply is removed as well.
+        """
+        if state.get("phase") != "playing":
+            return 0
+        player = state["players"].get(player_id)
+        if not player or player.get("is_ai"):
+            return 0
+        history = state.get("move_history") or []
+        if not history:
+            return 0
+        if str(history[-1].get("player_id")) == player_id:
+            return 1
+        opponent_id = (
+            state["black_player_id"] if player["color"] == "w" else state["white_player_id"]
+        )
+        opponent = state["players"].get(opponent_id) or {}
+        if (
+            opponent.get("is_ai")
+            and len(history) >= 2
+            and str(history[-2].get("player_id")) == player_id
+        ):
+            return 2
+        return 0
+
+    def _replay_history(self, history: list[dict]) -> dict:
+        position = chess.parse_fen(chess.START_FEN)
+        for entry in history:
+            promotion = entry.get("promotion")
+            if promotion:
+                promotion = str(promotion).lower()
+            move = chess.find_move(position, str(entry["from"]), str(entry["to"]), promotion)
+            if not move:
+                raise ValueError("Could not replay move history")
+            position = chess.apply_move_raw(position, move)
+        return position
+
+    def _undo(self, state: dict, player_id: str, events: list[dict]) -> tuple[dict, list[dict]]:
+        if player_id not in state["players"]:
+            raise ValueError("You are not a player in this game")
+        plies = self._undo_plies(state, player_id)
+        if plies == 0:
+            raise ValueError("Nothing to undo")
+
+        history = list(state.get("move_history") or [])[:-plies]
+        position = self._replay_history(history)
+        board_status = chess.status(position)
+
+        state["position"] = position
+        state["fen"] = chess.board_to_fen(position)
+        state["board"] = chess.board_matrix(position)
+        state["current_color"] = position["turn"]
+        state["in_check"] = board_status["in_check"]
+        state["move_history"] = history
+        state["last_move"] = history[-1] if history else None
+        state["draw_offer_from"] = None
+        state["phase"] = "playing"
+        state["winner"] = None
+        state["winner_color"] = None
+        state["win_reason"] = None
+        state["current_actor_id"] = (
+            state["white_player_id"] if position["turn"] == "w" else state["black_player_id"]
+        )
+        state["legal_moves"] = [
+            {"from": m["from"], "to": m["to"], "promotion": m.get("promotion")}
+            for m in chess.generate_legal_moves(position)
+        ]
+        events.append({"type": "move_undone", "player_id": player_id, "plies": plies})
+        return state, events
+
     def get_public_state(self, state: dict, viewer_player: dict | None) -> dict:
         viewer_id = str(viewer_player["id"]) if viewer_player else None
         players = []
@@ -290,6 +366,7 @@ class ChessEngine(GamePlugin):
             "winner_color": state.get("winner_color"),
             "win_reason": state.get("win_reason"),
             "draw_offer_from": state.get("draw_offer_from"),
+            "can_undo": self._undo_plies(state, viewer_id) > 0 if viewer_id else False,
             "settings": state.get("settings", {}),
             "host_id": state.get("host_id"),
             "viewer_id": viewer_id,
