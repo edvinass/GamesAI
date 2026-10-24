@@ -21,13 +21,14 @@ import Connect4Board from '@/games/connect4/Connect4Board.vue'
 import BattleshipBoard from '@/games/battleship/BattleshipBoard.vue'
 import SolitaireBoard from '@/games/solitaire/SolitaireBoard.vue'
 import PinballBoard from '@/games/pinball/PinballBoard.vue'
+import ScribbleBoard from '@/games/scribble/ScribbleBoard.vue'
 import { useGoClientSolo } from '@/composables/useGoClientSolo'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
 import { pokerReactionSet } from '@/games/poker/reactions'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, MonopolyGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState, PinballGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isMonopolyState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState, isPinballState, mergeBombermanGameState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, MonopolyGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState, PinballGameState, ScribbleGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isMonopolyState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState, isPinballState, isScribbleState, mergeBombermanGameState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -64,6 +65,7 @@ const gameTitle = computed(() => {
   if (type === 'battleship') return 'Battleship'
   if (type === 'solitaire') return 'Solitaire'
   if (type === 'pinball') return 'Pinball'
+  if (type === 'scribble') return 'Scribble'
   return type ?? 'Game'
 })
 
@@ -137,6 +139,10 @@ const pinballState = computed(() =>
   gameState.value && isPinballState(gameState.value) ? gameState.value as PinballGameState : null,
 )
 
+const scribbleState = computed(() =>
+  gameState.value && isScribbleState(gameState.value) ? gameState.value as ScribbleGameState : null,
+)
+
 const playerId = computed(() => playerStore.playerId)
 
 const isPoker = computed(() => room.value?.game_type === 'poker')
@@ -145,7 +151,7 @@ const isMonopoly = computed(() => room.value?.game_type === 'monopoly')
 const isRoboRally = computed(() => room.value?.game_type === 'roborally')
 
 const isFullscreenGame = computed(() =>
-  Boolean(snakeState.value || bombermanState.value || pacmanState.value || duelState.value || tetrisState.value || gravityMasterState.value || monopolyState.value || chessState.value || goState.value || roborallyState.value || connect4State.value || battleshipState.value || solitaireState.value || pinballState.value),
+  Boolean(snakeState.value || bombermanState.value || pacmanState.value || duelState.value || tetrisState.value || gravityMasterState.value || monopolyState.value || chessState.value || goState.value || roborallyState.value || connect4State.value || battleshipState.value || solitaireState.value || pinballState.value || scribbleState.value),
 )
 
 const loadingMessage = computed(() => {
@@ -260,7 +266,7 @@ function backToLobby() {
             <span class="connection-dot" />
             {{ connected ? 'Live' : 'Reconnecting' }}
           </span>
-          <span v-if="room?.game_type !== 'duel' && room?.game_type !== 'roborally'" class="av-hint">💬 Voice chat optional — text Q&amp;A built in</span>
+          <span v-if="room?.game_type !== 'duel' && room?.game_type !== 'roborally' && room?.game_type !== 'scribble'" class="av-hint">💬 Voice chat optional — text Q&amp;A built in</span>
         </div>
       </div>
       <div class="header-actions">
@@ -412,6 +418,13 @@ function backToLobby() {
       v-else-if="pinballState && room"
       :game-state="pinballState"
       :room="room"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <ScribbleBoard
+      v-else-if="scribbleState && room"
+      :game-state="scribbleState"
       :player-id="playerStore.playerId"
       @action="sendAction"
     />

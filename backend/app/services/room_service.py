@@ -78,6 +78,7 @@ _NO_TEAM_LOBBY_GAMES = frozenset(
         "battleship",
         "connect4",
         "pinball",
+        "scribble",
     }
 )
 
@@ -507,6 +508,8 @@ class RoomService:
                 await self._setup_battleship_solo(room)
             elif room.game_type == "connect4":
                 await self._setup_connect4_solo(room)
+            elif room.game_type == "scribble":
+                await self._setup_scribble_solo(room)
             await self.db.refresh(room, ["players"])
         elif settings.get("single_player") and room.game_type in ("tetris", "pacman"):
             if room.game_type == "tetris":
@@ -852,6 +855,27 @@ class RoomService:
                 is_connected=True,
             )
         )
+        await self.db.flush()
+
+    async def _setup_scribble_solo(self, room: Room) -> None:
+        for p in list(room.players):
+            if p.is_ai:
+                await self.db.delete(p)
+        await self.db.flush()
+
+        for _ in range(3):
+            token = generate_session_token()
+            self.db.add(
+                RoomPlayer(
+                    room_id=room.id,
+                    nickname=_generate_ai_nickname(),
+                    session_token_hash=hash_session_token(token),
+                    team=None,
+                    role=None,
+                    is_ai=True,
+                    is_connected=True,
+                )
+            )
         await self.db.flush()
 
     async def _setup_connect4_solo(self, room: Room) -> None:

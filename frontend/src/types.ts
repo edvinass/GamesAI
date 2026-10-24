@@ -1063,7 +1063,71 @@ export interface PacmanGameState {
   viewer_id: string | null
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | PacmanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | MonopolyGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState | PinballGameState
+export interface ScribbleStroke {
+  color: string
+  size: number
+  points: number[][]
+}
+
+export interface ScribbleMessage {
+  id: number
+  player_id: string | null
+  nickname: string
+  text: string
+  kind: 'system' | 'wrong' | 'close' | 'correct'
+}
+
+export interface ScribbleAward {
+  player_id: string
+  nickname: string
+  points: number
+}
+
+export interface ScribbleWordOption {
+  text: string
+  difficulty: 'easy' | 'medium' | 'hard' | string
+}
+
+export interface ScribbleSeat {
+  id: string
+  nickname: string
+  is_ai: boolean
+  score: number
+  guessed: boolean
+  is_drawer: boolean
+}
+
+export interface ScribbleGameState {
+  game: 'scribble'
+  phase: 'choosing' | 'drawing' | 'reveal' | 'finished'
+  round: number
+  rounds: number
+  turn_index: number
+  total_turns: number
+  drawer_id: string | null
+  word: string | null
+  word_difficulty: string | null
+  word_options: ScribbleWordOption[] | null
+  word_mask: string
+  strokes: ScribbleStroke[]
+  messages: ScribbleMessage[]
+  guessed_ids: string[]
+  last_awards: ScribbleAward[]
+  players: ScribbleSeat[]
+  phase_ends_at: string | null
+  canvas_width: number
+  canvas_height: number
+  paper: string
+  winner: string | null
+  winner_ids: string[]
+  win_reason: string | null
+  viewer_id: string | null
+  viewer_is_drawer: boolean
+  viewer_has_guessed: boolean
+  settings: { rounds: number; draw_seconds: number }
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | PacmanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | MonopolyGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState | PinballGameState | ScribbleGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -1167,6 +1231,10 @@ export function isSolitaireState(state: GameState): state is SolitaireGameState 
 
 export function isPinballState(state: GameState): state is PinballGameState {
   return 'balls_remaining' in state && 'score' in state && !('snakes' in state)
+}
+
+export function isScribbleState(state: GameState): state is ScribbleGameState {
+  return 'word_mask' in state && 'drawer_id' in state && 'strokes' in state
 }
 
 export interface WsMessage {

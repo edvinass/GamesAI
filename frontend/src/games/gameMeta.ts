@@ -172,6 +172,15 @@ const metaByGameType: Record<string, GameMeta> = {
     players: 'Solo',
     accent: '#5352ed',
   },
+  scribble: {
+    name: 'Scribble',
+    description: 'Draw the word while everyone else races to guess it.',
+    emoji: '✏️',
+    lobbyHint: 'Need 2 to 8 players. Add AI seats or share the link, then start.',
+    category: 'party',
+    players: '2-8',
+    accent: '#e11d48',
+  },
 }
 
 export interface GameListItem {
