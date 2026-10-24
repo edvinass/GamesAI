@@ -181,6 +181,15 @@ const metaByGameType: Record<string, GameMeta> = {
     players: '2-8',
     accent: '#e11d48',
   },
+  scrabble: {
+    name: 'Scrabble',
+    description: 'Build words on the board and hunt premium squares.',
+    emoji: '🔤',
+    lobbyHint: 'Need 2 to 4 players. Add an AI seat or turn on solo play.',
+    category: 'classic',
+    players: '2-4',
+    accent: '#d4a24a',
+  },
 }
 
 export interface GameListItem {

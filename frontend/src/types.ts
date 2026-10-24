@@ -1127,7 +1127,70 @@ export interface ScribbleGameState {
   settings: { rounds: number; draw_seconds: number }
 }
 
-export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | PacmanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | MonopolyGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState | PinballGameState | ScribbleGameState
+export interface ScrabbleTile {
+  id: string
+  letter: string
+  blank: boolean
+  value: number
+}
+
+export interface ScrabbleCell {
+  letter: string
+  blank: boolean
+}
+
+export interface ScrabblePlacement {
+  row: number
+  col: number
+  letter: string
+  blank: boolean
+}
+
+export interface ScrabbleWord {
+  word: string
+  score: number
+}
+
+export interface ScrabbleLogEntry {
+  player_id: string
+  nickname: string
+  kind: 'play' | 'pass' | 'exchange' | 'resign'
+  score: number
+  words: ScrabbleWord[]
+  bingo: boolean
+  placements: ScrabblePlacement[]
+}
+
+export interface ScrabbleSeat {
+  id: string
+  nickname: string
+  is_ai: boolean
+  score: number
+  rack_count: number
+}
+
+export interface ScrabbleGameState {
+  game: 'scrabble'
+  phase: 'playing' | 'game_over'
+  board: Array<Array<ScrabbleCell | null>>
+  premiums: string[][]
+  bag_count: number
+  players: ScrabbleSeat[]
+  current_actor_id: string | null
+  turn_index: number
+  zero_turns: number
+  last_move: ScrabbleLogEntry | null
+  move_log: ScrabbleLogEntry[]
+  rack: ScrabbleTile[]
+  winner: string | null
+  winner_ids: string[]
+  win_reason: string | null
+  end_adjustments: Record<string, number> | null
+  viewer_id: string | null
+  settings: Record<string, unknown>
+}
+
+export type GameState = CodenamesGameState | SpyfallGameState | SnakeGameState | BombermanGameState | PacmanGameState | DuelGameState | TetrisGameState | GravityMasterGameState | PokerGameState | MonopolyGameState | ChessGameState | GoGameState | RoboRallyGameState | Connect4GameState | BattleshipGameState | SolitaireGameState | PinballGameState | ScribbleGameState | ScrabbleGameState
 
 export function isCodenamesState(state: GameState): state is CodenamesGameState {
   return 'cards' in state
@@ -1235,6 +1298,10 @@ export function isPinballState(state: GameState): state is PinballGameState {
 
 export function isScribbleState(state: GameState): state is ScribbleGameState {
   return 'word_mask' in state && 'drawer_id' in state && 'strokes' in state
+}
+
+export function isScrabbleState(state: GameState): state is ScrabbleGameState {
+  return 'bag_count' in state && 'premiums' in state && 'rack' in state
 }
 
 export interface WsMessage {

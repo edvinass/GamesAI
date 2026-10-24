@@ -16,6 +16,7 @@ import { tetrisRules } from './tetris/rules'
 import { connect4Rules } from './connect4/rules'
 import { battleshipRules } from './battleship/rules'
 import { scribbleRules } from './scribble/rules'
+import { scrabbleRules } from './scrabble/rules'
 
 const rulesByGameType: Record<string, GameRules> = {
   codenames: codenamesRules,
@@ -36,6 +37,7 @@ const rulesByGameType: Record<string, GameRules> = {
   solitaire: solitaireRules,
   pinball: pinballRules,
   scribble: scribbleRules,
+  scrabble: scrabbleRules,
 }
 
 export function getGameRules(gameType: string): GameRules | null {

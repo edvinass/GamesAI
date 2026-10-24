@@ -26,6 +26,7 @@ import BattleshipLobby from '@/games/battleship/BattleshipLobby.vue'
 import SolitaireLobby from '@/games/solitaire/SolitaireLobby.vue'
 import PinballLobby from '@/games/pinball/PinballLobby.vue'
 import ScribbleLobby from '@/games/scribble/ScribbleLobby.vue'
+import ScrabbleLobby from '@/games/scrabble/ScrabbleLobby.vue'
 import { validateLobby as validateCodenamesLobby, teamOperatives, teamSpymaster } from '@/games/codenames/lobbyValidation'
 import { validateLobby as validateSpyfallLobby } from '@/games/spyfall/lobbyValidation'
 import { validateLobby as validateSnakeLobby } from '@/games/snake/lobbyValidation'
@@ -44,6 +45,7 @@ import { validateLobby as validateBattleshipLobby } from '@/games/battleship/lob
 import { validateLobby as validateSolitaireLobby } from '@/games/solitaire/lobbyValidation'
 import { validateLobby as validatePinballLobby } from '@/games/pinball/lobbyValidation'
 import { validateLobby as validateScribbleLobby } from '@/games/scribble/lobbyValidation'
+import { validateLobby as validateScrabbleLobby } from '@/games/scrabble/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
 import { useLockPageZoom } from '@/composables/useLockPageZoom'
 import type { Room } from '@/types'
@@ -146,6 +148,7 @@ const isBattleship = computed(() => room.value?.game_type === 'battleship')
 const isSolitaire = computed(() => room.value?.game_type === 'solitaire')
 const isPinball = computed(() => room.value?.game_type === 'pinball')
 const isScribble = computed(() => room.value?.game_type === 'scribble')
+const isScrabble = computed(() => room.value?.game_type === 'scrabble')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
 useLockPageZoom(isCodenames)
 
@@ -170,6 +173,7 @@ const lobbyValidation = computed(() => {
   if (room.value.game_type === 'solitaire') return validateSolitaireLobby(room.value)
   if (room.value.game_type === 'pinball') return validatePinballLobby(room.value)
   if (room.value.game_type === 'scribble') return validateScribbleLobby(room.value)
+  if (room.value.game_type === 'scrabble') return validateScrabbleLobby(room.value)
   return validateCodenamesLobby(room.value)
 })
 
@@ -763,6 +767,21 @@ function startGame() {
         v-model:ai-difficulty="aiDifficulty"
         v-model:rounds="scribbleRounds"
         v-model:draw-seconds="scribbleDrawSeconds"
+        :room="room"
+        :is-host="isHost"
+        :current-player-id="playerStore.playerId"
+        :host-player-id="room.host_player_id"
+        :validation-message="lobbyValidation.message"
+        :validation-valid="lobbyValidation.valid"
+        :validation-issues="lobbyValidation.issues"
+        @add-ai="addAi()"
+        @remove="removePlayer"
+      />
+
+      <ScrabbleLobby
+        v-else-if="isScrabble"
+        v-model:solo-practice="soloPractice"
+        v-model:ai-difficulty="aiDifficulty"
         :room="room"
         :is-host="isHost"
         :current-player-id="playerStore.playerId"

@@ -12,6 +12,7 @@ from app.games.pinball.engine import PinballEngine
 from app.games.roborally.engine import RoboRallyEngine
 from app.games.snake.engine import SnakeEngine
 from app.games.poker.engine import PokerEngine
+from app.games.scrabble.engine import ScrabbleEngine
 from app.games.scribble.engine import ScribbleEngine
 from app.games.solitaire.engine import SolitaireEngine
 from app.games.spyfall.engine import SpyfallEngine
@@ -38,6 +39,7 @@ _REGISTRY: dict[str, GamePlugin] = {
     "solitaire": SolitaireEngine(),
     "pinball": PinballEngine(),
     "scribble": ScribbleEngine(),
+    "scrabble": ScrabbleEngine(),
 }
 
 
@@ -70,6 +72,7 @@ _GAME_LIST_META: dict[str, dict[str, str]] = {
     "solitaire": {"name": "Solitaire", "description": "Classic Klondike — stack cards and clear the tableau"},
     "pinball": {"name": "Pinball", "description": "Classic arcade pinball — hit bumpers, score points, beat your high score"},
     "scribble": {"name": "Scribble", "description": "Draw the word while everyone else races to guess it"},
+    "scrabble": {"name": "Scrabble", "description": "Build words on the board and hunt premium squares"},
 }
 
 

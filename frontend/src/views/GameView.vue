@@ -22,13 +22,14 @@ import BattleshipBoard from '@/games/battleship/BattleshipBoard.vue'
 import SolitaireBoard from '@/games/solitaire/SolitaireBoard.vue'
 import PinballBoard from '@/games/pinball/PinballBoard.vue'
 import ScribbleBoard from '@/games/scribble/ScribbleBoard.vue'
+import ScrabbleBoard from '@/games/scrabble/ScrabbleBoard.vue'
 import { useGoClientSolo } from '@/composables/useGoClientSolo'
 import GameRulesModal from '@/components/GameRulesModal.vue'
 import PokerHandsModal from '@/games/poker/PokerHandsModal.vue'
 import type { PokerReaction } from '@/games/poker/reactions'
 import { pokerReactionSet } from '@/games/poker/reactions'
-import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, MonopolyGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState, PinballGameState, ScribbleGameState } from '@/types'
-import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isMonopolyState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState, isPinballState, isScribbleState, mergeBombermanGameState } from '@/types'
+import type { Room, GameState, CodenamesGameState, SpyfallGameState, SnakeGameState, BombermanGameState, PacmanGameState, DuelGameState, TetrisGameState, GravityMasterGameState, PokerGameState, MonopolyGameState, ChessGameState, GoGameState, RoboRallyGameState, Connect4GameState, BattleshipGameState, SolitaireGameState, PinballGameState, ScribbleGameState, ScrabbleGameState } from '@/types'
+import { isCodenamesState, isSpyfallState, isSnakeState, isBombermanState, isPacmanState, isDuelState, isTetrisState, isGravityMasterState, isPokerState, isMonopolyState, isChessState, isGoState, isRoboRallyState, isConnect4State, isBattleshipState, isSolitaireState, isPinballState, isScribbleState, isScrabbleState, mergeBombermanGameState } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -66,6 +67,7 @@ const gameTitle = computed(() => {
   if (type === 'solitaire') return 'Solitaire'
   if (type === 'pinball') return 'Pinball'
   if (type === 'scribble') return 'Scribble'
+  if (type === 'scrabble') return 'Scrabble'
   return type ?? 'Game'
 })
 
@@ -141,6 +143,10 @@ const pinballState = computed(() =>
 
 const scribbleState = computed(() =>
   gameState.value && isScribbleState(gameState.value) ? gameState.value as ScribbleGameState : null,
+)
+
+const scrabbleState = computed(() =>
+  gameState.value && isScrabbleState(gameState.value) ? gameState.value as ScrabbleGameState : null,
 )
 
 const playerId = computed(() => playerStore.playerId)
@@ -425,6 +431,13 @@ function backToLobby() {
     <ScribbleBoard
       v-else-if="scribbleState && room"
       :game-state="scribbleState"
+      :player-id="playerStore.playerId"
+      @action="sendAction"
+    />
+
+    <ScrabbleBoard
+      v-else-if="scrabbleState && room"
+      :game-state="scrabbleState"
       :player-id="playerStore.playerId"
       @action="sendAction"
     />
