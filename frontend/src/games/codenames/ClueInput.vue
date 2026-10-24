@@ -12,6 +12,7 @@ const emit = defineEmits<{
 
 const clueWord = ref('')
 const clueNumber = ref(1)
+const clueNumbers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 const justSubmitted = ref(false)
 
 const boardWordSet = computed(() => getBoardWords(props.boardWords))
@@ -35,7 +36,9 @@ function submit() {
     <h4>✨ Your clue</h4>
     <div class="row">
       <input v-model="clueWord" placeholder="One word…" maxlength="30" @keyup.enter="submit" />
-      <input v-model.number="clueNumber" type="number" min="0" max="9" class="number-input" aria-label="Clue number" />
+      <select v-model.number="clueNumber" class="number-input" aria-label="Clue number">
+        <option v-for="n in clueNumbers" :key="n" :value="n">{{ n }}</option>
+      </select>
       <button class="btn-primary submit-btn" :disabled="Boolean(validationError) || !clueWord.trim()" @click="submit">
         Give Clue
       </button>
@@ -76,10 +79,13 @@ function submit() {
 }
 
 .number-input {
-  flex: 0 0 56px !important;
+  flex: 0 0 4.5rem !important;
   text-align: center;
   font-weight: 700;
   font-size: 1.1rem;
+  padding-left: 0.4rem;
+  padding-right: 0.25rem;
+  cursor: pointer;
 }
 
 .submit-btn {

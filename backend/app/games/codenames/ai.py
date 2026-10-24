@@ -11,7 +11,7 @@ from app.games.codenames.clue_validation import (
     conflicting_board_word,
     validate_clue_word,
 )
-from app.games.codenames.ai_models import DEFAULT_AI_MODEL
+from app.games.codenames.ai_models import DEFAULT_AI_MODEL, DEFAULT_REASONING_EFFORT
 from app.services.llm import llm_chat
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,12 @@ def _ai_model(state: dict) -> str:
     return str(model) if model else DEFAULT_AI_MODEL
 
 
+def _reasoning_effort(state: dict) -> str:
+    settings = state.get("settings") or {}
+    effort = settings.get("reasoning_effort")
+    return str(effort) if effort else DEFAULT_REASONING_EFFORT
+
+
 async def _chat(state: dict, prompt: str, system: str, temperature: float) -> str:
     return await llm_chat(
         prompt,
@@ -30,6 +36,7 @@ async def _chat(state: dict, prompt: str, system: str, temperature: float) -> st
         temperature=temperature,
         json_mode=True,
         model=_ai_model(state),
+        reasoning_effort=_reasoning_effort(state),
     )
 
 SPYMASTER_TEMPERATURE = 0.3

@@ -4,6 +4,8 @@ DEEPSEEK_MODEL = "deepseek-v4-pro"
 OPENAI_MODELS = ("gpt-6-astra", "gpt-6.1-sol")
 AI_MODELS = (DEEPSEEK_MODEL, *OPENAI_MODELS)
 DEFAULT_AI_MODEL = DEEPSEEK_MODEL
+REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+DEFAULT_REASONING_EFFORT = "low"
 
 AI_MODEL_LABELS = {
     DEEPSEEK_MODEL: "DeepSeek V4 Pro",

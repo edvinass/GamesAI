@@ -21,6 +21,15 @@ def test_ai_model_setting_accepts_openai_and_falls_back() -> None:
     assert engine.validate_settings({"ai_model": "gpt-4o"})["ai_model"] == "deepseek-v4-pro"
 
 
+def test_reasoning_effort_setting_accepts_known_levels() -> None:
+    engine = CodenamesEngine()
+
+    assert engine.validate_settings({})["reasoning_effort"] == "low"
+    assert engine.validate_settings({"reasoning_effort": "max"})["reasoning_effort"] == "max"
+    assert engine.validate_settings({"reasoning_effort": "xhigh"})["reasoning_effort"] == "xhigh"
+    assert engine.validate_settings({"reasoning_effort": "turbo"})["reasoning_effort"] == "low"
+
+
 def test_spymaster_sees_all_card_colors() -> None:
     engine = CodenamesEngine()
     state = _make_state()

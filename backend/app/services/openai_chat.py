@@ -41,6 +41,7 @@ async def openai_chat(
     temperature: float = 0.7,
     json_mode: bool = False,
     model: str,
+    reasoning_effort: str | None = None,
 ) -> str:
     del temperature  # Unsupported while reasoning is enabled.
     if not settings.openai_api_key:
@@ -56,7 +57,7 @@ async def openai_chat(
         prompt,
         system,
         json_mode=json_mode,
-        reasoning_effort=settings.openai_reasoning_effort,
+        reasoning_effort=reasoning_effort or settings.openai_reasoning_effort,
     )
 
     async with httpx.AsyncClient(timeout=120.0) as client:

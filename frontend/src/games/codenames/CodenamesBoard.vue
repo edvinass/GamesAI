@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
 import type { CodenamesGameState, Room } from '@/types'
 import TeamPanel from './TeamPanel.vue'
 import ClueInput from './ClueInput.vue'
 import CardWord from './CardWord.vue'
 import FlowSlot from '@/components/FlowSlot.vue'
 import { useLockPageZoom } from '@/composables/useLockPageZoom'
+import { isCheatModeEnabled, useCodenamesCheat } from './cheatMode'
 
 useLockPageZoom()
 
@@ -92,6 +93,69 @@ function endTurn() {
 
 function startNewGame() {
   emit('action', { type: 'start_game' })
+}
+
+const cheatMode = isCheatModeEnabled()
+const {
+  status: cheatStatus,
+  modelLabel: cheatModelLabel,
+  suggestion: cheatSuggestion,
+} = useCodenamesCheat({
+  enabled: cheatMode,
+  roomId: computed(() => props.room.id),
+  gameState: toRef(props, 'gameState'),
+  active: computed(() => isMyTurn.value && !isGameOver.value),
+})
+
+const cheatStatusText = computed(() => {
+  if (isGameOver.value) return 'Game over'
+  if (!isMyTurn.value) return 'Waiting for your turn'
+  if (cheatStatus.value === 'loading') return 'Thinking…'
+  if (cheatStatus.value === 'error') return 'Suggestion failed'
+  const suggestion = cheatSuggestion.value
+  if (!suggestion) return 'No suggestion'
+  if (suggestion.kind === 'guess' && suggestion.guesses.length === 0) return 'No suggestion'
+  return suggestion.kind === 'clue' ? 'Suggested clue' : 'Suggested guess'
+})
+
+const cheatLine = computed(() => {
+  const suggestion = cheatSuggestion.value
+  if (!suggestion || !isMyTurn.value) return ''
+  if (suggestion.kind === 'clue') {
+    const targets = suggestion.targets.join(', ')
+    return targets
+      ? `${suggestion.word} ${suggestion.number} for ${targets}`
+      : `${suggestion.word} ${suggestion.number}`
+  }
+  const [first, ...rest] = suggestion.guesses
+  if (!first) return ''
+  return rest.length ? `${first.word}, then ${rest.map((guess) => guess.word).join(', ')}` : first.word
+})
+
+function suggestionMark(index: number): 'suggested' | 'suggested-next' | null {
+  const suggestion = cheatSuggestion.value
+  if (!suggestion || !isMyTurn.value) return null
+  if (suggestion.kind === 'guess') {
+    const at = suggestion.guesses.findIndex((guess) => guess.index === index)
+    if (at === 0) return 'suggested'
+    if (at > 0) return 'suggested-next'
+    return null
+  }
+  const card = props.gameState.cards.find((item) => item.index === index)
+  if (!card) return null
+  const targets = new Set(suggestion.targets.map((word) => word.toUpperCase()))
+  return targets.has(card.word.toUpperCase()) ? 'suggested' : null
+}
+
+function applySuggestion() {
+  const suggestion = cheatSuggestion.value
+  if (!suggestion || !isMyTurn.value || isGameOver.value) return
+  if (suggestion.kind === 'clue') {
+    submitClue(suggestion.word, suggestion.number)
+    return
+  }
+  const next = suggestion.guesses[0]
+  if (next) guessCard(next.index)
 }
 
 function cardClasses(card: { revealed: boolean; color?: string }) {
@@ -198,6 +262,24 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
       />
 
       <div class="center">
+        <div v-if="cheatMode" class="assistant-panel" :class="cheatStatus">
+          <div class="assistant-header">
+            <h3>Assistant</h3>
+            <span v-if="cheatModelLabel" class="assistant-name">{{ cheatModelLabel }}</span>
+          </div>
+          <p class="assistant-line">{{ cheatLine }}</p>
+          <p class="assistant-status">{{ cheatStatusText }}</p>
+          <button
+            v-if="isMyTurn && !isGameOver"
+            type="button"
+            class="btn-secondary assistant-apply"
+            :disabled="!cheatLine"
+            @click="applySuggestion"
+          >
+            {{ gameState.phase === 'guess' ? 'Guess suggested word' : 'Give suggested clue' }}
+          </button>
+        </div>
+
         <FlowSlot :open="showClueInput" spaced="after">
           <ClueInput
             v-show="showClueInput"
@@ -213,6 +295,7 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
             :class="[
               'card-btn',
               ...cardClasses(card),
+              suggestionMark(card.index),
               { pop: isPopping(card.index), 'can-guess': isMyTurn && gameState.phase === 'guess' && !card.revealed && !gameState.winner },
             ]"
             :style="{ '--delay': `${idx * 0.03}s` }"
@@ -450,6 +533,63 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
   align-items: stretch;
 }
 
+.assistant-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(64, 156, 255, 0.4);
+  background: rgba(64, 156, 255, 0.08);
+}
+
+.assistant-panel.error {
+  border-color: rgba(255, 92, 108, 0.45);
+  background: rgba(255, 92, 108, 0.08);
+}
+
+.assistant-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.assistant-header h3 {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.assistant-name {
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.assistant-line {
+  min-height: 1.35rem;
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: rgba(64, 156, 255, 0.95);
+}
+
+.assistant-status {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.assistant-apply {
+  align-self: flex-start;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.7rem;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -664,6 +804,15 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
     transform: scale(1);
     box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.2);
   }
+}
+
+.card-btn.suggested {
+  box-shadow: 0 0 0 3px rgba(64, 156, 255, 0.95);
+  z-index: 1;
+}
+
+.card-btn.suggested-next {
+  box-shadow: 0 0 0 2px rgba(64, 156, 255, 0.45);
 }
 
 .card-btn.can-guess:hover {

@@ -183,9 +183,29 @@ const CODENAMES_AI_MODELS = [
   { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
 ] as const
 
+const CODENAMES_REASONING_LEVELS = [
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Extra high' },
+  { id: 'max', label: 'Max' },
+] as const
+
 const aiModel = computed({
   get: () => String(room.value?.settings?.ai_model ?? 'deepseek-v4-pro'),
   set: (val: string) => updateSettings({ ai_model: val }),
+})
+
+const showReasoningLevel = computed(
+  () => aiModel.value === 'gpt-6-astra' || aiModel.value === 'gpt-6.1-sol',
+)
+
+const reasoningEffort = computed({
+  get: () => {
+    const value = String(room.value?.settings?.reasoning_effort ?? 'low')
+    return CODENAMES_REASONING_LEVELS.some((level) => level.id === value) ? value : 'low'
+  },
+  set: (val: string) => updateSettings({ reasoning_effort: val }),
 })
 
 const soloPractice = computed({
@@ -492,6 +512,14 @@ function startGame() {
             <select v-model="aiModel" class="setting-select">
               <option v-for="model in CODENAMES_AI_MODELS" :key="model.id" :value="model.id">
                 {{ model.label }}
+              </option>
+            </select>
+          </label>
+          <label v-if="showReasoningLevel" class="setting-field">
+            <span class="setting-label">Reasoning</span>
+            <select v-model="reasoningEffort" class="setting-select">
+              <option v-for="level in CODENAMES_REASONING_LEVELS" :key="level.id" :value="level.id">
+                {{ level.label }}
               </option>
             </select>
           </label>

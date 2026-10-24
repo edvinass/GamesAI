@@ -29,6 +29,7 @@ async def test_llm_chat_routes_openai_models(monkeypatch: pytest.MonkeyPatch) ->
         calls.append(str(kwargs["model"]))
         assert prompt == "clue"
         assert system == "system"
+        assert kwargs["reasoning_effort"] == "low"
         return "{}"
 
     async def fake_deepseek(*_args: object, **_kwargs: object) -> str:
@@ -37,7 +38,13 @@ async def test_llm_chat_routes_openai_models(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("app.services.llm.openai_chat", fake_openai)
     monkeypatch.setattr("app.services.llm.deepseek_chat", fake_deepseek)
 
-    result = await llm_chat("clue", "system", json_mode=True, model="gpt-6.1-sol")
+    result = await llm_chat(
+        "clue",
+        "system",
+        json_mode=True,
+        model="gpt-6.1-sol",
+        reasoning_effort="low",
+    )
 
     assert result == "{}"
     assert calls == ["gpt-6.1-sol"]
