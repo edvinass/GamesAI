@@ -72,6 +72,7 @@ function submit() {
 
 .row input {
   flex: 1;
+  font-size: 16px;
 }
 
 .number-input {

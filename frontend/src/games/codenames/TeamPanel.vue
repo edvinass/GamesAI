@@ -71,6 +71,25 @@ const dots = computed(() => {
   top: 1rem;
 }
 
+@media (max-width: 1000px) {
+  .team-panel {
+    position: static;
+    padding: 0.65rem 0.7rem;
+  }
+
+  .remaining-num {
+    font-size: 1.45rem;
+  }
+
+  .word-dots {
+    margin-bottom: 0.4rem;
+  }
+
+  .player-list {
+    font-size: 0.72rem;
+  }
+}
+
 .team-panel.red {
   border-top: 3px solid var(--red-team);
 }

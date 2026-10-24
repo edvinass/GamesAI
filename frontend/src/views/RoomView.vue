@@ -43,6 +43,7 @@ import { validateLobby as validateBattleshipLobby } from '@/games/battleship/lob
 import { validateLobby as validateSolitaireLobby } from '@/games/solitaire/lobbyValidation'
 import { validateLobby as validatePinballLobby } from '@/games/pinball/lobbyValidation'
 import { getGameMeta } from '@/games/gameMeta'
+import { useLockPageZoom } from '@/composables/useLockPageZoom'
 import type { Room } from '@/types'
 
 const route = useRoute()
@@ -143,6 +144,7 @@ const isBattleship = computed(() => room.value?.game_type === 'battleship')
 const isSolitaire = computed(() => room.value?.game_type === 'solitaire')
 const isPinball = computed(() => room.value?.game_type === 'pinball')
 const isCodenames = computed(() => room.value?.game_type === 'codenames')
+useLockPageZoom(isCodenames)
 
 const gameMeta = computed(() => getGameMeta(room.value?.game_type ?? ''))
 

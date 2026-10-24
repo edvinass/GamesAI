@@ -239,6 +239,7 @@ function backToLobby() {
       'game-page--poker': isPoker,
       'game-page--monopoly': isMonopoly,
       'game-page--roborally': isRoboRally,
+      'game-page--codenames': room?.game_type === 'codenames',
     }"
   >
     <header
@@ -248,6 +249,7 @@ function backToLobby() {
         'game-header--poker': isPoker,
         'game-header--monopoly': isMonopoly,
         'game-header--roborally': isRoboRally,
+        'game-header--codenames': room?.game_type === 'codenames',
       }"
     >
       <div class="header-left">
@@ -673,6 +675,25 @@ function backToLobby() {
 
   .game-header--poker .header-btn__short {
     display: inline;
+  }
+
+  .game-header.game-header--codenames {
+    padding: 0.55rem 0.75rem 0.45rem;
+    margin-bottom: 0.35rem;
+    gap: 0.45rem;
+  }
+
+  .game-header--codenames h1 {
+    font-size: 1.15rem;
+  }
+
+  .game-header--codenames .av-hint {
+    display: none;
+  }
+
+  .game-header--codenames .header-actions .btn-secondary {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.85rem;
   }
 }
 </style>

@@ -3,7 +3,11 @@ import { computed, ref, watch } from 'vue'
 import type { CodenamesGameState, Room } from '@/types'
 import TeamPanel from './TeamPanel.vue'
 import ClueInput from './ClueInput.vue'
+import CardWord from './CardWord.vue'
 import FlowSlot from '@/components/FlowSlot.vue'
+import { useLockPageZoom } from '@/composables/useLockPageZoom'
+
+useLockPageZoom()
 
 const props = defineProps<{
   gameState: CodenamesGameState
@@ -186,6 +190,7 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 
     <div class="layout">
       <TeamPanel
+        class="team-slot team-slot--red"
         team="red"
         :players="redPlayers"
         :remaining="gameState.red_remaining"
@@ -214,7 +219,7 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
             :disabled="!!gameState.winner || !isMyTurn || gameState.phase !== 'guess' || card.revealed"
             @click="guessCard(card.index)"
           >
-            {{ card.word }}
+            <CardWord :text="card.word" />
           </button>
         </div>
 
@@ -230,6 +235,7 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
       </div>
 
       <TeamPanel
+        class="team-slot team-slot--blue"
         team="blue"
         :players="bluePlayers"
         :remaining="gameState.blue_remaining"
@@ -243,6 +249,7 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 .board-container {
   --flow-duration: 0.35s;
   padding-bottom: 1.5rem;
+  touch-action: pan-y;
 }
 
 .game-over {
@@ -426,8 +433,15 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 
 @media (max-width: 1000px) {
   .layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "board board"
+      "red blue";
   }
+
+  .team-slot--red { grid-area: red; }
+  .team-slot--blue { grid-area: blue; }
+  .center { grid-area: board; }
 }
 
 .center {
@@ -438,34 +452,58 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.45rem;
   width: 100%;
 }
 
-@media (max-width: 600px) {
-  .grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
 .card-btn {
+  --card-word-size: clamp(1.45rem, 4.2vw, 2rem);
   aspect-ratio: 1.55;
-  padding: 0.4rem 0.35rem;
-  font-size: clamp(0.65rem, 1.2vw, 0.8rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.35rem 0.25rem;
   font-weight: 700;
   text-transform: uppercase;
   border-radius: 10px;
   border: 2px solid var(--border);
   background: #d4b06a;
   color: #1a1a1a;
-  word-break: break-word;
-  line-height: 1.15;
+  line-height: 1.05;
   position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: pan-y;
   transition:
     transform 0.2s var(--ease-bounce),
     box-shadow 0.2s,
     border-color 0.2s;
+}
+
+@media (max-width: 700px) {
+  .board-container {
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
+  }
+
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .card-btn {
+    --card-word-size: clamp(1.35rem, 6vw, 1.9rem);
+    aspect-ratio: 1.35;
+    padding: 0.35rem 0.3rem;
+    border-radius: 10px;
+  }
+}
+
+.card-btn:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 .card-btn:not(.revealed) {
@@ -538,6 +576,10 @@ const confettiPieces = Array.from({ length: 24 }, (_, i) => i)
   cursor: default;
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.2);
   animation: none;
+}
+
+.card-btn.revealed :deep(.card-word) {
+  padding-top: 0.35rem;
 }
 
 .card-btn.revealed::after {
