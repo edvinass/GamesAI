@@ -19,7 +19,7 @@ import { applyStars, isUnlocked, loadProgress, miniStars, saveProgress, skipMatc
 import { StockfishClient } from '../stockfish'
 import { getDefaultBoardView, setDefaultBoardView, type BoardView } from '../prefs'
 
-const boardView = ref<BoardView>(getDefaultBoardView() ?? '2d')
+const boardView = ref<BoardView>(getDefaultBoardView() ?? 'clay')
 watch(boardView, setDefaultBoardView)
 
 const boardStyles = [
@@ -773,14 +773,13 @@ onUnmounted(() => {
 <style scoped>
 .lesson {
   width: 100%;
-  height: 100dvh;
+  min-height: 100dvh;
   margin: 0 auto;
-  padding: 0.75rem 1.25rem 0.85rem;
+  padding: 0.75rem 1.25rem 1.25rem;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.65rem;
-  overflow: hidden;
 }
 
 .top,
@@ -796,6 +795,23 @@ onUnmounted(() => {
 .lesson :deep(.oscar) {
   width: min(100%, 720px);
   flex-shrink: 0;
+}
+
+@media (max-width: 520px) {
+  .lesson {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .top,
+  .pips,
+  .note,
+  .actions,
+  .view-switch,
+  .promo,
+  .lesson :deep(.oscar) {
+    width: calc(100% - 1.5rem);
+  }
 }
 
 .top {

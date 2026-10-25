@@ -59,12 +59,9 @@ const matrix = computed(() => {
 
 <style scoped>
 .learn-board {
-  flex: 1 1 auto;
-  align-self: stretch;
-  min-height: 0;
-  width: 100%;
-  display: grid;
-  place-items: start center;
+  flex: 0 0 auto;
+  width: min(100%, calc(100dvh - 16.5rem));
+  aspect-ratio: 1;
   container-type: size;
 }
 
@@ -73,15 +70,24 @@ const matrix = computed(() => {
 }
 
 .stage {
-  width: min(100cqw, 100cqh);
-  height: min(100cqw, 100cqh);
+  width: 100%;
+  height: 100%;
   min-height: 0;
 }
 
+.learn-board.iso {
+  width: min(100%, calc(100dvh - 19.1rem));
+}
+
 .learn-board.iso .stage {
-  width: min(100cqw, calc(100cqh - 2.6rem));
-  height: min(100cqw, calc(100cqh - 2.6rem));
   margin-bottom: 2.6rem;
+}
+
+@media (max-width: 520px) {
+  .learn-board,
+  .learn-board.iso {
+    width: 100%;
+  }
 }
 
 .stage :deep(.surface) {

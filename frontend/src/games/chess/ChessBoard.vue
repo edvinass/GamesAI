@@ -82,7 +82,7 @@ const settingView = props.gameState.settings?.board_view
 const boardView = ref<BoardView>(
   getDefaultBoardView() ??
     getBoardViewPref(props.room.id) ??
-    (isBoardView(settingView) ? settingView : '2d'),
+    (isBoardView(settingView) ? settingView : 'clay'),
 )
 watch(boardView, (view) => {
   setBoardViewPref(props.room.id, view)
