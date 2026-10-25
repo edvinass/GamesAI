@@ -113,7 +113,7 @@ const metaByGameType: Record<string, GameMeta> = {
     name: 'Chess',
     description: 'Classic chess — play a friend or challenge the AI.',
     emoji: '♟️',
-    lobbyHint: 'Need exactly 2 players. Share the link or add an AI opponent.',
+    lobbyHint: 'Play the computer, or share the room for a match.',
     category: 'classic',
     players: '2',
     accent: '#eef2f9',
