@@ -1539,8 +1539,9 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 
 @media (max-width: 860px) {
   .chess-board {
-    overflow: auto;
-    padding: 0.5rem;
+    overflow-x: clip;
+    overflow-y: auto;
+    padding: 0.35rem 0 0.75rem;
   }
 
   .chess-shell {
@@ -1553,9 +1554,17 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
     min-height: auto;
   }
 
+  .player-bar,
+  .side-rail {
+    margin-inline: 0.5rem;
+  }
+
   .board-stage {
-    min-height: min(78vw, calc(100dvh - 13rem));
-    height: min(78vw, calc(100dvh - 13rem));
+    flex: none;
+    width: 100%;
+    aspect-ratio: 1;
+    height: auto;
+    min-height: 0;
   }
 
   .side-rail {
