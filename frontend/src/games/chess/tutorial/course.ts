@@ -26,7 +26,7 @@ export interface Lesson {
   summary: string
   drills: Drill[]
   mini?: { seconds: number; fen: string }
-  match?: { minutes: number; oscar: 'gentle' | 'sharp' }
+  match?: { oscar: 'gentle' | 'sharp' }
 }
 
 export interface CourseSection {
@@ -519,7 +519,7 @@ export const lessons: Lesson[] = [
     kind: 'match',
     summary: 'A full game against a gentle coach.',
     drills: [],
-    match: { minutes: 5, oscar: 'gentle' },
+    match: { oscar: 'gentle' },
   },
   {
     id: 'values',
@@ -659,7 +659,7 @@ export const lessons: Lesson[] = [
     kind: 'match',
     summary: 'The same game, a sharper Oscar.',
     drills: [],
-    match: { minutes: 5, oscar: 'sharp' },
+    match: { oscar: 'sharp' },
   },
 ]
 

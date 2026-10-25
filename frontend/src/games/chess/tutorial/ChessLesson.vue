@@ -50,8 +50,6 @@ const explainFinal = ref(false)
 const pending = ref<{ from: string; to: string } | null>(null)
 const points = ref(0)
 const remainingMs = ref(0)
-const whiteMs = ref(0)
-const blackMs = ref(0)
 const resultStars = ref(0)
 const xpGained = ref(0)
 const resultLine = ref('')
@@ -204,8 +202,13 @@ function advance() {
     return
   }
   if (more) {
-    drillIndex.value += 1
-    loadDrill()
+    status.value = 'wait'
+    mood.value = 'happy'
+    coach.value = 'Good.'
+    later(2000, () => {
+      drillIndex.value += 1
+      loadDrill()
+    })
     return
   }
   finishScored(starsForHearts(hearts.value, HEARTS))
@@ -534,26 +537,12 @@ function startMatch() {
   ended = false
   board = new Chess()
   sync()
-  const ms = lesson.match.minutes * 60 * 1000
-  whiteMs.value = ms
-  blackMs.value = ms
-  let anchor = Date.now()
   status.value = 'play'
   mood.value = 'idle'
   coach.value =
     lesson.match.oscar === 'gentle'
       ? 'Oscar goes easy. He takes free pieces and misses a lot. Checkmate wins. You can skip this match from the path.'
       : 'Oscar is sharper this time, and he still slips. Checkmate wins.'
-  every(200, () => {
-    const now = Date.now()
-    const delta = now - anchor
-    anchor = now
-    if (status.value !== 'play' && status.value !== 'wait') return
-    if (board.turn() === 'w') whiteMs.value -= delta
-    else blackMs.value -= delta
-    if (whiteMs.value <= 0) finishMatch('loss', 'Time. Oscar wins this one.')
-    else if (blackMs.value <= 0) finishMatch('win', 'Oscar ran out of time.')
-  })
 }
 
 function begin() {
@@ -616,10 +605,6 @@ onUnmounted(() => {
       <div v-else-if="lesson.kind === 'mini'" class="hud">
         <strong>{{ points }} pts</strong>
         <span>{{ clockLabel(remainingMs) }}</span>
-      </div>
-      <div v-else-if="lesson.kind === 'match'" class="hud">
-        <span>You {{ clockLabel(whiteMs) }}</span>
-        <span>Oscar {{ clockLabel(blackMs) }}</span>
       </div>
     </header>
 
