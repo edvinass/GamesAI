@@ -2,8 +2,9 @@ import type { GameRules } from '../codenames/rules'
 
 export const chessRules: GameRules = {
   title: 'Chess',
-  subtitle: 'Classic strategy — outmaneuver your opponent or the AI',
+  subtitle: 'Classic strategy. Outmaneuver your opponent, the AI, or take the lessons.',
   quickStart: [
+    'Open Learn chess for guided moves, puzzles, a capture drill, and a match with Oscar.',
     'Join with exactly 2 players, or enable solo practice to play against AI.',
     'White moves first. Click a piece, then click a highlighted square.',
     'Capture the enemy king by checkmate — or resign if you’re lost.',

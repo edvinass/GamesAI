@@ -17,6 +17,7 @@
     "@tensorflow/tfjs": "^4.22.0",
     "@tensorflow/tfjs-backend-wasm": "^4.22.0",
     "@tensorflow/tfjs-backend-webgpu": "^4.22.0",
+    "chess.js": "^1.4.0",
     "earcut": "^3.2.3",
     "pako": "^2.1.0",
     "pinia": "^2.3.0",

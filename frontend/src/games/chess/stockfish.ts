@@ -77,11 +77,18 @@ export class StockfishClient {
   private stopping = false
   private searchFen: string | null = null
   private pendingFen: string | null = null
+  private movetimeMs = SEARCH_MOVETIME_MS
   private latest: EngineSuggestion | null = null
   private disposed = false
 
-  async init(): Promise<EngineFlavor> {
-    const candidates = FLAVORS.filter((f) => !f.multiThreaded || globalThis.crossOriginIsolated)
+  /**
+   * `lite` skips the large NNUE nets and boots the small single-threaded build.
+   * Tutorial hints use that so a lesson does not download the full network.
+   */
+  async init(options?: { lite?: boolean }): Promise<EngineFlavor> {
+    const candidates = (options?.lite ? FLAVORS.filter((f) => f.id === 'lite') : FLAVORS).filter(
+      (f) => !f.multiThreaded || globalThis.crossOriginIsolated,
+    )
     let lastError: unknown = null
     for (const flavor of candidates) {
       if (this.disposed) break
@@ -144,7 +151,8 @@ export class StockfishClient {
   }
 
   /** Search `fen`, superseding any search already running. */
-  analyze(fen: string) {
+  analyze(fen: string, options?: { movetimeMs?: number }) {
+    this.movetimeMs = options?.movetimeMs ?? SEARCH_MOVETIME_MS
     if (!this.worker || !this.flavor) return
     if (this.searching) {
       if (this.searchFen === fen && !this.stopping) return
@@ -172,7 +180,7 @@ export class StockfishClient {
     this.searchFen = fen
     this.latest = null
     this.send(`position fen ${fen}`)
-    this.send(`go movetime ${SEARCH_MOVETIME_MS}`)
+    this.send(`go movetime ${this.movetimeMs}`)
   }
 
   private handleLine(line: string) {

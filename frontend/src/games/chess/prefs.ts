@@ -14,7 +14,26 @@ export function isBoardView(value: unknown): value is BoardView {
   return value === '2d' || value === '3d' || value === 'clay'
 }
 
+const DEFAULT_VIEW_KEY = 'chess-board-view'
 const boardViewKey = (roomId: string) => `chess-board-view:${roomId}`
+
+/** Style chosen from the game or the lessons. Null until the player picks one. */
+export function getDefaultBoardView(): BoardView | null {
+  try {
+    const value = localStorage.getItem(DEFAULT_VIEW_KEY)
+    return isBoardView(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+export function setDefaultBoardView(value: BoardView): void {
+  try {
+    localStorage.setItem(DEFAULT_VIEW_KEY, value)
+  } catch {
+    /* ignore */
+  }
+}
 
 export function getBoardViewPref(roomId: string): BoardView | null {
   try {

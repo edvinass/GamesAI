@@ -199,6 +199,14 @@ function switchToJoin() {
               <strong>{{ selectedGameMeta.name }}</strong>
               <p>{{ selectedGameMeta.description }}</p>
             </div>
+            <button
+              v-if="gameType === 'chess'"
+              type="button"
+              class="btn-secondary rules-btn"
+              @click="router.push('/chess/learn')"
+            >
+              Learn
+            </button>
             <button type="button" class="btn-secondary rules-btn" @click="showRules = true">
               Rules
             </button>

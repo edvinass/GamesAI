@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { ChessGameState, Room } from '@/types'
-import Chess3DView from './Chess3DView.vue'
 import { getIsoPieceSprites } from './isoPieces'
 import {
   getBoardViewPref,
+  getDefaultBoardView,
   isBoardView,
   isMoveHintsEnabled,
   setBoardViewPref,
+  setDefaultBoardView,
   setMoveHintsEnabled,
   type BoardView,
 } from './prefs'
+import ChessSurface from './ChessSurface.vue'
 import { formatEngineScore, isCheatModeEnabled, useCheatEngine } from './cheatMode'
 
 const props = defineProps<{
@@ -78,9 +80,14 @@ const viewerColor = computed(() => props.gameState.viewer_color)
 const flipBoard = computed(() => viewerColor.value === 'b')
 const settingView = props.gameState.settings?.board_view
 const boardView = ref<BoardView>(
-  getBoardViewPref(props.room.id) ?? (isBoardView(settingView) ? settingView : '2d'),
+  getDefaultBoardView() ??
+    getBoardViewPref(props.room.id) ??
+    (isBoardView(settingView) ? settingView : '2d'),
 )
-watch(boardView, (view) => setBoardViewPref(props.room.id, view))
+watch(boardView, (view) => {
+  setBoardViewPref(props.room.id, view)
+  setDefaultBoardView(view)
+})
 const is3d = computed(() => boardView.value === '3d')
 
 const isMyTurn = computed(() => {
@@ -102,29 +109,6 @@ const blackPlayer = computed(() => props.gameState.players.find((p) => p.color =
 const topPlayer = computed(() => (flipBoard.value ? whitePlayer.value : blackPlayer.value))
 const bottomPlayer = computed(() => (flipBoard.value ? blackPlayer.value : whitePlayer.value))
 
-const ranks = computed(() => {
-  const order = [7, 6, 5, 4, 3, 2, 1, 0]
-  return flipBoard.value ? [...order].reverse() : order
-})
-
-const files = computed(() => {
-  const order = [...FILES]
-  return flipBoard.value ? [...order].reverse() : order
-})
-
-/** Closer to the camera paints in front. The view sits at the bottom of the board, a little to the right. */
-function isoPieceOrder(file: string, rankIndex: number): number {
-  const row = ranks.value.indexOf(rankIndex)
-  const col = files.value.indexOf(file as (typeof FILES)[number])
-  return 10 + row * 100 + col * 32
-}
-
-const lastMoveSquares = computed(() => {
-  const move = props.gameState.last_move
-  if (!move) return new Set<string>()
-  return new Set([move.from, move.to])
-})
-
 const selectedTargets = computed(() => {
   if (!selected.value) return new Map<string, { promotion?: string | null }>()
   const map = new Map<string, { promotion?: string | null }>()
@@ -143,10 +127,6 @@ const targetSquares = computed(() =>
   showMoveHints.value ? [...selectedTargets.value.keys()] : [],
 )
 
-function isHintTarget(sq: string): boolean {
-  return showMoveHints.value && selectedTargets.value.has(sq)
-}
-
 const cheatMode = isCheatModeEnabled()
 const {
   status: engineStatus,
@@ -161,20 +141,6 @@ const {
 const engineHint = computed(() => {
   const s = engineSuggestion.value
   return s ? { from: s.from, to: s.to } : null
-})
-
-const engineArrow = computed(() => {
-  const hint = engineHint.value
-  if (!hint || is3d.value) return null
-  const point = (sq: string) => ({
-    x: files.value.indexOf(sq[0] as (typeof FILES)[number]) + 0.5,
-    y: ranks.value.indexOf(Number(sq[1]) - 1) + 0.5,
-  })
-  const from = point(hint.from)
-  const to = point(hint.to)
-  const len = Math.hypot(to.x - from.x, to.y - from.y)
-  const trim = 0.3 / len
-  return { x1: from.x, y1: from.y, x2: to.x - (to.x - from.x) * trim, y2: to.y - (to.y - from.y) * trim }
 })
 
 const engineStatusText = computed(() => {
@@ -226,11 +192,6 @@ function squareOf(file: string, rankIndex: number): string {
 
 function pieceAt(file: string, rankIndex: number): string | null {
   return props.gameState.board[rankIndex][FILES.indexOf(file as (typeof FILES)[number])] ?? null
-}
-
-function isLightSquare(file: string, rankIndex: number): boolean {
-  const fileIndex = FILES.indexOf(file as (typeof FILES)[number])
-  return (fileIndex + rankIndex) % 2 === 1
 }
 
 function ownPiece(piece: string | null): boolean {
@@ -408,122 +369,21 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
         </div>
 
         <div class="board-stage" :class="{ 'is-3d': is3d, 'is-clay': boardView === 'clay' }">
-          <Chess3DView
-            v-if="is3d"
+          <ChessSurface
+            v-model:view="boardView"
             :board="gameState.board"
             :fen="gameState.fen"
             :flipped="flipBoard"
             :interactive="isMyTurn && !pendingPromotion"
+            :side="viewerColor ?? 'w'"
             :selected="selected"
             :targets="targetSquares"
             :last-move="gameState.last_move"
             :check-square="checkedKingSquare"
             :hint="engineHint"
+            :in-check="gameState.in_check && gameState.phase === 'playing'"
             @square-click="onSquareClick"
           />
-          <div
-            v-else
-            class="board"
-            :class="{
-              disabled: !isMyTurn || !!pendingPromotion,
-              check: gameState.in_check && gameState.phase === 'playing',
-              clay: boardView === 'clay',
-            }"
-          >
-            <div class="board-grid">
-              <svg class="iso-filters" aria-hidden="true">
-                <filter id="iso-outline-w" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
-                  <feComponentTransfer in="SourceAlpha" result="solid">
-                    <feFuncA type="discrete" tableValues="0 0 1" />
-                  </feComponentTransfer>
-                  <feMorphology in="solid" operator="dilate" radius="1" result="spread" />
-                  <feFlood flood-color="#2c4158" result="ink" />
-                  <feComposite in="ink" in2="spread" operator="in" result="line" />
-                  <feMerge>
-                    <feMergeNode in="line" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-                <filter id="iso-outline-b" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
-                  <feComponentTransfer in="SourceAlpha" result="solid">
-                    <feFuncA type="discrete" tableValues="0 0 1" />
-                  </feComponentTransfer>
-                  <feMorphology in="solid" operator="dilate" radius="1" result="spread" />
-                  <feFlood flood-color="#e4eef8" result="ink" />
-                  <feComposite in="ink" in2="spread" operator="in" result="line" />
-                  <feMerge>
-                    <feMergeNode in="line" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-              </svg>
-              <div v-for="rankIndex in ranks" :key="rankIndex" class="rank-row">
-                <button
-                  v-for="file in files"
-                  :key="`${file}${rankIndex}`"
-                  type="button"
-                  class="square"
-                  :class="{
-                    light: isLightSquare(file, rankIndex),
-                    dark: !isLightSquare(file, rankIndex),
-                    selected: selected === squareOf(file, rankIndex),
-                    target: isHintTarget(squareOf(file, rankIndex)),
-                    last: lastMoveSquares.has(squareOf(file, rankIndex)),
-                    capture: isHintTarget(squareOf(file, rankIndex)) && !!pieceAt(file, rankIndex),
-                    check: checkedKingSquare === squareOf(file, rankIndex),
-                    'engine-hint':
-                      engineHint?.from === squareOf(file, rankIndex) ||
-                      engineHint?.to === squareOf(file, rankIndex),
-                    movable: isMyTurn && !pendingPromotion && ownPiece(pieceAt(file, rankIndex)),
-                  }"
-                  @click="onSquareClick(file, rankIndex)"
-                >
-                  <span v-if="file === files[0]" class="coord rank">{{ rankIndex + 1 }}</span>
-                  <img
-                    v-if="pieceAt(file, rankIndex)"
-                    class="piece"
-                    :class="isWhitePiece(pieceAt(file, rankIndex)!) ? 'is-white' : 'is-black'"
-                    :src="pieceSrc(pieceAt(file, rankIndex)!)"
-                    :alt="pieceAlt(pieceAt(file, rankIndex)!)"
-                    :style="boardView === 'clay' ? { zIndex: isoPieceOrder(file, rankIndex) } : undefined"
-                    draggable="false"
-                  />
-                  <span
-                    v-if="isHintTarget(squareOf(file, rankIndex)) && !pieceAt(file, rankIndex)"
-                    class="target-dot"
-                  />
-                  <span v-if="rankIndex === ranks[ranks.length - 1]" class="coord file">{{ file }}</span>
-                </button>
-              </div>
-              <svg
-                v-if="engineArrow"
-                class="engine-arrow"
-                viewBox="0 0 8 8"
-                aria-hidden="true"
-              >
-                <defs>
-                  <marker
-                    id="engine-arrow-head"
-                    viewBox="0 0 4 4"
-                    refX="1.2"
-                    refY="2"
-                    markerWidth="3"
-                    markerHeight="3"
-                    orient="auto"
-                  >
-                    <path d="M0,0 L4,2 L0,4 Z" />
-                  </marker>
-                </defs>
-                <line
-                  :x1="engineArrow.x1"
-                  :y1="engineArrow.y1"
-                  :x2="engineArrow.x2"
-                  :y2="engineArrow.y2"
-                  marker-end="url(#engine-arrow-head)"
-                />
-              </svg>
-            </div>
-          </div>
 
           <div v-if="pendingPromotion" class="promotion-overlay">
             <div class="promotion-card">
@@ -830,6 +690,12 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 .board-stage.is-3d {
   grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: stretch;
+}
+
+.board-stage :deep(.surface) {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .board {

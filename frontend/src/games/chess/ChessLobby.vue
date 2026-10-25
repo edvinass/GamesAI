@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import type { Room } from '@/types'
 
 const props = defineProps<{
@@ -66,6 +67,14 @@ const seats = computed(() => {
 
 <template>
   <div class="chess-lobby">
+    <RouterLink to="/chess/learn" class="card learn-card">
+      <span class="learn-mark" aria-hidden="true">★</span>
+      <span>
+        <strong>Learn chess</strong>
+        <small>Guided lessons, puzzles, a capture drill, and a match with Oscar.</small>
+      </span>
+    </RouterLink>
+
     <section v-if="isHost" class="card setup">
       <div class="segment" role="radiogroup" aria-label="Game mode">
         <button
@@ -165,6 +174,35 @@ const seats = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.learn-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.learn-card strong,
+.learn-card small {
+  display: block;
+}
+
+.learn-card small {
+  color: var(--text-muted);
+}
+
+.learn-mark {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #1c6b4a;
+  color: white;
+  flex-shrink: 0;
 }
 
 .setup {
