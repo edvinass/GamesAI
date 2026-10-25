@@ -2,8 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import type { ChessGameState, Room } from '@/types'
 import Chess3DView from './Chess3DView.vue'
+import { getIsoPieceSprites } from './isoPieces'
 import {
   getBoardViewPref,
+  isBoardView,
   isMoveHintsEnabled,
   setBoardViewPref,
   setMoveHintsEnabled,
@@ -37,6 +39,15 @@ const PIECE_SRC: Record<string, string> = Object.fromEntries(
   ]),
 )
 
+/** Isometric renders of the same meshes used by the 3D board. */
+const ISO_PIECE_SRC = getIsoPieceSprites()
+
+const boardViewOptions = [
+  { id: '2d', label: '2D' },
+  { id: 'clay', label: 'Iso' },
+  { id: '3d', label: '3D' },
+] as const satisfies ReadonlyArray<{ id: BoardView; label: string }>
+
 const PIECE_NAME: Record<string, string> = {
   k: 'king',
   q: 'queen',
@@ -51,7 +62,9 @@ function isWhitePiece(piece: string): boolean {
 }
 
 function pieceSrc(piece: string): string {
-  return PIECE_SRC[`${isWhitePiece(piece) ? 'w' : 'b'}${piece.toUpperCase()}`] ?? ''
+  const key = `${isWhitePiece(piece) ? 'w' : 'b'}${piece.toUpperCase()}`
+  if (boardView.value === 'clay' && ISO_PIECE_SRC?.[key]) return ISO_PIECE_SRC[key]
+  return PIECE_SRC[key] ?? ''
 }
 
 function pieceAlt(piece: string): string {
@@ -63,8 +76,9 @@ const pendingPromotion = ref<{ from: string; to: string } | null>(null)
 
 const viewerColor = computed(() => props.gameState.viewer_color)
 const flipBoard = computed(() => viewerColor.value === 'b')
+const settingView = props.gameState.settings?.board_view
 const boardView = ref<BoardView>(
-  getBoardViewPref(props.room.id) ?? (props.gameState.settings?.board_view === '3d' ? '3d' : '2d'),
+  getBoardViewPref(props.room.id) ?? (isBoardView(settingView) ? settingView : '2d'),
 )
 watch(boardView, (view) => setBoardViewPref(props.room.id, view))
 const is3d = computed(() => boardView.value === '3d')
@@ -386,7 +400,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
           </span>
         </div>
 
-        <div class="board-stage" :class="{ 'is-3d': is3d }">
+        <div class="board-stage" :class="{ 'is-3d': is3d, 'is-clay': boardView === 'clay' }">
           <Chess3DView
             v-if="is3d"
             :board="gameState.board"
@@ -406,6 +420,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
             :class="{
               disabled: !isMyTurn || !!pendingPromotion,
               check: gameState.in_check && gameState.phase === 'playing',
+              clay: boardView === 'clay',
             }"
           >
             <div class="board-grid">
@@ -591,16 +606,16 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
         <div class="view-switch" role="radiogroup" aria-label="Board view">
           <span class="view-switch-label">Board</span>
           <button
-            v-for="view in (['2d', '3d'] as const)"
-            :key="view"
+            v-for="view in boardViewOptions"
+            :key="view.id"
             type="button"
             class="view-option"
-            :class="{ active: boardView === view }"
+            :class="{ active: boardView === view.id }"
             role="radio"
-            :aria-checked="boardView === view"
-            @click="boardView = view"
+            :aria-checked="boardView === view.id"
+            @click="boardView = view.id"
           >
-            {{ view.toUpperCase() }}
+            {{ view.label }}
           </button>
         </div>
 
@@ -971,6 +986,76 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   right: 4px;
 }
 
+.board.clay {
+  --wood-light: #d7e0ea;
+  --wood-dark: #7f93a8;
+  --wood-frame: #1b2836;
+  --wood-frame-hi: #3d5166;
+  --select: rgba(88, 204, 120, 0.42);
+  --last-move: rgba(255, 210, 90, 0.4);
+  --target: rgba(18, 36, 54, 0.34);
+  padding: 1.05cqw;
+  border-radius: 18px;
+  overflow: visible;
+  isolation: isolate;
+  background: linear-gradient(160deg, var(--wood-frame-hi), var(--wood-frame) 58%, #121a24);
+}
+
+.board.clay .board-grid {
+  min-height: 0;
+}
+
+.board.clay .rank-row {
+  min-height: 0;
+}
+
+.board.clay .square {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.board.clay .coord {
+  z-index: 1;
+}
+
+.board.clay .piece {
+  position: absolute;
+  inset: auto;
+  left: 50%;
+  top: 26%;
+  width: 168%;
+  height: 168%;
+  transform: translate(-50%, -50%);
+  filter: none;
+  z-index: 2;
+}
+
+.board.clay .square.movable:hover .piece,
+.board.clay .square.selected .piece {
+  z-index: 3;
+}
+
+.board.clay .square.movable:hover .piece {
+  transform: translate(-50%, -54%) scale(1.03);
+  filter: none;
+}
+
+.board.clay .square.selected .piece {
+  transform: translate(-50%, -56%) scale(1.04);
+  filter: none;
+}
+
+.board.clay .square.light .coord {
+  color: #42566c;
+}
+
+.board.clay .square.dark .coord {
+  color: #f4f7fb;
+}
+
 .square.light .coord {
   color: var(--wood-dark);
 }
@@ -1029,6 +1114,11 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   transition:
     transform 0.12s var(--ease-smooth),
     box-shadow 0.12s var(--ease-smooth);
+}
+
+.board-stage.is-clay .promo-btn {
+  border-color: rgba(127, 147, 168, 0.55);
+  background: linear-gradient(145deg, #eef3f8, #c5d0dc);
 }
 
 .promo-btn:hover {
@@ -1222,6 +1312,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
 .view-switch {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.3rem;
   padding: 0.3rem 0.3rem 0.3rem 0.6rem;
   border-radius: 10px;

@@ -8,14 +8,18 @@ export function isMoveHintsEnabled(): boolean {
   }
 }
 
-export type BoardView = '2d' | '3d'
+export type BoardView = '2d' | '3d' | 'clay'
+
+export function isBoardView(value: unknown): value is BoardView {
+  return value === '2d' || value === '3d' || value === 'clay'
+}
 
 const boardViewKey = (roomId: string) => `chess-board-view:${roomId}`
 
 export function getBoardViewPref(roomId: string): BoardView | null {
   try {
     const value = localStorage.getItem(boardViewKey(roomId))
-    return value === '2d' || value === '3d' ? value : null
+    return isBoardView(value) ? value : null
   } catch {
     return null
   }

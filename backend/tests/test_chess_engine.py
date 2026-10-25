@@ -85,6 +85,7 @@ def test_board_view_setting():
     engine = ChessEngine()
     assert engine.validate_settings({})["board_view"] == "2d"
     assert engine.validate_settings({"board_view": "3D"})["board_view"] == "3d"
+    assert engine.validate_settings({"board_view": "Clay"})["board_view"] == "clay"
     assert engine.validate_settings({"board_view": "vr"})["board_view"] == "2d"
     state = engine.create_initial_state(_players(), {"board_view": "3d"})
     assert engine.get_public_state(state, {"id": "p1"})["settings"]["board_view"] == "3d"

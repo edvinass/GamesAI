@@ -61,6 +61,7 @@ const difficultyOptions = [
 
 const boardViewOptions = [
   { value: '2d', label: '2D', detail: 'Classic flat board' },
+  { value: 'clay', label: 'Iso', detail: '3D pieces on a flat board' },
   { value: '3d', label: '3D', detail: 'Rotatable 3D board' },
 ] as const
 
@@ -433,7 +434,7 @@ function seatInitial(nickname: string): string {
 }
 
 .difficulty-row.view-row {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .difficulty-chip {
