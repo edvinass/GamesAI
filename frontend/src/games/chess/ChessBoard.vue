@@ -939,6 +939,10 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   background-image: linear-gradient(var(--select), var(--select));
 }
 
+.board .square:active {
+  transform: none;
+}
+
 .square.engine-hint {
   box-shadow: inset 0 0 0 0.45cqw var(--engine);
 }

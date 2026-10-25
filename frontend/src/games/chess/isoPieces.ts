@@ -51,16 +51,16 @@ function renderSprites(): Record<string, string> {
   scene.environmentIntensity = 0.35
 
   scene.add(new THREE.HemisphereLight(0xf7fafc, 0x243240, 0.72))
-  const key = new THREE.DirectionalLight(0xf3f6f8, 1.7)
-  key.position.set(3, 7, 4)
-  key.castShadow = true
-  key.shadow.mapSize.set(1024, 1024)
-  key.shadow.camera.left = -2
-  key.shadow.camera.right = 2
-  key.shadow.camera.top = 2
-  key.shadow.camera.bottom = -2
-  key.shadow.bias = -0.001
-  scene.add(key)
+  const keyLight = new THREE.DirectionalLight(0xf3f6f8, 1.7)
+  keyLight.position.set(3, 7, 4)
+  keyLight.castShadow = true
+  keyLight.shadow.mapSize.set(1024, 1024)
+  keyLight.shadow.camera.left = -2
+  keyLight.shadow.camera.right = 2
+  keyLight.shadow.camera.top = 2
+  keyLight.shadow.camera.bottom = -2
+  keyLight.shadow.bias = -0.001
+  scene.add(keyLight)
   const rim = new THREE.DirectionalLight(0x8fb4ff, 0.4)
   rim.position.set(-4, 4, -3)
   scene.add(rim)
@@ -112,23 +112,24 @@ function renderSprites(): Record<string, string> {
   return urls
 }
 
-/** Matte plastic, close to Duolingo: pale cool gray and blue slate. */
 function duoMaterials(): PieceMaterials {
   const white = new THREE.MeshPhysicalMaterial({
     color: 0xb7c6d4,
     roughness: 0.48,
     metalness: 0,
     clearcoat: 0.18,
-    clearcoatRoughness: 0.6,
+    clearcoatRoughness: 0.55,
+    specularIntensity: 1,
   })
   const black = new THREE.MeshPhysicalMaterial({
     color: 0x3a4c5e,
     roughness: 0.42,
     metalness: 0,
     clearcoat: 0.22,
-    clearcoatRoughness: 0.5,
+    clearcoatRoughness: 0.55,
+    specularIntensity: 1,
   })
-  const accent = new THREE.MeshStandardMaterial({ color: 0x24303c, roughness: 0.55 })
+  const accent = new THREE.MeshStandardMaterial({ color: 0x24303c, roughness: 0.4 })
   return {
     white,
     black,
