@@ -112,6 +112,13 @@ const files = computed(() => {
   return flipBoard.value ? [...order].reverse() : order
 })
 
+/** Closer to the camera paints in front. The view sits at the bottom of the board, a little to the right. */
+function isoPieceOrder(file: string, rankIndex: number): number {
+  const row = ranks.value.indexOf(rankIndex)
+  const col = files.value.indexOf(file as (typeof FILES)[number])
+  return 10 + row * 100 + col * 32
+}
+
 const lastMoveSquares = computed(() => {
   const move = props.gameState.last_move
   if (!move) return new Set<string>()
@@ -478,6 +485,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
                     :class="isWhitePiece(pieceAt(file, rankIndex)!) ? 'is-white' : 'is-black'"
                     :src="pieceSrc(pieceAt(file, rankIndex)!)"
                     :alt="pieceAlt(pieceAt(file, rankIndex)!)"
+                    :style="boardView === 'clay' ? { zIndex: isoPieceOrder(file, rankIndex) } : undefined"
                     draggable="false"
                   />
                   <span
@@ -1075,9 +1083,8 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   filter: url(#iso-outline-b);
 }
 
-.board.clay .square.movable:hover .piece,
-.board.clay .square.selected .piece {
-  z-index: 3;
+.board.clay .engine-arrow {
+  z-index: 2000;
 }
 
 .board.clay .square.movable:hover .piece.is-white,
