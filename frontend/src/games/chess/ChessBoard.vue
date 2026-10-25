@@ -424,6 +424,32 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
             }"
           >
             <div class="board-grid">
+              <svg class="iso-filters" aria-hidden="true">
+                <filter id="iso-outline-w" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
+                  <feComponentTransfer in="SourceAlpha" result="solid">
+                    <feFuncA type="discrete" tableValues="0 0 1" />
+                  </feComponentTransfer>
+                  <feMorphology in="solid" operator="dilate" radius="1" result="spread" />
+                  <feFlood flood-color="#2c4158" result="ink" />
+                  <feComposite in="ink" in2="spread" operator="in" result="line" />
+                  <feMerge>
+                    <feMergeNode in="line" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+                <filter id="iso-outline-b" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
+                  <feComponentTransfer in="SourceAlpha" result="solid">
+                    <feFuncA type="discrete" tableValues="0 0 1" />
+                  </feComponentTransfer>
+                  <feMorphology in="solid" operator="dilate" radius="1" result="spread" />
+                  <feFlood flood-color="#e4eef8" result="ink" />
+                  <feComposite in="ink" in2="spread" operator="in" result="line" />
+                  <feMerge>
+                    <feMergeNode in="line" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </svg>
               <div v-for="rankIndex in ranks" :key="rankIndex" class="rank-row">
                 <button
                   v-for="file in files"
@@ -449,6 +475,7 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
                   <img
                     v-if="pieceAt(file, rankIndex)"
                     class="piece"
+                    :class="isWhitePiece(pieceAt(file, rankIndex)!) ? 'is-white' : 'is-black'"
                     :src="pieceSrc(pieceAt(file, rankIndex)!)"
                     :alt="pieceAlt(pieceAt(file, rankIndex)!)"
                     draggable="false"
@@ -1005,6 +1032,13 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   min-height: 0;
 }
 
+.iso-filters {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
 .board.clay .rank-row {
   min-height: 0;
 }
@@ -1029,8 +1063,16 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   width: 168%;
   height: 168%;
   transform: translate(-50%, -50%);
-  filter: none;
   z-index: 2;
+  transition: transform 0.14s var(--ease-smooth);
+}
+
+.board.clay .piece.is-white {
+  filter: url(#iso-outline-w);
+}
+
+.board.clay .piece.is-black {
+  filter: url(#iso-outline-b);
 }
 
 .board.clay .square.movable:hover .piece,
@@ -1038,14 +1080,22 @@ function isPlayerToMove(color: 'w' | 'b' | undefined): boolean {
   z-index: 3;
 }
 
+.board.clay .square.movable:hover .piece.is-white,
+.board.clay .square.selected .piece.is-white {
+  filter: url(#iso-outline-w);
+}
+
+.board.clay .square.movable:hover .piece.is-black,
+.board.clay .square.selected .piece.is-black {
+  filter: url(#iso-outline-b);
+}
+
 .board.clay .square.movable:hover .piece {
   transform: translate(-50%, -54%) scale(1.03);
-  filter: none;
 }
 
 .board.clay .square.selected .piece {
   transform: translate(-50%, -56%) scale(1.04);
-  filter: none;
 }
 
 .board.clay .square.light .coord {
