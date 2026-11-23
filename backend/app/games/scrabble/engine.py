@@ -141,6 +141,7 @@ class ScrabbleEngine(GamePlugin):
                     "is_ai": seat["is_ai"],
                     "score": seat["score"],
                     "rack_count": len(state["racks"].get(seat["id"], [])),
+                    "resigned": bool(seat.get("resigned")),
                 }
             )
 
@@ -190,7 +191,7 @@ class ScrabbleEngine(GamePlugin):
             if not isinstance(item, dict):
                 raise ValueError("Invalid tile placement")
             tile_id = item.get("tile_id")
-            tile = by_id.get(tile_id)
+            tile = by_id.get(tile_id) if isinstance(tile_id, str) else None
             if tile is None or tile_id in used:
                 raise ValueError("That tile is not on your rack")
             used.add(tile_id)
@@ -270,6 +271,8 @@ class ScrabbleEngine(GamePlugin):
             raise ValueError("Choose tiles to exchange")
         if len(state["bag"]) < 7:
             raise ValueError("You can exchange only when the bag has at least 7 tiles")
+        if not all(isinstance(tile_id, str) for tile_id in tile_ids):
+            raise ValueError("That tile is not on your rack")
         unique = list(dict.fromkeys(tile_ids))
         rack = state["racks"][player["id"]]
         by_id = {tile["id"]: tile for tile in rack}
@@ -279,11 +282,13 @@ class ScrabbleEngine(GamePlugin):
             if tile is None:
                 raise ValueError("That tile is not on your rack")
             returning.append(tile)
-        keep = [tile for tile in rack if tile["id"] not in set(unique)]
+        returned_ids = set(unique)
+        state["racks"][player["id"]] = [tile for tile in rack if tile["id"] not in returned_ids]
+        # Official rule: draw the replacements first, then return the old tiles,
+        # so a player can never draw back the tiles they just put back.
+        self._draw_up(state, player["id"])
         state["bag"].extend(returning)
         random.shuffle(state["bag"])
-        state["racks"][player["id"]] = keep
-        self._draw_up(state, player["id"])
         self._log(state, player["id"], "exchange", 0, [], False, [])
         state["zero_turns"] += 1
         events: list[dict] = [{"type": "exchange", "player_id": player["id"], "count": len(returning)}]
@@ -300,8 +305,24 @@ class ScrabbleEngine(GamePlugin):
         seat = self._seat(state, player["id"])
         if seat is None:
             raise ValueError("You are not in this game")
+        if seat.get("resigned"):
+            raise ValueError("You have already resigned")
         self._log(state, player["id"], "resign", 0, [], False, [])
-        others = [item for item in state["players"] if item["id"] != player["id"]]
+        others = [
+            item for item in state["players"] if item["id"] != player["id"] and not item.get("resigned")
+        ]
+        if len(others) >= 2:
+            # Several players remain: drop this one and keep playing. Their tiles go
+            # back in the bag so the remaining players can still draw them.
+            seat["resigned"] = True
+            state["bag"].extend(state["racks"].get(player["id"], []))
+            random.shuffle(state["bag"])
+            state["racks"][player["id"]] = []
+            if state["current_actor_id"] == player["id"]:
+                self._advance(state)
+            return state, [{"type": "resign", "player_id": player["id"]}]
+
+        seat["resigned"] = True
         top = max(item["score"] for item in others)
         leaders = [item["id"] for item in others if item["score"] == top]
         state["phase"] = "game_over"
@@ -309,6 +330,7 @@ class ScrabbleEngine(GamePlugin):
         state["winner"] = leaders[0] if len(leaders) == 1 else None
         state["win_reason"] = "resign"
         state["end_adjustments"] = {}
+        state["current_actor_id"] = None
         return state, [{"type": "game_over", "winner": state["winner"], "reason": "resign"}]
 
     def _finish(self, state: dict, went_out_id: str | None) -> None:
@@ -324,8 +346,9 @@ class ScrabbleEngine(GamePlugin):
                 delta += bonus
             seat["score"] += delta
             adjustments[seat["id"]] = delta
-        top = max(seat["score"] for seat in state["players"])
-        leaders = [seat["id"] for seat in state["players"] if seat["score"] == top]
+        active = [seat for seat in state["players"] if not seat.get("resigned")]
+        top = max(seat["score"] for seat in active)
+        leaders = [seat["id"] for seat in active if seat["score"] == top]
         state["phase"] = "game_over"
         state["end_adjustments"] = adjustments
         state["winner_ids"] = leaders
@@ -334,9 +357,14 @@ class ScrabbleEngine(GamePlugin):
         state["current_actor_id"] = None
 
     def _advance(self, state: dict) -> None:
-        order = [seat["id"] for seat in state["players"]]
+        seats = state["players"]
+        order = [seat["id"] for seat in seats]
         index = order.index(state["current_actor_id"])
-        state["current_actor_id"] = order[(index + 1) % len(order)]
+        for step in range(1, len(seats) + 1):
+            candidate = seats[(index + step) % len(seats)]
+            if not candidate.get("resigned"):
+                state["current_actor_id"] = candidate["id"]
+                break
         state["turn_index"] += 1
 
     def _draw_up(self, state: dict, player_id: str) -> None:

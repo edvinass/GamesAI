@@ -223,3 +223,78 @@ def test_not_your_turn():
         assert False, "expected ValueError"
     except ValueError as exc:
         assert "turn" in str(exc).lower()
+
+
+def test_modern_two_letter_words_are_valid():
+    for word in ("QI", "ZA", "KI", "OI", "OK", "EW", "QIS", "ZAS"):
+        assert is_word(word), word
+
+
+def test_exchange_never_draws_back_returned_tiles():
+    engine = ScrabbleEngine()
+    state = engine.create_initial_state(_players(), {})
+    state["racks"]["p1"] = [_tile(f"r{i}", "Q") for i in range(7)]
+    state["bag"] = [_tile(f"b{i}", "A") for i in range(7)]
+    state, _ = engine.apply_action(
+        state,
+        {"type": "exchange", "tile_ids": [f"r{i}" for i in range(7)]},
+        {"id": "p1"},
+    )
+    assert {tile["id"] for tile in state["racks"]["p1"]} == {f"b{i}" for i in range(7)}
+    assert {tile["id"] for tile in state["bag"]} == {f"r{i}" for i in range(7)}
+
+
+def test_bad_tile_ids_raise_value_error():
+    engine = ScrabbleEngine()
+    state = engine.create_initial_state(_players(), {})
+    bad_actions = [
+        {"type": "exchange", "tile_ids": [["x"]]},
+        {"type": "play", "placements": [{"tile_id": {"x": 1}, "row": 7, "col": 7}]},
+    ]
+    for action in bad_actions:
+        try:
+            engine.apply_action(state, action, {"id": "p1"})
+            assert False, "expected ValueError"
+        except ValueError:
+            pass
+
+
+def test_resign_with_three_players_drops_only_that_player():
+    engine = ScrabbleEngine()
+    state = engine.create_initial_state(_players(3), {})
+    bag_before = len(state["bag"])
+    state, events = engine.apply_action(state, {"type": "resign"}, {"id": "p1"})
+    assert events[0]["type"] == "resign"
+    assert state["phase"] == "playing"
+    assert state["current_actor_id"] == "p2"
+    assert state["racks"]["p1"] == []
+    assert len(state["bag"]) == bag_before + 7
+
+    # Turn order skips the resigned seat.
+    state, _ = engine.apply_action(state, {"type": "pass"}, {"id": "p2"})
+    state, _ = engine.apply_action(state, {"type": "pass"}, {"id": "p3"})
+    assert state["current_actor_id"] == "p2"
+
+    try:
+        engine.apply_action(state, {"type": "resign"}, {"id": "p1"})
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+    # Once only one player is left, the game ends and that player wins.
+    state, events = engine.apply_action(state, {"type": "resign"}, {"id": "p3"})
+    assert state["phase"] == "game_over"
+    assert state["winner"] == "p2"
+    assert state["win_reason"] == "resign"
+
+
+def test_resigned_player_cannot_win_on_passes():
+    engine = ScrabbleEngine()
+    state = engine.create_initial_state(_players(3), {})
+    state["players"][0]["score"] = 500
+    state, _ = engine.apply_action(state, {"type": "resign"}, {"id": "p1"})
+    for _ in range(6):
+        actor = state["current_actor_id"]
+        state, _ = engine.apply_action(state, {"type": "pass"}, {"id": actor})
+    assert state["phase"] == "game_over"
+    assert "p1" not in state["winner_ids"]

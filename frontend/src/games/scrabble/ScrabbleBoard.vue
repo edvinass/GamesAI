@@ -288,13 +288,28 @@ function exchangeTiles() {
   emit('action', { type: 'exchange', tile_ids: exchangeIds.value })
 }
 
+const iResigned = computed(
+  () => props.gameState.players.find((seat) => seat.id === props.playerId)?.resigned ?? false,
+)
+
 function resign() {
-  emit('action', { type: 'resign' })
+  if (props.gameState.phase !== 'playing' || iResigned.value) return
+  const remaining = props.gameState.players.filter((seat) => !seat.resigned).length
+  const message =
+    remaining > 2
+      ? 'Resign? You leave the game and the others keep playing.'
+      : 'Resign? This ends the game.'
+  if (window.confirm(message)) {
+    emit('action', { type: 'resign' })
+  }
 }
 
 const statusText = computed(() => {
   if (props.gameState.phase === 'game_over') return resultText.value
   if (myTurn.value) return exchangeMode.value ? 'Select tiles to swap' : 'Your turn'
+  if (iResigned.value) {
+    return actor.value ? `You resigned. ${actor.value.nickname} to play` : 'You resigned'
+  }
   return actor.value ? `Waiting for ${actor.value.nickname}` : 'Waiting'
 })
 
@@ -434,7 +449,7 @@ const canExchange = computed(() => myTurn.value && props.gameState.bag_count >= 
           >
             Swap {{ exchangeIds.length }}
           </button>
-          <button v-if="gameState.phase === 'playing'" type="button" class="btn-secondary danger" @click="resign">
+          <button v-if="gameState.phase === 'playing' && !iResigned" type="button" class="btn-secondary danger" @click="resign">
             Resign
           </button>
         </div>
@@ -456,10 +471,11 @@ const canExchange = computed(() => myTurn.value && props.gameState.bag_count >= 
               <strong>{{ seat.nickname }}</strong>
               <span v-if="seat.is_ai" class="tag">AI</span>
               <span v-if="seat.id === playerId" class="tag">You</span>
+              <span v-if="seat.resigned" class="tag">Resigned</span>
             </div>
             <div class="score-col">
               <b>{{ seat.score }}</b>
-              <span>{{ seat.rack_count }} tiles</span>
+              <span v-if="!seat.resigned">{{ seat.rack_count }} tiles</span>
               <span v-if="gameState.end_adjustments && gameState.end_adjustments[seat.id]" class="delta">
                 {{ gameState.end_adjustments[seat.id] > 0 ? '+' : '' }}{{ gameState.end_adjustments[seat.id] }}
               </span>

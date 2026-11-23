@@ -7,6 +7,13 @@ from pathlib import Path
 _WORDS: set[str] | None = None
 _TRIE: dict | None = None
 
+# lexicon.txt is the ENABLE list, which predates several two-letter words that
+# every current official list accepts. Add them (and their plurals) here.
+_SUPPLEMENT = (
+    "DA", "EW", "FE", "GI", "GIS", "KI", "KIS", "OI", "OK", "PO", "POS",
+    "QI", "QIS", "TE", "TES", "ZA", "ZAS",
+)
+
 
 class TrieNode:
     __slots__ = ("children", "end")
@@ -26,6 +33,7 @@ def _load_words() -> set[str]:
                 words.add(word)
     if not words:
         raise RuntimeError("Scrabble lexicon is empty")
+    words.update(_SUPPLEMENT)
     return words
 
 

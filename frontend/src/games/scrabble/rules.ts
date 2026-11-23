@@ -25,7 +25,7 @@ export const scrabbleRules: GameRules = {
     },
     {
       heading: 'Ending',
-      body: 'The game ends when someone plays their last tile and the bag is empty, or after six scoreless turns in a row. Leftover tiles are subtracted from your score. If you played out, you also add everyone else\'s leftover points.',
+      body: 'The game ends when someone plays their last tile and the bag is empty, or after six scoreless turns in a row. Leftover tiles are subtracted from your score. If you played out, you also add everyone else\'s leftover points. If someone resigns while two or more others remain, their tiles go back in the bag and the rest keep playing.',
     },
     {
       heading: 'AI opponent',

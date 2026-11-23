@@ -1167,6 +1167,7 @@ export interface ScrabbleSeat {
   is_ai: boolean
   score: number
   rack_count: number
+  resigned?: boolean
 }
 
 export interface ScrabbleGameState {
