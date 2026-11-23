@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import logging
 
@@ -12,6 +13,7 @@ from app.games.codenames.suggest import (
     run_suggestion,
 )
 from app.games.registry import get_game, list_games
+from app.games.scrabble.suggest import scrabble_position_key, suggest_moves
 from app.models import RoomStatus
 from app.services.room_service import RoomService
 from app.utils import hash_session_token, room_to_dict
@@ -125,6 +127,54 @@ async def suggest_codenames(room_ref: str, request: Request):
         "model": model,
         "model_label": model_label,
         "suggestion": suggestion,
+    }
+
+
+@router.post("/{room_ref}/scrabble/suggest")
+async def suggest_scrabble(room_ref: str, request: Request):
+    """Suggest the best plays for the signed-in player's own rack.
+
+    The database session is closed before the move search runs, and this path never
+    takes the room AI lock, so a hint cannot stall the live game.
+    """
+    token = request.headers.get("x-session-token", "")
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+    async with async_session() as db:
+        service = RoomService(db)
+        room = await service.resolve_room_ref(room_ref)
+        if not room:
+            raise HTTPException(status_code=404, detail="Room not found")
+        if room.game_type != "scrabble" or room.status != RoomStatus.PLAYING or not room.game_state:
+            raise HTTPException(status_code=409, detail="Scrabble is not in progress")
+
+        token_hash = hash_session_token(token)
+        player = next((p for p in room.players if p.session_token_hash == token_hash), None)
+        if not player:
+            raise HTTPException(status_code=401, detail="Invalid session")
+
+        raw_state = room.game_state.state
+        if not isinstance(raw_state, dict) or raw_state.get("phase") != "playing":
+            raise HTTPException(status_code=409, detail="Scrabble is not in progress")
+        player_id = str(player.id)
+        snapshot = {
+            "board": copy.deepcopy(raw_state["board"]),
+            "racks": {player_id: copy.deepcopy(raw_state.get("racks", {}).get(player_id, []))},
+            "turn_index": raw_state.get("turn_index", 0),
+            "current_actor_id": raw_state.get("current_actor_id"),
+        }
+
+    try:
+        moves = await asyncio.to_thread(suggest_moves, snapshot, player_id)
+    except Exception as exc:
+        logger.exception("Scrabble suggestion failed")
+        raise HTTPException(status_code=502, detail="Suggestion failed") from exc
+
+    return {
+        "position_key": scrabble_position_key(snapshot, player_id),
+        "model_label": "Move finder",
+        "moves": moves,
     }
 
 

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
 import type { ScrabbleGameState, ScrabbleTile } from '@/types'
+import { isCheatModeEnabled, useScrabbleCheat, type ScrabbleSuggestedMove } from './cheatMode'
 
 const props = defineProps<{
   gameState: ScrabbleGameState
   playerId: string
+  roomId: string
 }>()
 
 const emit = defineEmits<{
@@ -341,6 +343,74 @@ function logLine(entry: ScrabbleGameState['move_log'][number]) {
 }
 
 const canExchange = computed(() => myTurn.value && props.gameState.bag_count >= 7 && !pending.value.length)
+
+const cheatMode = isCheatModeEnabled()
+const {
+  status: cheatStatus,
+  modelLabel: cheatModelLabel,
+  moves: cheatMoves,
+} = useScrabbleCheat({
+  enabled: cheatMode,
+  roomId: toRef(props, 'roomId'),
+  gameState: toRef(props, 'gameState'),
+  active: computed(() => myTurn.value && !iResigned.value),
+})
+const previewIndex = ref(0)
+
+watch(cheatMoves, () => {
+  previewIndex.value = 0
+})
+
+const previewMove = computed<ScrabbleSuggestedMove | null>(() =>
+  myTurn.value ? cheatMoves.value[previewIndex.value] ?? null : null,
+)
+
+const previewCells = computed(() => {
+  const cells = new Map<string, string>()
+  for (const item of previewMove.value?.placements ?? []) {
+    cells.set(`${item.row},${item.col}`, item.letter)
+  }
+  return cells
+})
+
+function hintAt(row: number, col: number): string {
+  if (pendingAt(row, col)) return ''
+  return previewCells.value.get(`${row},${col}`) ?? ''
+}
+
+function moveLabel(move: ScrabbleSuggestedMove): string {
+  const words = move.words.map((word) => word.word).join(', ')
+  return `${words} for ${move.score}${move.bingo ? ' (bingo)' : ''}`
+}
+
+const cheatStatusText = computed(() => {
+  if (props.gameState.phase !== 'playing') return 'Game over'
+  if (iResigned.value) return 'You resigned'
+  if (!myTurn.value) return 'Waiting for your turn'
+  if (cheatStatus.value === 'loading') return 'Searching…'
+  if (cheatStatus.value === 'error') return 'Suggestion failed'
+  if (!cheatMoves.value.length) {
+    return props.gameState.bag_count >= 7 ? 'No word fits. Try an exchange.' : 'No word fits. Pass.'
+  }
+  return cheatMoves.value.length > 1 ? 'Tap another play to preview it' : 'Best play'
+})
+
+function applySuggestion() {
+  const move = previewMove.value
+  if (!move || !myTurn.value) return
+  const byId = new Map(props.gameState.rack.map((tile) => [tile.id, tile]))
+  const staged: PendingTile[] = []
+  for (const item of move.placements) {
+    const tile = byId.get(item.tile_id)
+    if (!tile || props.gameState.board[item.row]?.[item.col]) return
+    staged.push({ tile, row: item.row, col: item.col, letter: item.letter })
+  }
+  exchangeMode.value = false
+  exchangeIds.value = []
+  blankPrompt.value = null
+  selectedId.value = null
+  pending.value = staged
+}
 </script>
 
 <template>
@@ -370,6 +440,7 @@ const canExchange = computed(() => myTurn.value && props.gameState.bag_count >= 
             {
               fresh: freshCells.has(`${Math.floor((index - 1) / 15)},${(index - 1) % 15}`),
               staged: !!pendingAt(Math.floor((index - 1) / 15), (index - 1) % 15),
+              hinted: !!hintAt(Math.floor((index - 1) / 15), (index - 1) % 15),
             },
           ]"
           :data-row="Math.floor((index - 1) / 15)"
@@ -402,6 +473,9 @@ const canExchange = computed(() => myTurn.value && props.gameState.bag_count >= 
                 : cellModel(Math.floor((index - 1) / 15), (index - 1) % 15)?.value
             }}</span>
           </span>
+          <span v-else-if="hintAt(Math.floor((index - 1) / 15), (index - 1) % 15)" class="hint-glyph">{{
+            hintAt(Math.floor((index - 1) / 15), (index - 1) % 15)
+          }}</span>
           <span v-else class="prem">{{ premiumLabel(Math.floor((index - 1) / 15), (index - 1) % 15) }}</span>
         </button>
       </div>
@@ -459,6 +533,35 @@ const canExchange = computed(() => myTurn.value && props.gameState.bag_count >= 
     </section>
 
     <aside class="side">
+      <section v-if="cheatMode" class="card assistant-panel" :class="cheatStatus">
+        <div class="assistant-header">
+          <h2>Assistant</h2>
+          <span v-if="cheatModelLabel" class="assistant-name">{{ cheatModelLabel }}</span>
+        </div>
+        <ol v-if="myTurn && cheatMoves.length" class="assistant-moves">
+          <li v-for="(move, index) in cheatMoves" :key="index">
+            <button
+              type="button"
+              class="assistant-move"
+              :class="{ active: index === previewIndex }"
+              @click="previewIndex = index"
+            >
+              {{ moveLabel(move) }}
+            </button>
+          </li>
+        </ol>
+        <p class="assistant-status">{{ cheatStatusText }}</p>
+        <button
+          v-if="myTurn"
+          type="button"
+          class="btn-secondary assistant-apply"
+          :disabled="!previewMove"
+          @click="applySuggestion"
+        >
+          Place suggested tiles
+        </button>
+      </section>
+
       <section class="card scores">
         <h2>Scores</h2>
         <ul>
@@ -617,6 +720,79 @@ const canExchange = computed(() => myTurn.value && props.gameState.bag_count >= 
 .sq.dl { background: #b7cff8; color: #243e73; }
 .sq.fresh { outline: 2px solid #f6c453; outline-offset: -2px; }
 .sq.staged { outline: 2px dashed #2a2118; outline-offset: -3px; }
+.sq.hinted { outline: 2px solid rgba(64, 156, 255, 0.85); outline-offset: -2px; }
+
+.hint-glyph {
+  pointer-events: none;
+  font-family: Georgia, 'Iowan Old Style', serif;
+  font-size: clamp(0.75rem, 2vw, 1.15rem);
+  color: rgba(30, 100, 200, 0.75);
+}
+
+.assistant-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  border: 1px solid rgba(64, 156, 255, 0.4);
+  background: rgba(64, 156, 255, 0.08);
+}
+
+.assistant-panel.error {
+  border-color: rgba(255, 92, 108, 0.45);
+  background: rgba(255, 92, 108, 0.08);
+}
+
+.assistant-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.assistant-header h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.assistant-name,
+.assistant-status {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.assistant-moves {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+}
+
+.assistant-move {
+  width: 100%;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assistant-move.active {
+  border-color: rgba(64, 156, 255, 0.6);
+  color: rgba(64, 156, 255, 0.95);
+  font-weight: 700;
+}
+
+.assistant-apply {
+  align-self: flex-start;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.7rem;
+}
 
 .prem {
   pointer-events: none;

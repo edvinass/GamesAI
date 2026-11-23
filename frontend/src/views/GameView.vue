@@ -439,6 +439,7 @@ function backToLobby() {
       v-else-if="scrabbleState && room"
       :game-state="scrabbleState"
       :player-id="playerStore.playerId"
+      :room-id="room.id"
       @action="sendAction"
     />
 
